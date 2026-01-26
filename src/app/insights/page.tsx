@@ -214,11 +214,14 @@ export default function InsightsPage() {
         </ChartCard>
 
         <ChartCard title="User Breakdown" subtitle="Free vs Paid users">
-          <div className="flex items-center gap-8">
-            <div className="w-40 h-40">
+          <div className="flex flex-col items-center">
+            {/* Chart */}
+            <div className="w-48 h-48 mb-6">
               <PieChart data={userBreakdownData} />
             </div>
-            <div className="flex-1 space-y-4">
+            
+            {/* Legend & Stats */}
+            <div className="w-full space-y-3">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <div className="w-3 h-3 rounded-full bg-indigo-500" />
@@ -237,7 +240,7 @@ export default function InsightsPage() {
                   {metrics.userBreakdown.paid.toLocaleString()}
                 </span>
               </div>
-              <div className="pt-2 border-t border-zinc-700">
+              <div className="pt-3 border-t border-zinc-700">
                 <div className="flex items-center justify-between">
                   <span className="text-sm text-zinc-400">Conversion Rate</span>
                   <span className="text-lg font-semibold text-emerald-400">
