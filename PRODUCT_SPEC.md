@@ -189,7 +189,7 @@ chunk-analytics/
 9. Test and deploy
 
 ## Notes
-- **Web events:** Currently no web events in Mixpanel. May need to instrument chunk-web separately.
+- **Web events:** Some web events exist already, primarily around subscriptions (Paywall Viewed, Plan Selected, Purchase Initiated, etc.). More may need to be added for page views and search.
 - **Rate limits:** Mixpanel has rate limits; implement caching to avoid hitting them.
 - **Timezone:** Store timestamps in UTC, display in user's local timezone.
 

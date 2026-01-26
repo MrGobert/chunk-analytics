@@ -1,0 +1,122 @@
+export interface MixpanelEvent {
+  event: string;
+  properties: {
+    time: number;
+    distinct_id: string;
+    $insert_id?: string;
+    $model?: string;
+    $os?: string;
+    $os_version?: string;
+    $manufacturer?: string;
+    $city?: string;
+    $region?: string;
+    mp_country_code?: string;
+    platform?: string;
+    model_used?: string;
+    search_mode?: string;
+    has_context?: boolean;
+    plan_type?: string;
+    price?: number;
+    product_id?: string;
+    has_trial?: boolean;
+    source?: string;
+    $ae_session_length?: number;
+    tab_name?: string;
+    step?: string;
+    error_message?: string;
+    [key: string]: unknown;
+  };
+}
+
+export interface OverviewMetrics {
+  totalUsers: number;
+  totalSessions: number;
+  totalSearches: number;
+  conversionRate: number;
+  usersTrend: number;
+  sessionsTrend: number;
+  searchesTrend: number;
+  dailyData: DailyDataPoint[];
+}
+
+export interface DailyDataPoint {
+  date: string;
+  users: number;
+  sessions: number;
+  searches: number;
+  [key: string]: string | number;
+}
+
+export interface UserMetrics {
+  dau: DailyDataPoint[];
+  wau: WeeklyDataPoint[];
+  mau: MonthlyDataPoint[];
+  sessionDurations: SessionDuration[];
+  sessionsPerUser: SessionsPerUser[];
+  geographic: GeographicData[];
+}
+
+export interface WeeklyDataPoint {
+  week: string;
+  users: number;
+  [key: string]: string | number;
+}
+
+export interface MonthlyDataPoint {
+  month: string;
+  users: number;
+  [key: string]: string | number;
+}
+
+export interface SessionDuration {
+  range: string;
+  count: number;
+  [key: string]: string | number;
+}
+
+export interface SessionsPerUser {
+  sessions: string;
+  users: number;
+  [key: string]: string | number;
+}
+
+export interface GeographicData {
+  country: string;
+  users: number;
+  percentage: number;
+  [key: string]: string | number;
+}
+
+export interface SearchMetrics {
+  searchesOverTime: DailyDataPoint[];
+  searchModes: { mode: string; count: number }[];
+  modelsUsed: { model: string; count: number }[];
+  contextUsage: { hasContext: boolean; count: number }[];
+  hourlyDistribution: { hour: number; count: number }[];
+}
+
+export interface FunnelMetrics {
+  funnel: FunnelStep[];
+  revenueByPlan: { plan: string; revenue: number; count: number }[];
+  trialConversion: { converted: number; notConverted: number };
+  failedPurchases: { error: string; count: number }[];
+  paywallSources: { source: string; count: number }[];
+}
+
+export interface FunnelStep {
+  name: string;
+  count: number;
+  percentage: number;
+  dropoff: number;
+}
+
+export interface FeatureMetrics {
+  featureUsage: { feature: string; count: number }[];
+  featureOverTime: { date: string; [key: string]: string | number }[];
+  featuresBySegment: { segment: string; features: { feature: string; count: number }[] }[];
+}
+
+export interface DateRange {
+  from: string;
+  to: string;
+}
