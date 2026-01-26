@@ -14,6 +14,7 @@ interface PieChartProps {
   colors?: string[];
   showLegend?: boolean;
   innerRadius?: number;
+  outerRadius?: number;
 }
 
 const defaultColors = [
@@ -34,6 +35,7 @@ export default function PieChart({
   colors = defaultColors,
   showLegend = true,
   innerRadius = 60,
+  outerRadius = 100,
 }: PieChartProps) {
   return (
     <ResponsiveContainer width="100%" height="100%">
@@ -43,7 +45,7 @@ export default function PieChart({
           cx="50%"
           cy="50%"
           innerRadius={innerRadius}
-          outerRadius={100}
+          outerRadius={outerRadius}
           paddingAngle={2}
           dataKey="value"
           nameKey="name"

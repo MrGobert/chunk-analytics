@@ -216,8 +216,8 @@ export default function InsightsPage() {
         <ChartCard title="User Breakdown" subtitle="Free vs Paid users">
           <div className="flex flex-col items-center">
             {/* Chart */}
-            <div className="w-48 h-48 mb-6">
-              <PieChart data={userBreakdownData} />
+            <div className="w-52 h-52 mb-6">
+              <PieChart data={userBreakdownData} showLegend={false} innerRadius={45} outerRadius={85} />
             </div>
             
             {/* Legend & Stats */}
