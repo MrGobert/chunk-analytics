@@ -5,7 +5,6 @@ import PageHeader from '@/components/layout/PageHeader';
 import StatCard from '@/components/cards/StatCard';
 import ChartCard from '@/components/cards/ChartCard';
 import BarChart from '@/components/charts/BarChart';
-import PieChart from '@/components/charts/PieChart';
 import DataTable from '@/components/charts/DataTable';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
 
@@ -104,11 +103,6 @@ export default function InsightsPage() {
     { name: 'Day 1', value: metrics.retention.day1 },
     { name: 'Day 7', value: metrics.retention.day7 },
     { name: 'Day 30', value: metrics.retention.day30 },
-  ];
-
-  const userBreakdownData = [
-    { name: 'Free Users', value: metrics.userBreakdown.free, color: '#6366f1' },
-    { name: 'Paid Users', value: metrics.userBreakdown.paid, color: '#10b981' },
   ];
 
   const featureAdoptionData = metrics.featureAdoption.map((f) => ({
@@ -215,9 +209,80 @@ export default function InsightsPage() {
 
         <ChartCard title="User Breakdown" subtitle="Free vs Paid users">
           <div className="flex flex-col items-center">
-            {/* Chart */}
-            <div className="w-52 h-52 mb-6">
-              <PieChart data={userBreakdownData} showLegend={false} innerRadius={45} outerRadius={85} />
+            {/* Custom SVG Donut Chart */}
+            <div className="relative mb-6">
+              <svg width="180" height="180" viewBox="0 0 180 180">
+                {(() => {
+                  const total = metrics.userBreakdown.free + metrics.userBreakdown.paid;
+                  const freePercent = total > 0 ? metrics.userBreakdown.free / total : 0;
+                  const paidPercent = total > 0 ? metrics.userBreakdown.paid / total : 0;
+                  const radius = 70;
+                  const strokeWidth = 24;
+                  const circumference = 2 * Math.PI * radius;
+                  const freeLength = circumference * freePercent;
+                  const paidLength = circumference * paidPercent;
+                  const center = 90;
+                  
+                  return (
+                    <>
+                      {/* Background circle */}
+                      <circle
+                        cx={center}
+                        cy={center}
+                        r={radius}
+                        fill="none"
+                        stroke="#27272a"
+                        strokeWidth={strokeWidth}
+                      />
+                      {/* Free users arc (indigo) */}
+                      <circle
+                        cx={center}
+                        cy={center}
+                        r={radius}
+                        fill="none"
+                        stroke="#6366f1"
+                        strokeWidth={strokeWidth}
+                        strokeDasharray={`${freeLength} ${circumference}`}
+                        strokeDashoffset={0}
+                        transform={`rotate(-90 ${center} ${center})`}
+                        strokeLinecap="round"
+                      />
+                      {/* Paid users arc (emerald) */}
+                      <circle
+                        cx={center}
+                        cy={center}
+                        r={radius}
+                        fill="none"
+                        stroke="#10b981"
+                        strokeWidth={strokeWidth}
+                        strokeDasharray={`${paidLength} ${circumference}`}
+                        strokeDashoffset={-freeLength}
+                        transform={`rotate(-90 ${center} ${center})`}
+                        strokeLinecap="round"
+                      />
+                      {/* Center text */}
+                      <text
+                        x={center}
+                        y={center - 8}
+                        textAnchor="middle"
+                        className="fill-white text-2xl font-bold"
+                        style={{ fontSize: '24px', fontWeight: 'bold' }}
+                      >
+                        {total.toLocaleString()}
+                      </text>
+                      <text
+                        x={center}
+                        y={center + 14}
+                        textAnchor="middle"
+                        className="fill-zinc-400 text-sm"
+                        style={{ fontSize: '12px' }}
+                      >
+                        total users
+                      </text>
+                    </>
+                  );
+                })()}
+              </svg>
             </div>
             
             {/* Legend & Stats */}
