@@ -120,3 +120,44 @@ export interface DateRange {
   from: string;
   to: string;
 }
+
+export interface PushMetrics {
+  permissionRequested: number;
+  permissionGranted: number;
+  permissionDenied: number;
+  notificationsOpened: number;
+  optInRate: number;
+  usersWithOpens: number;
+  requestedTrend: number;
+  grantedTrend: number;
+  openedTrend: number;
+  dailyData: PushDailyDataPoint[];
+  destinations: PushDestination[];
+  sources: PushSource[];
+  permissionFunnel: FunnelStep[];
+  hourlyDistribution: HourlyDataPoint[];
+  lastUpdated: string;
+}
+
+export interface PushDailyDataPoint {
+  date: string;
+  requested: number;
+  granted: number;
+  denied: number;
+  opened: number;
+}
+
+export interface PushDestination {
+  destination: string;
+  count: number;
+}
+
+export interface PushSource {
+  source: string;
+  count: number;
+}
+
+export interface HourlyDataPoint {
+  hour: number;
+  count: number;
+}
