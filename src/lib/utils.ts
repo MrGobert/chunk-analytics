@@ -9,14 +9,18 @@ export function getDateRange(range: string): { from: string; to: string } {
   const to = formatDate(today);
 
   switch (range) {
+    case '1d':
+      return { from: to, to }; // Today only
     case '7d':
-      return { from: formatDate(subDays(today, 7)), to };
+      return { from: formatDate(subDays(today, 6)), to }; // Last 7 days including today
     case '30d':
-      return { from: formatDate(subDays(today, 30)), to };
+      return { from: formatDate(subDays(today, 29)), to };
     case '90d':
-      return { from: formatDate(subDays(today, 90)), to };
+      return { from: formatDate(subDays(today, 89)), to };
+    case '365d':
+      return { from: formatDate(subDays(today, 364)), to };
     default:
-      return { from: formatDate(subDays(today, 30)), to };
+      return { from: formatDate(subDays(today, 29)), to };
   }
 }
 

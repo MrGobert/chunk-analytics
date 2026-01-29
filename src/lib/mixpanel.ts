@@ -1,15 +1,9 @@
 import { MixpanelEvent } from '@/types/mixpanel';
+import { unstable_cache } from 'next/cache';
 
-const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
+const CACHE_REVALIDATE_SECONDS = 300; // 5 minutes
 
-interface CacheEntry {
-  data: MixpanelEvent[];
-  timestamp: number;
-}
-
-const cache = new Map<string, CacheEntry>();
-
-export async function fetchMixpanelEvents(
+async function fetchMixpanelEventsInternal(
   fromDate: string,
   toDate: string
 ): Promise<MixpanelEvent[]> {
@@ -17,13 +11,6 @@ export async function fetchMixpanelEvents(
   
   if (!MIXPANEL_API_SECRET) {
     throw new Error('MIXPANEL_API_SECRET environment variable is not set');
-  }
-
-  const cacheKey = `${fromDate}-${toDate}`;
-  const cached = cache.get(cacheKey);
-
-  if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
-    return cached.data;
   }
 
   // Use btoa for base64 encoding (works in Edge runtime)
@@ -35,6 +22,8 @@ export async function fetchMixpanelEvents(
     headers: {
       Authorization: `Basic ${auth}`,
     },
+    // Use Next.js fetch cache with revalidation
+    next: { revalidate: CACHE_REVALIDATE_SECONDS },
   });
 
   if (!response.ok) {
@@ -46,10 +35,15 @@ export async function fetchMixpanelEvents(
   const lines = text.trim().split('\n').filter(Boolean);
   const events: MixpanelEvent[] = lines.map((line) => JSON.parse(line));
 
-  cache.set(cacheKey, { data: events, timestamp: Date.now() });
-
   return events;
 }
+
+// Wrap with unstable_cache for additional server-side caching
+export const fetchMixpanelEvents = unstable_cache(
+  fetchMixpanelEventsInternal,
+  ['mixpanel-events'],
+  { revalidate: CACHE_REVALIDATE_SECONDS, tags: ['mixpanel'] }
+);
 
 export function filterEventsByType(
   events: MixpanelEvent[],

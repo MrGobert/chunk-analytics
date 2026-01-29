@@ -42,7 +42,8 @@ export async function GET(request: NextRequest) {
     const conversionRate = totalUsers > 0 ? uniqueSignups / totalUsers : 0;
 
     // Calculate trends (compare to previous period)
-    const rangeDays = range === '7d' ? 7 : range === '90d' ? 90 : 30;
+    const rangeDaysMap: Record<string, number> = { '1d': 1, '7d': 7, '30d': 30, '90d': 90, '365d': 365 };
+    const rangeDays = rangeDaysMap[range] || 30;
     const previousFrom = formatDate(subDays(new Date(dateRange.from), rangeDays));
     const previousTo = formatDate(subDays(new Date(dateRange.to), rangeDays));
 
@@ -98,6 +99,10 @@ export async function GET(request: NextRequest) {
       dateRange,
       platform,
       lastUpdated: getLastUpdated(),
+    }, {
+      headers: {
+        'Cache-Control': 'public, s-maxage=300, stale-while-revalidate=600',
+      },
     });
   } catch (error) {
     console.error('Error fetching overview metrics:', error);
