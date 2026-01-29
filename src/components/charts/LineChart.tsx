@@ -43,9 +43,9 @@ export default function LineChart({ data, xKey, lines, showLegend = false }: Lin
             backgroundColor: '#18181b',
             border: '1px solid #27272a',
             borderRadius: '8px',
-            color: '#fff',
           }}
           labelStyle={{ color: '#a1a1aa' }}
+          itemStyle={{ color: '#fff' }}
         />
         {showLegend && <Legend />}
         {lines.map((line) => (
