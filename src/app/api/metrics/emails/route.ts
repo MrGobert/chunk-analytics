@@ -19,11 +19,10 @@ export async function GET(request: NextRequest) {
   const timeoutId = setTimeout(() => controller.abort(), 25000); // 25s timeout
 
   try {
-    // TODO: Remove skip_firestore=true once Firestore query is optimized
-    console.log(`Fetching email stats from ${CEREBRAL_API_URL}/webhooks/revenuecat/email-stats?days=${days}&skip_firestore=true`);
+    console.log(`Fetching email stats from ${CEREBRAL_API_URL}/webhooks/revenuecat/email-stats?days=${days}`);
     
     const response = await fetch(
-      `${CEREBRAL_API_URL}/webhooks/revenuecat/email-stats?days=${days}&skip_firestore=true`,
+      `${CEREBRAL_API_URL}/webhooks/revenuecat/email-stats?days=${days}`,
       {
         headers: {
           'Authorization': CEREBRAL_AUTH_TOKEN,
