@@ -46,25 +46,53 @@ export async function GET(request: NextRequest) {
 
     const data = await response.json();
     
-    return NextResponse.json({
-      ...data,
+    // Ensure all expected fields exist with defaults
+    const safeData = {
+      period_days: data.period_days ?? 30,
+      generated_at: data.generated_at ?? new Date().toISOString(),
+      by_email_type: data.by_email_type ?? {},
+      totals: {
+        sent: data.totals?.sent ?? 0,
+        converted: data.totals?.converted ?? 0,
+        overallConversionRate: data.totals?.overallConversionRate ?? 0,
+      },
       lastUpdated: new Date().toISOString(),
-    });
+    };
+    
+    return NextResponse.json(safeData);
   } catch (error) {
     clearTimeout(timeoutId);
     
     if (error instanceof Error && error.name === 'AbortError') {
       console.error('Cerebral API timeout');
-      return NextResponse.json(
-        { error: 'Request timed out - cerebral server may be waking up. Try again in a few seconds.' },
-        { status: 504 }
-      );
+      // Return empty data on timeout so page renders with zeros instead of error
+      return NextResponse.json({
+        period_days: parseInt(days) || 30,
+        generated_at: new Date().toISOString(),
+        by_email_type: {},
+        totals: {
+          sent: 0,
+          converted: 0,
+          overallConversionRate: 0,
+        },
+        lastUpdated: new Date().toISOString(),
+        note: 'Data unavailable - Cerebral server timeout. Try refreshing.',
+      });
     }
     
     console.error('Failed to fetch email stats:', error);
-    return NextResponse.json(
-      { error: `Failed to fetch email stats: ${error instanceof Error ? error.message : 'Unknown error'}` },
-      { status: 500 }
-    );
+    // Return empty data on error so page renders with zeros instead of crashing
+    return NextResponse.json({
+      period_days: parseInt(days) || 30,
+      generated_at: new Date().toISOString(),
+      by_email_type: {},
+      totals: {
+        sent: 0,
+        converted: 0,
+        overallConversionRate: 0,
+      },
+      lastUpdated: new Date().toISOString(),
+      note: `Data unavailable - ${error instanceof Error ? error.message : 'Unknown error'}`,
+    });
   }
 }

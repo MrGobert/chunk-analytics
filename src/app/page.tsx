@@ -7,12 +7,17 @@ import ChartCard from '@/components/cards/ChartCard';
 import LineChart from '@/components/charts/LineChart';
 import AreaChart from '@/components/charts/AreaChart';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
-import { OverviewMetrics } from '@/types/mixpanel';
+import { OverviewMetrics, UserBreakdown } from '@/types/mixpanel';
+
+interface ExtendedOverviewMetrics extends OverviewMetrics {
+  userBreakdown?: UserBreakdown;
+}
 
 export default function OverviewPage() {
   const [dateRange, setDateRange] = useState('30d');
   const [platform, setPlatform] = useState('all');
-  const [metrics, setMetrics] = useState<OverviewMetrics | null>(null);
+  const [userType, setUserType] = useState('all');
+  const [metrics, setMetrics] = useState<ExtendedOverviewMetrics | null>(null);
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<string>('');
 
@@ -20,7 +25,7 @@ export default function OverviewPage() {
     async function fetchMetrics() {
       setLoading(true);
       try {
-        const res = await fetch(`/api/metrics/overview?range=${dateRange}&platform=${platform}`);
+        const res = await fetch(`/api/metrics/overview?range=${dateRange}&platform=${platform}&userType=${userType}`);
         const data = await res.json();
         setMetrics(data);
         setLastUpdated(data.lastUpdated);
@@ -32,7 +37,7 @@ export default function OverviewPage() {
     }
 
     fetchMetrics();
-  }, [dateRange, platform]);
+  }, [dateRange, platform, userType]);
 
   if (loading) {
     return (
@@ -50,6 +55,16 @@ export default function OverviewPage() {
     );
   }
 
+  // Helper to get the right label for the current filter
+  const getUserTypeLabel = () => {
+    switch (userType) {
+      case 'authenticated': return 'Authenticated Users';
+      case 'subscribers': return 'Subscribers';
+      case 'visitors': return 'Visitors';
+      default: return 'Total Users';
+    }
+  };
+
   return (
     <div>
       <PageHeader
@@ -59,12 +74,45 @@ export default function OverviewPage() {
         onDateRangeChange={setDateRange}
         platform={platform}
         onPlatformChange={setPlatform}
+        userType={userType}
+        onUserTypeChange={setUserType}
         lastUpdated={lastUpdated}
       />
 
+      {/* User Breakdown Cards - Always shows full breakdown regardless of filter */}
+      {metrics.userBreakdown && userType === 'all' && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+          <div className="bg-zinc-800/50 border border-zinc-700/50 rounded-lg p-4">
+            <p className="text-xs text-zinc-400 uppercase tracking-wide">Total Unique</p>
+            <p className="text-2xl font-bold text-white mt-1">{metrics.userBreakdown.total.toLocaleString()}</p>
+          </div>
+          <div className="bg-zinc-800/50 border border-zinc-700/50 rounded-lg p-4">
+            <p className="text-xs text-zinc-400 uppercase tracking-wide">Visitors (Anonymous)</p>
+            <p className="text-2xl font-bold text-amber-400 mt-1">{metrics.userBreakdown.visitors.toLocaleString()}</p>
+            <p className="text-xs text-zinc-500 mt-1">
+              {metrics.userBreakdown.total > 0 ? ((metrics.userBreakdown.visitors / metrics.userBreakdown.total) * 100).toFixed(1) : 0}%
+            </p>
+          </div>
+          <div className="bg-zinc-800/50 border border-zinc-700/50 rounded-lg p-4">
+            <p className="text-xs text-zinc-400 uppercase tracking-wide">Authenticated</p>
+            <p className="text-2xl font-bold text-blue-400 mt-1">{metrics.userBreakdown.authenticated.toLocaleString()}</p>
+            <p className="text-xs text-zinc-500 mt-1">
+              {metrics.userBreakdown.total > 0 ? ((metrics.userBreakdown.authenticated / metrics.userBreakdown.total) * 100).toFixed(1) : 0}%
+            </p>
+          </div>
+          <div className="bg-zinc-800/50 border border-zinc-700/50 rounded-lg p-4">
+            <p className="text-xs text-zinc-400 uppercase tracking-wide">Subscribers</p>
+            <p className="text-2xl font-bold text-green-400 mt-1">{metrics.userBreakdown.subscribers.toLocaleString()}</p>
+            <p className="text-xs text-zinc-500 mt-1">
+              {metrics.userBreakdown.total > 0 ? ((metrics.userBreakdown.subscribers / metrics.userBreakdown.total) * 100).toFixed(1) : 0}%
+            </p>
+          </div>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
         <StatCard
-          title="Total Users"
+          title={getUserTypeLabel()}
           value={metrics.totalUsers}
           trend={metrics.usersTrend}
           icon={

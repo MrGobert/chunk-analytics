@@ -2,11 +2,15 @@ import { NextRequest, NextResponse } from 'next/server';
 import {
   fetchMixpanelEvents,
   filterByPlatform,
+  filterByUserType,
   getUniqueUsers,
+  getUniqueUsersByType,
+  getUserCountsByType,
   countEvents,
   getUniqueUsersByDate,
   calculateTrend,
   getLastUpdated,
+  UserType,
 } from '@/lib/mixpanel';
 import { getDateRange, getDaysInRange, formatDate } from '@/lib/utils';
 import { subDays } from 'date-fns';
@@ -18,13 +22,18 @@ export async function GET(request: NextRequest) {
     const from = searchParams.get('from');
     const to = searchParams.get('to');
     const platform = searchParams.get('platform') || 'all';
+    const userType = (searchParams.get('userType') || 'all') as UserType;
 
     const dateRange = from && to ? { from, to } : getDateRange(range);
     const allEvents = await fetchMixpanelEvents(dateRange.from, dateRange.to);
-    const events = filterByPlatform(allEvents, platform);
+    const platformFilteredEvents = filterByPlatform(allEvents, platform);
+    const events = filterByUserType(platformFilteredEvents, userType);
 
-    // Calculate metrics
-    const uniqueUsers = getUniqueUsers(events);
+    // Get user breakdown (before userType filter, but after platform filter)
+    const userBreakdown = getUserCountsByType(platformFilteredEvents);
+
+    // Calculate metrics (after all filters)
+    const uniqueUsers = getUniqueUsersByType(platformFilteredEvents, userType);
     const totalUsers = uniqueUsers.size;
     const totalSessions = countEvents(events, '$ae_session') + countEvents(events, 'Session_Started');
     // Count both old and new event names for backwards compatibility
@@ -50,12 +59,13 @@ export async function GET(request: NextRequest) {
     let previousEvents: Awaited<ReturnType<typeof fetchMixpanelEvents>> = [];
     try {
       const allPreviousEvents = await fetchMixpanelEvents(previousFrom, previousTo);
-      previousEvents = filterByPlatform(allPreviousEvents, platform);
+      const previousPlatformFiltered = filterByPlatform(allPreviousEvents, platform);
+      previousEvents = filterByUserType(previousPlatformFiltered, userType);
     } catch {
       // Use empty array if previous period data unavailable
     }
 
-    const previousUsers = getUniqueUsers(previousEvents).size;
+    const previousUsers = getUniqueUsersByType(previousEvents, userType).size;
     const previousSessions = countEvents(previousEvents, '$ae_session') + countEvents(previousEvents, 'Session_Started');
     const previousSearches = countEvents(previousEvents, 'Search Performed') + 
                              countEvents(previousEvents, 'Search') + 
@@ -98,6 +108,8 @@ export async function GET(request: NextRequest) {
       dailyData,
       dateRange,
       platform,
+      userType,
+      userBreakdown,
       lastUpdated: getLastUpdated(),
     }, {
       headers: {

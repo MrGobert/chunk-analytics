@@ -25,6 +25,7 @@ const FEATURE_COLORS: Record<string, string> = {
 export default function FeaturesPage() {
   const [dateRange, setDateRange] = useState('30d');
   const [platform, setPlatform] = useState('all');
+  const [userType, setUserType] = useState('all');
   const [metrics, setMetrics] = useState<FeatureMetrics | null>(null);
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<string>('');
@@ -33,7 +34,7 @@ export default function FeaturesPage() {
     async function fetchMetrics() {
       setLoading(true);
       try {
-        const res = await fetch(`/api/metrics/features?range=${dateRange}&platform=${platform}`);
+        const res = await fetch(`/api/metrics/features?range=${dateRange}&platform=${platform}&userType=${userType}`);
         const data = await res.json();
         setMetrics(data);
         setLastUpdated(data.lastUpdated);
@@ -45,7 +46,7 @@ export default function FeaturesPage() {
     }
 
     fetchMetrics();
-  }, [dateRange, platform]);
+  }, [dateRange, platform, userType]);
 
   if (loading) {
     return (
@@ -79,6 +80,8 @@ export default function FeaturesPage() {
         onDateRangeChange={setDateRange}
         platform={platform}
         onPlatformChange={setPlatform}
+        userType={userType}
+        onUserTypeChange={setUserType}
         lastUpdated={lastUpdated}
       />
 

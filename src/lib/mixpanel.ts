@@ -3,6 +3,174 @@ import { unstable_cache } from 'next/cache';
 
 const CACHE_REVALIDATE_SECONDS = 300; // 5 minutes
 
+// ============================================
+// User Type Detection
+// ============================================
+
+export type UserType = 'all' | 'authenticated' | 'subscribers' | 'visitors';
+
+// Events that indicate an authenticated user
+const AUTH_EVENTS = [
+  'Signup_Completed',
+  'Login_Completed',
+  'SignUp',
+  'Account Created',
+];
+
+// Events that indicate a subscriber
+const SUBSCRIBER_EVENTS = [
+  'Purchase_Completed',
+  'Purchase Completed',
+  'Subscription_Started',
+];
+
+/**
+ * Analyze events to categorize users by type
+ * Returns a map of distinct_id -> user type
+ */
+export function categorizeUsers(events: MixpanelEvent[]): Map<string, 'visitor' | 'authenticated' | 'subscriber'> {
+  const userCategories = new Map<string, 'visitor' | 'authenticated' | 'subscriber'>();
+  
+  // First pass: identify all users and their highest category
+  for (const event of events) {
+    const userId = event.properties.distinct_id;
+    const currentCategory = userCategories.get(userId) || 'visitor';
+    
+    // Check for subscriber indicators (highest priority)
+    if (
+      SUBSCRIBER_EVENTS.includes(event.event) ||
+      event.properties.$plan === 'Subscribed' ||
+      event.properties.subscription_status === 'active'
+    ) {
+      userCategories.set(userId, 'subscriber');
+      continue;
+    }
+    
+    // Check for authenticated user indicators (if not already subscriber)
+    if (currentCategory !== 'subscriber') {
+      if (
+        AUTH_EVENTS.includes(event.event) ||
+        event.properties.$user_id !== undefined ||
+        event.properties.user_id !== undefined ||
+        event.properties.is_authenticated === true
+      ) {
+        userCategories.set(userId, 'authenticated');
+        continue;
+      }
+    }
+    
+    // Default to visitor if not already categorized
+    if (!userCategories.has(userId)) {
+      userCategories.set(userId, 'visitor');
+    }
+  }
+  
+  return userCategories;
+}
+
+/**
+ * Filter events by user type
+ */
+export function filterByUserType(
+  events: MixpanelEvent[],
+  userType: UserType
+): MixpanelEvent[] {
+  if (userType === 'all') return events;
+  
+  const userCategories = categorizeUsers(events);
+  
+  return events.filter((event) => {
+    const userId = event.properties.distinct_id;
+    const category = userCategories.get(userId) || 'visitor';
+    
+    switch (userType) {
+      case 'authenticated':
+        // Authenticated includes subscribers (subscribers are also authenticated)
+        return category === 'authenticated' || category === 'subscriber';
+      case 'subscribers':
+        return category === 'subscriber';
+      case 'visitors':
+        return category === 'visitor';
+      default:
+        return true;
+    }
+  });
+}
+
+/**
+ * Get user counts by type
+ */
+export function getUserCountsByType(events: MixpanelEvent[]): {
+  total: number;
+  visitors: number;
+  authenticated: number;
+  subscribers: number;
+} {
+  const userCategories = categorizeUsers(events);
+  
+  let visitors = 0;
+  let authenticated = 0;
+  let subscribers = 0;
+  
+  for (const category of userCategories.values()) {
+    switch (category) {
+      case 'visitor':
+        visitors++;
+        break;
+      case 'authenticated':
+        authenticated++;
+        break;
+      case 'subscriber':
+        subscribers++;
+        break;
+    }
+  }
+  
+  return {
+    total: userCategories.size,
+    visitors,
+    authenticated: authenticated + subscribers, // Subscribers are also authenticated
+    subscribers,
+  };
+}
+
+/**
+ * Get unique users filtered by user type
+ */
+export function getUniqueUsersByType(
+  events: MixpanelEvent[],
+  userType: UserType
+): Set<string> {
+  if (userType === 'all') {
+    return new Set(events.map((e) => e.properties.distinct_id));
+  }
+  
+  const userCategories = categorizeUsers(events);
+  const filteredUsers = new Set<string>();
+  
+  for (const [userId, category] of userCategories.entries()) {
+    switch (userType) {
+      case 'authenticated':
+        if (category === 'authenticated' || category === 'subscriber') {
+          filteredUsers.add(userId);
+        }
+        break;
+      case 'subscribers':
+        if (category === 'subscriber') {
+          filteredUsers.add(userId);
+        }
+        break;
+      case 'visitors':
+        if (category === 'visitor') {
+          filteredUsers.add(userId);
+        }
+        break;
+    }
+  }
+  
+  return filteredUsers;
+}
+
 async function fetchMixpanelEventsInternal(
   fromDate: string,
   toDate: string

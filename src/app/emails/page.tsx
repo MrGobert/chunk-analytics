@@ -26,6 +26,7 @@ interface EmailStats {
     overallConversionRate: number;
   };
   lastUpdated: string;
+  note?: string;
 }
 
 // Friendly names for email types
@@ -98,22 +99,18 @@ export default function EmailCampaignsPage() {
     );
   }
 
-  if (!stats || !stats.totals) {
-    return (
-      <div className="text-center text-zinc-400 py-20">
-        No email campaign data available yet.
-      </div>
-    );
-  }
-
-  // Transform data for charts
-  const byTypeData = Object.entries(stats.by_email_type).map(([type, data]) => ({
+  // Safely extract stats with defaults
+  const totals = stats?.totals ?? { sent: 0, converted: 0, overallConversionRate: 0 };
+  const byEmailType = stats?.by_email_type ?? {};
+  
+  // Transform data for charts with null-safe handling
+  const byTypeData = Object.entries(byEmailType).map(([type, data]) => ({
     name: EMAIL_TYPE_LABELS[type] || type,
     type,
-    sent: data.sent,
-    converted: data.converted,
-    conversionRate: data.conversionRate,
-    avgDaysToConvert: data.avgDaysToConvert,
+    sent: data?.sent ?? 0,
+    converted: data?.converted ?? 0,
+    conversionRate: data?.conversionRate ?? 0,
+    avgDaysToConvert: data?.avgDaysToConvert ?? 0,
   }));
 
   const conversionData = byTypeData.map((item) => ({
@@ -149,11 +146,23 @@ export default function EmailCampaignsPage() {
         lastUpdated={lastUpdated}
       />
 
+      {/* Warning banner if data couldn't be loaded */}
+      {stats?.note && (
+        <div className="mb-6 p-4 bg-yellow-900/20 border border-yellow-700/50 rounded-lg">
+          <div className="flex items-center gap-2 text-yellow-400 text-sm">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+            <span>{stats.note}</span>
+          </div>
+        </div>
+      )}
+
       {/* Summary Stats */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
         <StatCard 
           title="Emails Sent" 
-          value={stats.totals.sent} 
+          value={totals.sent ?? 0} 
           icon={
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
@@ -162,7 +171,7 @@ export default function EmailCampaignsPage() {
         />
         <StatCard 
           title="Conversions" 
-          value={stats.totals.converted}
+          value={totals.converted ?? 0}
           icon={
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -171,7 +180,7 @@ export default function EmailCampaignsPage() {
         />
         <StatCard 
           title="Conversion Rate" 
-          value={stats.totals.overallConversionRate / 100}
+          value={(totals.overallConversionRate ?? 0) / 100}
           format="percentage"
           icon={
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -181,7 +190,7 @@ export default function EmailCampaignsPage() {
         />
         <StatCard 
           title="Campaign Types" 
-          value={Object.keys(stats.by_email_type).length}
+          value={Object.keys(byEmailType).length}
           icon={
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />

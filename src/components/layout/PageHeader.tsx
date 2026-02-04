@@ -2,6 +2,7 @@
 
 import DateRangePicker from '@/components/ui/DateRangePicker';
 import PlatformFilter from '@/components/ui/PlatformFilter';
+import UserTypeFilter from '@/components/ui/UserTypeFilter';
 
 interface PageHeaderProps {
   title: string;
@@ -10,6 +11,8 @@ interface PageHeaderProps {
   onDateRangeChange: (range: string) => void;
   platform?: string;
   onPlatformChange?: (platform: string) => void;
+  userType?: string;
+  onUserTypeChange?: (userType: string) => void;
   lastUpdated?: string;
 }
 
@@ -20,6 +23,8 @@ export default function PageHeader({
   onDateRangeChange,
   platform,
   onPlatformChange,
+  userType,
+  onUserTypeChange,
   lastUpdated,
 }: PageHeaderProps) {
   return (
@@ -34,6 +39,9 @@ export default function PageHeader({
         )}
       </div>
       <div className="flex flex-wrap items-center gap-3">
+        {userType !== undefined && onUserTypeChange && (
+          <UserTypeFilter value={userType} onChange={onUserTypeChange} />
+        )}
         {platform !== undefined && onPlatformChange && (
           <PlatformFilter value={platform} onChange={onPlatformChange} />
         )}

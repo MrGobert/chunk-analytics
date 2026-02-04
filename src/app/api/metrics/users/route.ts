@@ -2,8 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import {
   fetchMixpanelEvents,
   filterByPlatform,
+  filterByUserType,
   getUniqueUsersByDate,
+  getUserCountsByType,
   getLastUpdated,
+  UserType,
 } from '@/lib/mixpanel';
 import { getDateRange, getDaysInRange } from '@/lib/utils';
 import { startOfWeek, startOfMonth, format } from 'date-fns';
@@ -15,10 +18,15 @@ export async function GET(request: NextRequest) {
     const from = searchParams.get('from');
     const to = searchParams.get('to');
     const platform = searchParams.get('platform') || 'all';
+    const userType = (searchParams.get('userType') || 'all') as UserType;
 
     const dateRange = from && to ? { from, to } : getDateRange(range);
     const allEvents = await fetchMixpanelEvents(dateRange.from, dateRange.to);
-    const events = filterByPlatform(allEvents, platform);
+    const platformFilteredEvents = filterByPlatform(allEvents, platform);
+    const events = filterByUserType(platformFilteredEvents, userType);
+    
+    // Get user breakdown for context
+    const userBreakdown = getUserCountsByType(platformFilteredEvents);
 
     // DAU - Daily Active Users
     const usersByDate = getUniqueUsersByDate(events);
@@ -123,6 +131,8 @@ export async function GET(request: NextRequest) {
       geographic,
       dateRange,
       platform,
+      userType,
+      userBreakdown,
       lastUpdated: getLastUpdated(),
     });
   } catch (error) {

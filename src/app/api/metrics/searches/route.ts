@@ -2,9 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import {
   fetchMixpanelEvents,
   filterByPlatform,
+  filterByUserType,
   filterEventsByType,
   getPropertyDistribution,
   getLastUpdated,
+  UserType,
 } from '@/lib/mixpanel';
 import { getDateRange, getDaysInRange } from '@/lib/utils';
 
@@ -15,10 +17,12 @@ export async function GET(request: NextRequest) {
     const from = searchParams.get('from');
     const to = searchParams.get('to');
     const platform = searchParams.get('platform') || 'all';
+    const userType = (searchParams.get('userType') || 'all') as UserType;
 
     const dateRange = from && to ? { from, to } : getDateRange(range);
     const allEvents = await fetchMixpanelEvents(dateRange.from, dateRange.to);
-    const events = filterByPlatform(allEvents, platform);
+    const platformFilteredEvents = filterByPlatform(allEvents, platform);
+    const events = filterByUserType(platformFilteredEvents, userType);
 
     // Include both old and new event names for backwards compatibility
     const searchEvents = filterEventsByType(events, ['Search Performed', 'Search', 'Search_Performed']);
@@ -70,6 +74,7 @@ export async function GET(request: NextRequest) {
       totalSearches: searchEvents.length,
       dateRange,
       platform,
+      userType,
       lastUpdated: getLastUpdated(),
     });
   } catch (error) {

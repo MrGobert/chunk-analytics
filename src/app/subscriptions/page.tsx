@@ -14,6 +14,7 @@ import { FunnelMetrics } from '@/types/mixpanel';
 export default function SubscriptionsPage() {
   const [dateRange, setDateRange] = useState('30d');
   const [platform, setPlatform] = useState('all');
+  const [userType, setUserType] = useState('all');
   const [metrics, setMetrics] = useState<FunnelMetrics | null>(null);
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<string>('');
@@ -22,7 +23,7 @@ export default function SubscriptionsPage() {
     async function fetchMetrics() {
       setLoading(true);
       try {
-        const res = await fetch(`/api/metrics/funnel?range=${dateRange}&platform=${platform}`);
+        const res = await fetch(`/api/metrics/funnel?range=${dateRange}&platform=${platform}&userType=${userType}`);
         const data = await res.json();
         setMetrics(data);
         setLastUpdated(data.lastUpdated);
@@ -34,7 +35,7 @@ export default function SubscriptionsPage() {
     }
 
     fetchMetrics();
-  }, [dateRange, platform]);
+  }, [dateRange, platform, userType]);
 
   if (loading) {
     return (
@@ -78,6 +79,8 @@ export default function SubscriptionsPage() {
         onDateRangeChange={setDateRange}
         platform={platform}
         onPlatformChange={setPlatform}
+        userType={userType}
+        onUserTypeChange={setUserType}
         lastUpdated={lastUpdated}
       />
 

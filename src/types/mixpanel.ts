@@ -28,6 +28,15 @@ export interface MixpanelEvent {
   };
 }
 
+export type UserType = 'all' | 'authenticated' | 'subscribers' | 'visitors';
+
+export interface UserBreakdown {
+  total: number;
+  visitors: number;
+  authenticated: number;
+  subscribers: number;
+}
+
 export interface OverviewMetrics {
   totalUsers: number;
   totalSessions: number;
@@ -37,6 +46,8 @@ export interface OverviewMetrics {
   sessionsTrend: number;
   searchesTrend: number;
   dailyData: DailyDataPoint[];
+  userType?: UserType;
+  userBreakdown?: UserBreakdown;
 }
 
 export interface DailyDataPoint {

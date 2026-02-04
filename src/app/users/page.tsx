@@ -7,12 +7,17 @@ import LineChart from '@/components/charts/LineChart';
 import BarChart from '@/components/charts/BarChart';
 import DataTable from '@/components/charts/DataTable';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
-import { UserMetrics } from '@/types/mixpanel';
+import { UserMetrics, UserBreakdown } from '@/types/mixpanel';
+
+interface ExtendedUserMetrics extends UserMetrics {
+  userBreakdown?: UserBreakdown;
+}
 
 export default function UsersPage() {
   const [dateRange, setDateRange] = useState('30d');
   const [platform, setPlatform] = useState('all');
-  const [metrics, setMetrics] = useState<UserMetrics | null>(null);
+  const [userType, setUserType] = useState('all');
+  const [metrics, setMetrics] = useState<ExtendedUserMetrics | null>(null);
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<string>('');
 
@@ -20,7 +25,7 @@ export default function UsersPage() {
     async function fetchMetrics() {
       setLoading(true);
       try {
-        const res = await fetch(`/api/metrics/users?range=${dateRange}&platform=${platform}`);
+        const res = await fetch(`/api/metrics/users?range=${dateRange}&platform=${platform}&userType=${userType}`);
         const data = await res.json();
         setMetrics(data);
         setLastUpdated(data.lastUpdated);
@@ -32,7 +37,7 @@ export default function UsersPage() {
     }
 
     fetchMetrics();
-  }, [dateRange, platform]);
+  }, [dateRange, platform, userType]);
 
   if (loading) {
     return (
@@ -59,6 +64,8 @@ export default function UsersPage() {
         onDateRangeChange={setDateRange}
         platform={platform}
         onPlatformChange={setPlatform}
+        userType={userType}
+        onUserTypeChange={setUserType}
         lastUpdated={lastUpdated}
       />
 
