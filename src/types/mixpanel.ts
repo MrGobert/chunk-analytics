@@ -172,3 +172,54 @@ export interface HourlyDataPoint {
   hour: number;
   count: number;
 }
+
+export interface ResearchMetrics {
+  totalReportsInitiated: number;
+  totalReportsCompleted: number;
+  completionRate: number;
+  totalReportsViewed: number;
+  totalExports: number;
+  totalShares: number;
+  uniqueResearchUsers: number;
+  initiatedTrend: number;
+  completedTrend: number;
+  viewedTrend: number;
+  exportsTrend: number;
+  sharesTrend: number;
+  reportTypeDistribution: { name: string; value: number }[];
+  researchFunnel: FunnelStep[];
+  dailyData: { date: string; initiated: number; completed: number; viewed: number }[];
+  reportTypeOverTime: { date: string; [key: string]: string | number }[];
+  tonePreferences: { name: string; value: number }[];
+  citationFormatPreferences: { format: string; count: number }[];
+  exportFormatDistribution: { name: string; value: number }[];
+  averageSourceCount: number;
+  averageWordCount: number;
+  lastUpdated: string;
+}
+
+export interface NotesMetrics {
+  totalNotesCreated: number;
+  totalNotesViewed: number;
+  totalNotesSaved: number;
+  totalNotesDeleted: number;
+  totalPublished: number;
+  totalShared: number;
+  totalDocumentUploads: number;
+  uniqueNoteUsers: number;
+  totalWritingToolUses: number;
+  createdTrend: number;
+  viewedTrend: number;
+  savedTrend: number;
+  publishedTrend: number;
+  sharedTrend: number;
+  writingToolTrend: number;
+  notesFunnel: FunnelStep[];
+  dailyData: { date: string; created: number; viewed: number; saved: number }[];
+  saveTriggerDistribution: { name: string; value: number }[];
+  writingToolDistribution: { name: string; value: number }[];
+  featureAdoption: { name: string; value: number }[];
+  retentionRate: number;
+  documentUploadRate: number;
+  lastUpdated: string;
+}
