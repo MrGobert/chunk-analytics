@@ -106,20 +106,35 @@ export async function GET(request: NextRequest) {
     }
 
     // ============================================
-    // Free vs Paid Users
+    // Free vs Paid Users (excludes guest users)
     // ============================================
-    // Users who completed a purchase are paid, others are free
+    const allUserIds = getUniqueUsers(events);
+
+    // Identify guest users
+    const guestUserIds = new Set(
+      events
+        .filter((e) =>
+          e.properties.distinct_id?.toString().startsWith('guest-') ||
+          e.properties.distinct_id === 'guest-user'
+        )
+        .map((e) => e.properties.distinct_id)
+    );
+
+    // Only count users with actual accounts for Free vs Paid
+    const accountUserIds = new Set(
+      [...allUserIds].filter((id) => !guestUserIds.has(id))
+    );
+
     const purchaseEvents = filterEventsByType(events, [
-      'Purchase Completed', 
+      'Purchase Completed',
       'Purchase_Completed',
       '$ae_iap'
     ]);
     const paidUserIds = new Set(purchaseEvents.map((e) => e.properties.distinct_id));
-    const allUserIds = getUniqueUsers(events);
-    
+
     const paidUsers = paidUserIds.size;
-    const freeUsers = allUserIds.size - paidUsers;
-    const paidPercentage = allUserIds.size > 0 ? (paidUsers / allUserIds.size) * 100 : 0;
+    const freeUsers = accountUserIds.size - paidUsers;
+    const paidPercentage = accountUserIds.size > 0 ? (paidUsers / accountUserIds.size) * 100 : 0;
 
     // ============================================
     // Traffic Sources (Web only)
@@ -165,11 +180,7 @@ export async function GET(request: NextRequest) {
     // ============================================
     // Guest vs Authenticated Users (Web)
     // ============================================
-    const guestEvents = events.filter((e) => 
-      e.properties.distinct_id?.toString().startsWith('guest-') ||
-      e.properties.distinct_id === 'guest-user'
-    );
-    const guestUsers = new Set(guestEvents.map((e) => e.properties.distinct_id)).size;
+    const guestUsers = guestUserIds.size;
     const authenticatedUsers = allUserIds.size - guestUsers;
 
     // ============================================

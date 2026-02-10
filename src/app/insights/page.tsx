@@ -210,7 +210,7 @@ export default function InsightsPage() {
           </p>
         </ChartCard>
 
-        <ChartCard title="User Breakdown" subtitle="Free vs Paid users">
+        <ChartCard title="User Breakdown" subtitle="Free vs Paid users (excludes guests)">
           <div className="flex flex-col items-center">
             {/* Custom SVG Donut Chart */}
             <div className="relative mb-6">
