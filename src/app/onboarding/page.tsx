@@ -8,20 +8,28 @@ import FunnelChart from '@/components/charts/FunnelChart';
 import AreaChart from '@/components/charts/AreaChart';
 import BarChart from '@/components/charts/BarChart';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
-import { getDateRange, getDaysInRange } from '@/lib/utils';
 
 interface OnboardingMetrics {
   funnel: { name: string; count: number; percentage: number; dropoff: number }[];
-  onboardingOverTime: { date: string; count: number }[];
+  funnelLabel: string;
   signupsOverTime: { date: string; count: number }[];
   firstOpenToSignup: { day: string; count: number }[];
-  totalFirstOpens: number;
+  totalFirstStep: number;
   totalSignups: number;
   conversionRate: number;
+  lastUpdated: string;
 }
+
+const PLATFORM_TABS = [
+  { key: 'mobile', label: 'Mobile', description: 'iOS / iPadOS / visionOS' },
+  { key: 'macOS', label: 'macOS', description: 'No onboarding flow' },
+  { key: 'web', label: 'Web', description: 'Marketing site' },
+] as const;
 
 export default function OnboardingPage() {
   const [dateRange, setDateRange] = useState('30d');
+  const [platformGroup, setPlatformGroup] = useState<string>('mobile');
+  const [userType, setUserType] = useState('all');
   const [metrics, setMetrics] = useState<OnboardingMetrics | null>(null);
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<string>('');
@@ -30,116 +38,21 @@ export default function OnboardingPage() {
     async function fetchMetrics() {
       setLoading(true);
       try {
-        const res = await fetch(`/api/events?range=${dateRange}`);
-        const data = await res.json();
-
-        const events = data.events || [];
-        const range = getDateRange(dateRange);
-        const days = getDaysInRange(range.from, range.to);
-
-        // First opens
-        const firstOpens = events.filter((e: { event: string }) => e.event === '$ae_first_open');
-        const totalFirstOpens = firstOpens.length;
-
-        // Onboarding events
-        const onboardingEvents = events.filter((e: { event: string }) => e.event === 'Onboarding');
-
-        // Signups - include all signup event variants
-        const signups = events.filter((e: { event: string }) =>
-          e.event === 'SignUp' || e.event === 'Signup_Completed' || e.event === 'Account Created'
+        const res = await fetch(
+          `/api/metrics/onboarding?range=${dateRange}&platform=${platformGroup}&userType=${userType}`
         );
-        const totalSignups = signups.length;
-
-        // Conversion rate
-        const conversionRate = totalFirstOpens > 0 ? totalSignups / totalFirstOpens : 0;
-
-        // Funnel
-        const funnel = [
-          {
-            name: 'First Open',
-            count: totalFirstOpens,
-            percentage: 100,
-            dropoff: 0,
-          },
-          {
-            name: 'Started Onboarding',
-            count: onboardingEvents.length,
-            percentage: totalFirstOpens > 0 ? (onboardingEvents.length / totalFirstOpens) * 100 : 0,
-            dropoff:
-              totalFirstOpens > 0
-                ? ((totalFirstOpens - onboardingEvents.length) / totalFirstOpens) * 100
-                : 0,
-          },
-          {
-            name: 'Signed Up',
-            count: totalSignups,
-            percentage: totalFirstOpens > 0 ? (totalSignups / totalFirstOpens) * 100 : 0,
-            dropoff:
-              onboardingEvents.length > 0
-                ? ((onboardingEvents.length - totalSignups) / onboardingEvents.length) * 100
-                : 0,
-          },
-        ];
-
-        // Over time data
-        const onboardingOverTime = days.map((date) => ({
-          date,
-          count: onboardingEvents.filter((e: { properties: { time: number } }) => {
-            const eventDate = new Date(e.properties.time * 1000).toISOString().split('T')[0];
-            return eventDate === date;
-          }).length,
-        }));
-
-        const signupsOverTime = days.map((date) => ({
-          date,
-          count: signups.filter((e: { properties: { time: number } }) => {
-            const eventDate = new Date(e.properties.time * 1000).toISOString().split('T')[0];
-            return eventDate === date;
-          }).length,
-        }));
-
-        // First open to signup (same day vs later)
-        const firstOpenUsers = new Map<string, number>();
-        for (const event of firstOpens) {
-          firstOpenUsers.set(event.properties.distinct_id, event.properties.time);
-        }
-
-        const timeDiffs: number[] = [];
-        for (const event of signups) {
-          const firstOpenTime = firstOpenUsers.get(event.properties.distinct_id);
-          if (firstOpenTime) {
-            const diffDays = Math.floor((event.properties.time - firstOpenTime) / 86400);
-            timeDiffs.push(diffDays);
-          }
-        }
-
-        const firstOpenToSignup = [
-          { day: 'Same day', count: timeDiffs.filter((d) => d === 0).length },
-          { day: 'Day 1', count: timeDiffs.filter((d) => d === 1).length },
-          { day: 'Day 2-3', count: timeDiffs.filter((d) => d >= 2 && d <= 3).length },
-          { day: 'Day 4-7', count: timeDiffs.filter((d) => d >= 4 && d <= 7).length },
-          { day: 'Day 8+', count: timeDiffs.filter((d) => d > 7).length },
-        ];
-
-        setMetrics({
-          funnel,
-          onboardingOverTime,
-          signupsOverTime,
-          firstOpenToSignup,
-          totalFirstOpens,
-          totalSignups,
-          conversionRate,
-        });
+        const data = await res.json();
+        setMetrics(data);
         setLastUpdated(data.lastUpdated);
       } catch (error) {
-        console.error('Failed to fetch metrics:', error);
+        console.error('Failed to fetch onboarding metrics:', error);
       } finally {
         setLoading(false);
       }
     }
 
     fetchMetrics();
-  }, [dateRange]);
+  }, [dateRange, platformGroup, userType]);
 
   if (loading) {
     return (
@@ -157,6 +70,8 @@ export default function OnboardingPage() {
     );
   }
 
+  const firstStepLabel = platformGroup === 'web' ? 'Site Visitors' : 'First Opens';
+
   return (
     <div>
       <PageHeader
@@ -164,35 +79,49 @@ export default function OnboardingPage() {
         subtitle="User acquisition and onboarding funnel"
         dateRange={dateRange}
         onDateRangeChange={setDateRange}
+        userType={userType}
+        onUserTypeChange={setUserType}
         lastUpdated={lastUpdated}
       />
 
+      {/* Platform Tabs */}
+      <div className="flex gap-2 mb-8">
+        {PLATFORM_TABS.map((tab) => (
+          <button
+            key={tab.key}
+            onClick={() => setPlatformGroup(tab.key)}
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+              platformGroup === tab.key
+                ? 'bg-violet-600 text-white'
+                : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200'
+            }`}
+          >
+            <div>{tab.label}</div>
+            <div className={`text-xs ${platformGroup === tab.key ? 'text-violet-200' : 'text-zinc-500'}`}>
+              {tab.description}
+            </div>
+          </button>
+        ))}
+      </div>
+
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-        <StatCard title="First Opens" value={metrics.totalFirstOpens} />
-        <StatCard title="Sign Ups" value={metrics.totalSignups} />
+        <StatCard title={firstStepLabel} value={metrics.totalFirstStep} />
+        <StatCard title="Sign Ups" value={metrics.totalSignups} subtitle="Unique users" />
         <StatCard title="Conversion Rate" value={metrics.conversionRate} format="percentage" />
       </div>
 
       <div className="grid grid-cols-1 gap-6 mb-8">
         <ChartCard
           title="Onboarding Funnel"
-          subtitle="From first open to signup"
+          subtitle={metrics.funnelLabel}
           className="h-auto"
         >
           <FunnelChart data={metrics.funnel} />
         </ChartCard>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-        <ChartCard title="Onboarding Events Over Time" subtitle="Daily onboarding activity">
-          <AreaChart
-            data={metrics.onboardingOverTime}
-            xKey="date"
-            yKey="count"
-            color="#8b5cf6"
-          />
-        </ChartCard>
-        <ChartCard title="Sign Ups Over Time" subtitle="Daily new user registrations">
+      <div className={`grid grid-cols-1 ${metrics.firstOpenToSignup.length > 0 ? 'lg:grid-cols-2' : ''} gap-6 mb-8`}>
+        <ChartCard title="Sign Ups Over Time" subtitle="Daily unique new registrations">
           <AreaChart
             data={metrics.signupsOverTime}
             xKey="date"
@@ -200,12 +129,11 @@ export default function OnboardingPage() {
             color="#22c55e"
           />
         </ChartCard>
-      </div>
-
-      <div className="grid grid-cols-1 gap-6">
-        <ChartCard title="Time to Signup" subtitle="Days from first open to signup">
-          <BarChart data={metrics.firstOpenToSignup} xKey="day" yKey="count" color="#6366f1" />
-        </ChartCard>
+        {metrics.firstOpenToSignup.length > 0 && (
+          <ChartCard title="Time to Signup" subtitle="Days from first open to signup">
+            <BarChart data={metrics.firstOpenToSignup} xKey="day" yKey="count" color="#6366f1" />
+          </ChartCard>
+        )}
       </div>
     </div>
   );
