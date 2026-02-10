@@ -44,8 +44,10 @@ export default function OnboardingPage() {
         // Onboarding events
         const onboardingEvents = events.filter((e: { event: string }) => e.event === 'Onboarding');
 
-        // Signups
-        const signups = events.filter((e: { event: string }) => e.event === 'SignUp');
+        // Signups - include all signup event variants
+        const signups = events.filter((e: { event: string }) =>
+          e.event === 'SignUp' || e.event === 'Signup_Completed' || e.event === 'Account Created'
+        );
         const totalSignups = signups.length;
 
         // Conversion rate

@@ -74,16 +74,29 @@ export async function GET(request: NextRequest) {
     const sharedTrend = calculateTrend(totalShared, countEvents(prevNotes, 'Note_Shared'));
     const writingToolTrend = calculateTrend(totalWritingToolUses, countEvents(prevNotes, 'Note_Writing_Tool_Used'));
 
-    // Notes funnel: Created → Saved → Published → Shared
-    const savedPct = totalNotesCreated > 0 ? (totalNotesSaved / totalNotesCreated) * 100 : 0;
-    const publishedPct = totalNotesCreated > 0 ? (totalPublished / totalNotesCreated) * 100 : 0;
-    const sharedPct = totalNotesCreated > 0 ? (totalShared / totalNotesCreated) * 100 : 0;
+    // Notes funnel: Created → Saved → Published → Shared (using unique users per step)
+    const usersCreated = new Set(notesEvents.filter((e) => e.event === 'Note_Created').map((e) => e.properties.distinct_id));
+    const usersSaved = new Set(notesEvents.filter((e) => e.event === 'Note_Saved').map((e) => e.properties.distinct_id));
+    const usersPublished = new Set(notesEvents.filter((e) => e.event === 'Note_Published').map((e) => e.properties.distinct_id));
+    const usersShared = new Set(notesEvents.filter((e) => e.event === 'Note_Shared').map((e) => e.properties.distinct_id));
+
+    const createdCount = usersCreated.size;
+    const savedCount = usersSaved.size;
+    const publishedCount = usersPublished.size;
+    const sharedCount = usersShared.size;
+
+    const savedPct = createdCount > 0 ? (savedCount / createdCount) * 100 : 0;
+    const publishedPct = createdCount > 0 ? (publishedCount / createdCount) * 100 : 0;
+    const sharedPct = createdCount > 0 ? (sharedCount / createdCount) * 100 : 0;
 
     const notesFunnel = [
-      { name: 'Created', count: totalNotesCreated, percentage: 100, dropoff: 0 },
-      { name: 'Saved', count: totalNotesSaved, percentage: savedPct, dropoff: 100 - savedPct },
-      { name: 'Published', count: totalPublished, percentage: publishedPct, dropoff: savedPct - publishedPct },
-      { name: 'Shared', count: totalShared, percentage: sharedPct, dropoff: publishedPct - sharedPct },
+      { name: 'Created', count: createdCount, percentage: 100, dropoff: 0 },
+      { name: 'Saved', count: savedCount, percentage: Math.min(savedPct, 100),
+        dropoff: createdCount > 0 ? Math.max(0, ((createdCount - savedCount) / createdCount) * 100) : 0 },
+      { name: 'Published', count: publishedCount, percentage: publishedPct,
+        dropoff: savedCount > 0 ? Math.max(0, ((savedCount - publishedCount) / savedCount) * 100) : 0 },
+      { name: 'Shared', count: sharedCount, percentage: sharedPct,
+        dropoff: publishedCount > 0 ? Math.max(0, ((publishedCount - sharedCount) / publishedCount) * 100) : 0 },
     ];
 
     // Daily activity
@@ -123,10 +136,11 @@ export async function GET(request: NextRequest) {
       { name: 'Uploaded to Docs', value: totalDocumentUploads },
     ];
 
-    // Notes retention (created vs deleted ratio)
+    // Note survival rate (created vs deleted ratio) - measures notes kept, not user retention
     const retentionRate = totalNotesCreated > 0
       ? ((totalNotesCreated - totalNotesDeleted) / totalNotesCreated) * 100
       : 0;
+    const retentionRateLabel = 'Note Survival Rate';
 
     // Document upload rate
     const documentUploadRate = totalNotesCreated > 0
@@ -155,6 +169,7 @@ export async function GET(request: NextRequest) {
       writingToolDistribution,
       featureAdoption,
       retentionRate,
+      retentionRateLabel,
       documentUploadRate,
       dateRange,
       platform,

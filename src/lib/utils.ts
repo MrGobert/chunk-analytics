@@ -1,4 +1,4 @@
-import { format, subDays, startOfWeek, startOfMonth, parseISO } from 'date-fns';
+import { format, subDays, parseISO } from 'date-fns';
 
 export function formatDate(date: Date): string {
   return format(date, 'yyyy-MM-dd');
@@ -49,35 +49,6 @@ export function groupByDate(events: { time: number }[]): Map<string, number> {
   return grouped;
 }
 
-export function groupByWeek(events: { time: number }[]): Map<string, Set<string>> {
-  const grouped = new Map<string, Set<string>>();
-
-  for (const event of events) {
-    const eventDate = new Date(event.time * 1000);
-    const weekStart = formatDate(startOfWeek(eventDate));
-
-    if (!grouped.has(weekStart)) {
-      grouped.set(weekStart, new Set());
-    }
-  }
-
-  return grouped;
-}
-
-export function groupByMonth(events: { time: number }[]): Map<string, Set<string>> {
-  const grouped = new Map<string, Set<string>>();
-
-  for (const event of events) {
-    const eventDate = new Date(event.time * 1000);
-    const monthStart = formatDate(startOfMonth(eventDate));
-
-    if (!grouped.has(monthStart)) {
-      grouped.set(monthStart, new Set());
-    }
-  }
-
-  return grouped;
-}
 
 export function cn(...classes: (string | undefined | null | false)[]): string {
   return classes.filter(Boolean).join(' ');

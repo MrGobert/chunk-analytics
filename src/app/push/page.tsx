@@ -18,9 +18,9 @@ interface PushMetrics {
   notificationsOpened: number;
   optInRate: number;
   usersWithOpens: number;
-  requestedTrend: number;
-  grantedTrend: number;
-  openedTrend: number;
+  requestedTrend: number | null;
+  grantedTrend: number | null;
+  openedTrend: number | null;
   dailyData: Array<{
     date: string;
     requested: number;
@@ -38,6 +38,7 @@ interface PushMetrics {
 export default function PushNotificationsPage() {
   const [dateRange, setDateRange] = useState('30d');
   const [platform, setPlatform] = useState('all');
+  const [userType, setUserType] = useState('all');
   const [metrics, setMetrics] = useState<PushMetrics | null>(null);
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<string>('');
@@ -46,7 +47,7 @@ export default function PushNotificationsPage() {
     async function fetchMetrics() {
       setLoading(true);
       try {
-        const res = await fetch(`/api/metrics/push?range=${dateRange}&platform=${platform}`);
+        const res = await fetch(`/api/metrics/push?range=${dateRange}&platform=${platform}&userType=${userType}`);
         const data = await res.json();
         setMetrics(data);
         setLastUpdated(data.lastUpdated);
@@ -58,7 +59,7 @@ export default function PushNotificationsPage() {
     }
 
     fetchMetrics();
-  }, [dateRange, platform]);
+  }, [dateRange, platform, userType]);
 
   if (loading) {
     return (
@@ -100,6 +101,8 @@ export default function PushNotificationsPage() {
         onDateRangeChange={setDateRange}
         platform={platform}
         onPlatformChange={setPlatform}
+        userType={userType}
+        onUserTypeChange={setUserType}
         lastUpdated={lastUpdated}
       />
 

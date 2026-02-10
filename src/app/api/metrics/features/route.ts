@@ -83,13 +83,30 @@ export async function GET(request: NextRequest) {
       return result;
     });
 
-    // Feature usage by user segment (by platform)
-    const platforms = ['iOS', 'web', 'Unknown'];
-    const featuresBySegment = platforms.map((platform) => {
+    // Feature usage by user segment (by platform) - use same detection as filterByPlatform
+    const segmentPlatforms = ['iOS', 'web', 'macOS', 'Unknown'];
+    const featuresBySegment = segmentPlatforms.map((seg) => {
       const platformEvents = featureEvents.filter((e) => {
-        const eventPlatform = e.properties.platform || 'Unknown';
-        return eventPlatform.toLowerCase() === platform.toLowerCase() ||
-          (platform === 'Unknown' && !e.properties.platform);
+        const props = e.properties;
+        const eventPlatform = props.platform || props.$os || '';
+        const mpLib = props.mp_lib || '';
+
+        if (seg === 'web') {
+          return mpLib === 'web' || props.platform === 'web';
+        }
+        if (seg === 'iOS') {
+          return eventPlatform === 'iOS' || props.$os === 'iOS' || props.$os === 'iPadOS';
+        }
+        if (seg === 'macOS') {
+          return eventPlatform === 'macOS' || props.$os === 'macOS';
+        }
+        if (seg === 'Unknown') {
+          const isWeb = mpLib === 'web' || props.platform === 'web';
+          const isIOS = eventPlatform === 'iOS' || props.$os === 'iOS' || props.$os === 'iPadOS';
+          const isMac = eventPlatform === 'macOS' || props.$os === 'macOS';
+          return !isWeb && !isIOS && !isMac;
+        }
+        return false;
       });
 
       const counts = new Map<string, number>();
@@ -98,7 +115,7 @@ export async function GET(request: NextRequest) {
       }
 
       return {
-        segment: platform,
+        segment: seg,
         features: Array.from(counts.entries())
           .map(([feature, count]) => ({ feature, count }))
           .sort((a, b) => b.count - a.count),

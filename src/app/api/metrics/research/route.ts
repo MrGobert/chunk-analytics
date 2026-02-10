@@ -92,9 +92,12 @@ export async function GET(request: NextRequest) {
 
     const researchFunnel = [
       { name: 'Initiated', count: totalReportsInitiated, percentage: 100, dropoff: 0 },
-      { name: 'Completed', count: totalReportsCompleted, percentage: completedPct, dropoff: 100 - completedPct },
-      { name: 'Viewed', count: totalReportsViewed, percentage: viewedPct, dropoff: completedPct - viewedPct },
-      { name: 'Exported/Shared', count: exportedAndShared, percentage: exportedPct, dropoff: viewedPct - exportedPct },
+      { name: 'Completed', count: totalReportsCompleted, percentage: completedPct,
+        dropoff: totalReportsInitiated > 0 ? Math.max(0, ((totalReportsInitiated - totalReportsCompleted) / totalReportsInitiated) * 100) : 0 },
+      { name: 'Viewed', count: totalReportsViewed, percentage: viewedPct,
+        dropoff: totalReportsCompleted > 0 ? Math.max(0, ((totalReportsCompleted - totalReportsViewed) / totalReportsCompleted) * 100) : 0 },
+      { name: 'Exported/Shared', count: exportedAndShared, percentage: exportedPct,
+        dropoff: totalReportsViewed > 0 ? Math.max(0, ((totalReportsViewed - exportedAndShared) / totalReportsViewed) * 100) : 0 },
     ];
 
     // Daily activity

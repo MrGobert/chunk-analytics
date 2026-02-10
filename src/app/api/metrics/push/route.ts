@@ -2,11 +2,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import {
   fetchMixpanelEvents,
   filterByPlatform,
+  filterByUserType,
   getUniqueUsers,
   countEvents,
   calculateTrend,
   getLastUpdated,
   getPropertyDistribution,
+  UserType,
 } from '@/lib/mixpanel';
 import { getDateRange, getDaysInRange, formatDate } from '@/lib/utils';
 import { subDays } from 'date-fns';
@@ -18,10 +20,12 @@ export async function GET(request: NextRequest) {
     const from = searchParams.get('from');
     const to = searchParams.get('to');
     const platform = searchParams.get('platform') || 'all';
+    const userType = (searchParams.get('userType') || 'all') as UserType;
 
     const dateRange = from && to ? { from, to } : getDateRange(range);
     const allEvents = await fetchMixpanelEvents(dateRange.from, dateRange.to);
-    const events = filterByPlatform(allEvents, platform);
+    const platformFiltered = filterByPlatform(allEvents, platform);
+    const events = filterByUserType(platformFiltered, userType);
 
     // Count push notification events
     const permissionRequested = countEvents(events, 'Push_Permission_Requested');
@@ -46,7 +50,8 @@ export async function GET(request: NextRequest) {
     let previousEvents: Awaited<ReturnType<typeof fetchMixpanelEvents>> = [];
     try {
       const allPreviousEvents = await fetchMixpanelEvents(previousFrom, previousTo);
-      previousEvents = filterByPlatform(allPreviousEvents, platform);
+      const prevPlatformFiltered = filterByPlatform(allPreviousEvents, platform);
+      previousEvents = filterByUserType(prevPlatformFiltered, userType);
     } catch {
       // Use empty array if previous period data unavailable
     }
@@ -95,23 +100,23 @@ export async function GET(request: NextRequest) {
       .map(([source, count]) => ({ source, count }))
       .sort((a, b) => b.count - a.count);
 
-    // Permission funnel
+    // Permission funnel - all percentages relative to base (permissionRequested)
     const grantedPercentage = permissionRequested > 0 ? (permissionGranted / permissionRequested) * 100 : 0;
-    const openedPercentage = permissionGranted > 0 ? (notificationsOpened / permissionGranted) * 100 : 0;
-    
+    const openedPercentage = permissionRequested > 0 ? (notificationsOpened / permissionRequested) * 100 : 0;
+
     const permissionFunnel = [
       { name: 'Permission Requested', count: permissionRequested, percentage: 100, dropoff: 0 },
       {
         name: 'Permission Granted',
         count: permissionGranted,
         percentage: grantedPercentage,
-        dropoff: 100 - grantedPercentage,
+        dropoff: permissionRequested > 0 ? Math.max(0, ((permissionRequested - permissionGranted) / permissionRequested) * 100) : 0,
       },
       {
         name: 'Notification Opened',
         count: notificationsOpened,
         percentage: openedPercentage,
-        dropoff: grantedPercentage - openedPercentage,
+        dropoff: permissionGranted > 0 ? Math.max(0, ((permissionGranted - notificationsOpened) / permissionGranted) * 100) : 0,
       },
     ];
 
@@ -152,6 +157,7 @@ export async function GET(request: NextRequest) {
       // Meta
       dateRange,
       platform,
+      userType,
       lastUpdated: getLastUpdated(),
     });
   } catch (error) {

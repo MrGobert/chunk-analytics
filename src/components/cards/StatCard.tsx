@@ -3,7 +3,7 @@ import { formatNumber, formatPercentage } from '@/lib/utils';
 interface StatCardProps {
   title: string;
   value: number | string;
-  trend?: number;
+  trend?: number | null;
   format?: 'number' | 'percentage' | 'ratio' | 'decimal' | 'text';
   subtitle?: string;
   icon?: React.ReactNode;
@@ -19,8 +19,9 @@ export default function StatCard({ title, value, trend, format = 'number', subti
   };
 
   const formattedValue = getFormattedValue();
-  const trendColor = trend !== undefined && trend >= 0 ? 'text-emerald-400' : 'text-red-400';
-  const trendIcon = trend !== undefined && trend >= 0 ? '↑' : '↓';
+  const isNewTrend = trend === null;
+  const trendColor = isNewTrend ? 'text-blue-400' : (trend !== undefined && trend >= 0 ? 'text-emerald-400' : 'text-red-400');
+  const trendIcon = isNewTrend ? '' : (trend !== undefined && trend >= 0 ? '↑' : '↓');
 
   return (
     <div className="rounded-xl bg-zinc-900 border border-zinc-800 p-4 sm:p-6">
@@ -30,7 +31,10 @@ export default function StatCard({ title, value, trend, format = 'number', subti
       </div>
       <div className="flex items-end gap-2">
         <span className="text-2xl sm:text-3xl font-bold text-white">{formattedValue}</span>
-        {trend !== undefined && (
+        {isNewTrend && (
+          <span className={`text-sm font-medium ${trendColor} mb-1`}>New</span>
+        )}
+        {trend !== undefined && trend !== null && (
           <span className={`text-sm font-medium ${trendColor} mb-1`}>
             {trendIcon} {Math.abs(trend).toFixed(1)}%
           </span>

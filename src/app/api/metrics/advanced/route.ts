@@ -2,11 +2,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import {
   fetchMixpanelEvents,
   filterByPlatform,
+  filterByUserType,
   getUniqueUsers,
   getUniqueUsersByDate,
   filterEventsByType,
   getPropertyDistribution,
   getLastUpdated,
+  UserType,
 } from '@/lib/mixpanel';
 import { getDateRange, getDaysInRange } from '@/lib/utils';
 import { subDays, startOfMonth, endOfMonth, format, differenceInDays } from 'date-fns';
@@ -18,10 +20,12 @@ export async function GET(request: NextRequest) {
     const from = searchParams.get('from');
     const to = searchParams.get('to');
     const platform = searchParams.get('platform') || 'all';
+    const userType = (searchParams.get('userType') || 'all') as UserType;
 
     const dateRange = from && to ? { from, to } : getDateRange(range);
     const allEvents = await fetchMixpanelEvents(dateRange.from, dateRange.to);
-    const events = filterByPlatform(allEvents, platform);
+    const platformFiltered = filterByPlatform(allEvents, platform);
+    const events = filterByUserType(platformFiltered, userType);
 
     // ============================================
     // DAU / MAU Ratio (Stickiness)
@@ -68,26 +72,33 @@ export async function GET(request: NextRequest) {
         }
       });
 
-      let day1Retained = 0;
-      let day7Retained = 0;
-      let day30Retained = 0;
+      const day1RetainedUsers = new Set<string>();
+      const day7RetainedUsers = new Set<string>();
+      const day30RetainedUsers = new Set<string>();
 
       userFirstDates.forEach((firstDate, userId) => {
         // Get all sessions for this user
-        const userEvents = events.filter((e) => 
-          e.properties.distinct_id === userId && 
+        const userEvents = events.filter((e) =>
+          e.properties.distinct_id === userId &&
           (e.event === '$ae_session' || e.event === 'Session_Started')
         );
-        
-        userEvents.forEach((e) => {
+
+        for (const e of userEvents) {
           const eventDate = new Date(e.properties.time * 1000);
           const daysDiff = differenceInDays(eventDate, firstDate);
-          
-          if (daysDiff === 1) day1Retained++;
-          if (daysDiff >= 7 && daysDiff < 8) day7Retained++;
-          if (daysDiff >= 30 && daysDiff < 31) day30Retained++;
-        });
+
+          // Window-based retention: Day 1 = returned within days 1-2
+          if (daysDiff >= 1 && daysDiff <= 2) day1RetainedUsers.add(userId);
+          // Day 7 = returned within days 7-14
+          if (daysDiff >= 7 && daysDiff <= 14) day7RetainedUsers.add(userId);
+          // Day 30 = returned within days 30-60
+          if (daysDiff >= 30 && daysDiff <= 60) day30RetainedUsers.add(userId);
+        }
       });
+
+      const day1Retained = day1RetainedUsers.size;
+      const day7Retained = day7RetainedUsers.size;
+      const day30Retained = day30RetainedUsers.size;
 
       retention.day1 = (day1Retained / newUserIds.size) * 100;
       retention.day7 = (day7Retained / newUserIds.size) * 100;
@@ -189,6 +200,9 @@ export async function GET(request: NextRequest) {
       { events: ['Image_Generation_Started', 'Image Generation'], name: 'Image Generation' },
       { events: ['Collection_Created', 'Collections'], name: 'Collections' },
       { events: ['Memory_Added', 'AI Memory'], name: 'Memory' },
+      { events: ['Research_Report_Initiated', 'Research_Report_Completed'], name: 'Research Reports' },
+      { events: ['Note_Writing_Tool_Used'], name: 'Writing Tools' },
+      { events: ['Search Performed', 'Search', 'Search_Performed'], name: 'Searches' },
     ];
 
     featureEvents.forEach(({ events: eventNames, name }) => {
@@ -239,6 +253,7 @@ export async function GET(request: NextRequest) {
       // Meta
       dateRange,
       platform,
+      userType,
       lastUpdated: getLastUpdated(),
     });
   } catch (error) {

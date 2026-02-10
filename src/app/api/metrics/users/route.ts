@@ -105,19 +105,22 @@ export async function GET(request: NextRequest) {
       { sessions: '10+', users: sessionCounts.filter((c) => c > 10).length },
     ];
 
-    // Geographic Distribution
-    const countryCount = new Map<string, number>();
+    // Geographic Distribution - count unique users per country
+    const countryUsers = new Map<string, Set<string>>();
     for (const event of events) {
       const country = event.properties.mp_country_code || 'Unknown';
-      countryCount.set(country, (countryCount.get(country) || 0) + 1);
+      if (!countryUsers.has(country)) {
+        countryUsers.set(country, new Set());
+      }
+      countryUsers.get(country)!.add(event.properties.distinct_id);
     }
 
-    const totalEvents = events.length;
-    const geographic = Array.from(countryCount.entries())
+    const totalUniqueUsers = new Set(events.map((e) => e.properties.distinct_id)).size;
+    const geographic = Array.from(countryUsers.entries())
       .map(([country, users]) => ({
         country,
-        users,
-        percentage: totalEvents > 0 ? (users / totalEvents) * 100 : 0,
+        users: users.size,
+        percentage: totalUniqueUsers > 0 ? (users.size / totalUniqueUsers) * 100 : 0,
       }))
       .sort((a, b) => b.users - a.users)
       .slice(0, 10);

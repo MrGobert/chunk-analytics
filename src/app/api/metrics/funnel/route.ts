@@ -31,12 +31,14 @@ export async function GET(request: NextRequest) {
                           countEvents(events, 'Subscription View');
     const planSelected = countEvents(events, 'Plan Selected') + countEvents(events, 'Plan_Selected');
     const purchaseInitiated = countEvents(events, 'Purchase Initiated') + countEvents(events, 'Purchase_Initiated');
+    const failedUserIds = new Set(
+      events
+        .filter((e) => e.event === 'Purchase Failed' || e.event === 'Purchase_Failed')
+        .map((e) => e.properties.distinct_id)
+    );
     const purchaseCompleted = events.filter(
-      (e) => (e.event === 'Purchase Initiated' || e.event === 'Purchase_Initiated' || e.event === 'Purchase Completed' || e.event === 'Purchase_Completed') && 
-             !events.some(
-               (f) => (f.event === 'Purchase Failed' || f.event === 'Purchase_Failed') && 
-                      f.properties.distinct_id === e.properties.distinct_id
-             )
+      (e) => (e.event === 'Purchase Completed' || e.event === 'Purchase_Completed') &&
+             !failedUserIds.has(e.properties.distinct_id)
     ).length;
 
     const funnel = [
@@ -66,26 +68,31 @@ export async function GET(request: NextRequest) {
       },
     ];
 
-    // Revenue by plan type - support both old and new event names
-    const planEvents = filterEventsByType(events, [
-      'Plan Selected', 'Plan_Selected', 
-      'Purchase Initiated', 'Purchase_Initiated',
+    // Revenue by plan type - only count Purchase Completed events
+    const completedPurchaseEvents = filterEventsByType(events, [
       'Purchase Completed', 'Purchase_Completed'
     ]);
-    const planDistribution = getPropertyDistribution(planEvents, 'plan_type');
+    const planDistribution = getPropertyDistribution(completedPurchaseEvents, 'plan_type');
+    const planPrices: Record<string, number> = {
+      weekly: 2.99,
+      monthly: 9.99,
+      annual: 49.99,
+      yearly: 49.99,
+    };
     const revenueByPlan = Array.from(planDistribution.entries())
       .map(([plan, count]) => {
-        const planPrices: Record<string, number> = {
-          weekly: 2.99,
-          monthly: 9.99,
-          annual: 49.99,
-          yearly: 49.99,
-        };
-        const price = planPrices[plan.toLowerCase()] || 0;
+        // Use price from event properties when available, fall back to hardcoded
+        const eventsForPlan = completedPurchaseEvents.filter(
+          (e) => String(e.properties.plan_type) === plan
+        );
+        const avgPrice = eventsForPlan.length > 0
+          ? eventsForPlan.reduce((sum, e) => sum + (Number(e.properties.price) || planPrices[plan.toLowerCase()] || 0), 0) / eventsForPlan.length
+          : planPrices[plan.toLowerCase()] || 0;
         return {
           plan: plan || 'Unknown',
           count,
-          revenue: count * price,
+          revenue: count * avgPrice,
+          estimated: eventsForPlan.some((e) => !e.properties.price),
         };
       })
       .sort((a, b) => b.revenue - a.revenue);
@@ -94,11 +101,8 @@ export async function GET(request: NextRequest) {
     const trialUsers = events.filter((e) => e.properties.has_trial === true);
     const trialUserIds = new Set(trialUsers.map((e) => e.properties.distinct_id));
     const purchasedUsers = new Set(
-      filterEventsByType(events, ['Purchase Initiated', 'Purchase_Initiated', 'Purchase Completed', 'Purchase_Completed'])
-        .filter((e) => !events.some(
-          (f) => (f.event === 'Purchase Failed' || f.event === 'Purchase_Failed') && 
-                 f.properties.distinct_id === e.properties.distinct_id
-        ))
+      filterEventsByType(events, ['Purchase Completed', 'Purchase_Completed'])
+        .filter((e) => !failedUserIds.has(e.properties.distinct_id))
         .map((e) => e.properties.distinct_id)
     );
 

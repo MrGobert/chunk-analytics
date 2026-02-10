@@ -306,8 +306,8 @@ export function getUniqueUsersByDate(
 export function calculateTrend(
   current: number,
   previous: number
-): number {
-  if (previous === 0) return current > 0 ? 100 : 0;
+): number | null {
+  if (previous === 0) return current > 0 ? null : 0;
   return ((current - previous) / previous) * 100;
 }
 
