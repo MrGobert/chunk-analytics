@@ -223,3 +223,27 @@ export interface NotesMetrics {
   documentUploadRate: number;
   lastUpdated: string;
 }
+
+export interface SharingMetrics {
+  totalNotesShared: number;
+  totalConversationsShared: number;
+  totalResearchShared: number;
+  totalCollectionsShared: number;
+  totalSharedNoteViews: number;
+  totalSharedConversationViews: number;
+  totalSharedResearchViews: number;
+  totalSaveToChunkClicks: number;
+  noteSharedTrend: number | null;
+  conversationSharedTrend: number | null;
+  researchSharedTrend: number | null;
+  sharedViewsTrend: number | null;
+  saveClickTrend: number | null;
+  viewToShareRatio: number;
+  saveToChunkClickRate: number;
+  sharesCreatedOverTime: { date: string; note: number; conversation: number; research: number; collection: number }[];
+  sharedViewsOverTime: { date: string; note: number; conversation: number; research: number }[];
+  sharingFunnel: FunnelStep[];
+  contentTypeDistribution: { name: string; value: number }[];
+  viewToShareByType: { type: string; shares: number; views: number; ratio: number }[];
+  lastUpdated: string;
+}
