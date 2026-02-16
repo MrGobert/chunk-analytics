@@ -35,7 +35,9 @@ export async function GET(request: NextRequest) {
     // Calculate metrics (after all filters)
     const uniqueUsers = getUniqueUsersByType(platformFilteredEvents, userType);
     const totalUsers = uniqueUsers.size;
-    const totalSessions = countEvents(events, '$ae_session') + countEvents(events, 'Session_Started');
+    const marketingSessions = countEvents(events, 'Marketing_Session_Started');
+    const appSessions = countEvents(events, 'App_Session_Started') + countEvents(events, '$ae_session') + countEvents(events, 'Session_Started');
+    const totalSessions = marketingSessions + appSessions;
     // Count both old and new event names for backwards compatibility
     const totalSearches = countEvents(events, 'Search Performed') + 
                           countEvents(events, 'Search') + 
@@ -66,13 +68,17 @@ export async function GET(request: NextRequest) {
     }
 
     const previousUsers = getUniqueUsersByType(previousEvents, userType).size;
-    const previousSessions = countEvents(previousEvents, '$ae_session') + countEvents(previousEvents, 'Session_Started');
+    const previousMarketingSessions = countEvents(previousEvents, 'Marketing_Session_Started');
+    const previousAppSessions = countEvents(previousEvents, 'App_Session_Started') + countEvents(previousEvents, '$ae_session') + countEvents(previousEvents, 'Session_Started');
+    const previousSessions = previousMarketingSessions + previousAppSessions;
     const previousSearches = countEvents(previousEvents, 'Search Performed') + 
                              countEvents(previousEvents, 'Search') + 
                              countEvents(previousEvents, 'Search_Performed');
 
     const usersTrend = calculateTrend(totalUsers, previousUsers);
     const sessionsTrend = calculateTrend(totalSessions, previousSessions);
+    const marketingSessionsTrend = calculateTrend(marketingSessions, previousMarketingSessions);
+    const appSessionsTrend = calculateTrend(appSessions, previousAppSessions);
     const searchesTrend = calculateTrend(totalSearches, previousSearches);
 
     // Daily data
@@ -85,10 +91,15 @@ export async function GET(request: NextRequest) {
         return eventDate === date;
       });
 
+      const dayMarketingSessions = dayEvents.filter((e) => e.event === 'Marketing_Session_Started').length;
+      const dayAppSessions = dayEvents.filter((e) => e.event === 'App_Session_Started' || e.event === '$ae_session' || e.event === 'Session_Started').length;
+
       return {
         date,
         users: usersByDate.get(date)?.size || 0,
-        sessions: dayEvents.filter((e) => e.event === '$ae_session' || e.event === 'Session_Started').length,
+        sessions: dayMarketingSessions + dayAppSessions,
+        marketingSessions: dayMarketingSessions,
+        appSessions: dayAppSessions,
         searches: dayEvents.filter((e) => 
           e.event === 'Search Performed' || 
           e.event === 'Search' || 
@@ -100,10 +111,14 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       totalUsers,
       totalSessions,
+      marketingSessions,
+      appSessions,
       totalSearches,
       conversionRate,
       usersTrend,
       sessionsTrend,
+      marketingSessionsTrend,
+      appSessionsTrend,
       searchesTrend,
       dailyData,
       dateRange,

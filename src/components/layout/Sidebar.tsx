@@ -6,6 +6,7 @@ import { useState, useEffect } from 'react';
 
 const navItems = [
   { href: '/', label: 'Overview', icon: HomeIcon },
+  { href: '/acquisition', label: 'Acquisition', icon: FunnelIcon },
   { href: '/insights', label: 'Insights', icon: ChartIcon },
   { href: '/users', label: 'Users', icon: UsersIcon },
   { href: '/searches', label: 'Searches', icon: SearchIcon },
@@ -18,6 +19,14 @@ const navItems = [
   { href: '/sharing', label: 'Sharing', icon: ShareIcon },
   { href: '/onboarding', label: 'Onboarding', icon: RocketIcon },
 ];
+
+function FunnelIcon() {
+  return (
+    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
+    </svg>
+  );
+}
 
 function HomeIcon() {
   return (

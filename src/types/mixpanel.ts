@@ -40,10 +40,14 @@ export interface UserBreakdown {
 export interface OverviewMetrics {
   totalUsers: number;
   totalSessions: number;
+  marketingSessions: number;
+  appSessions: number;
   totalSearches: number;
   conversionRate: number;
   usersTrend: number | null;
   sessionsTrend: number | null;
+  marketingSessionsTrend: number | null;
+  appSessionsTrend: number | null;
   searchesTrend: number | null;
   dailyData: DailyDataPoint[];
   userType?: UserType;
@@ -54,8 +58,22 @@ export interface DailyDataPoint {
   date: string;
   users: number;
   sessions: number;
+  marketingSessions: number;
+  appSessions: number;
   searches: number;
   [key: string]: string | number;
+}
+
+export interface AcquisitionFunnelMetrics {
+  funnel: FunnelStep[];
+  dailyData: { date: string; marketing: number; guest: number; signup: number; subscriber: number }[];
+  conversionRates: {
+    marketingToGuest: number;
+    guestToSignup: number;
+    signupToSubscriber: number;
+    overallMarketingToSubscriber: number;
+  };
+  lastUpdated: string;
 }
 
 export interface UserMetrics {

@@ -80,7 +80,7 @@ export async function GET(request: NextRequest) {
         // Get all sessions for this user
         const userEvents = events.filter((e) =>
           e.properties.distinct_id === userId &&
-          (e.event === '$ae_session' || e.event === 'Session_Started')
+          (e.event === '$ae_session' || e.event === 'Session_Started' || e.event === 'Marketing_Session_Started' || e.event === 'App_Session_Started')
         );
 
         for (const e of userEvents) {
@@ -140,7 +140,7 @@ export async function GET(request: NextRequest) {
     // Traffic Sources (Web only)
     // ============================================
     const sessionEvents = events.filter((e) => 
-      e.event === 'Session_Started' || e.event === 'Page_Viewed'
+      e.event === 'Session_Started' || e.event === 'Marketing_Session_Started' || e.event === 'App_Session_Started' || e.event === 'Page_Viewed'
     );
     
     // Extract referrer domains
@@ -187,7 +187,7 @@ export async function GET(request: NextRequest) {
     // Average Session Duration
     // ============================================
     const sessionLengths = events
-      .filter((e) => e.event === '$ae_session' && e.properties.$ae_session_length)
+      .filter((e) => (e.event === '$ae_session' || e.event === 'App_Session_Started' || e.event === 'Marketing_Session_Started') && e.properties.$ae_session_length)
       .map((e) => e.properties.$ae_session_length as number)
       .filter((length) => length > 0 && length < 7200); // Filter outliers (< 2 hours)
     
