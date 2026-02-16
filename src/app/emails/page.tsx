@@ -14,6 +14,12 @@ interface EmailTypeStats {
   converted: number;
   conversionRate: number;
   avgDaysToConvert: number;
+  delivered: number;
+  opened: number;
+  clicked: number;
+  bounced: number;
+  openRate: number;
+  clickRate: number;
 }
 
 interface EmailStats {
@@ -36,6 +42,15 @@ const EMAIL_TYPE_LABELS: Record<string, string> = {
   trial_ending: 'Trial Ending',
   billing_issue: 'Billing Issue',
   subscription_expired: 'Subscription Expired',
+  trial_started: 'Trial Started',
+  reengagement_14day: '14-Day Re-engagement',
+  signup_no_trial_nudge: 'Signup No-Trial Nudge',
+  feature_announcement: 'Feature Announcement',
+  renewal_reminder: 'Renewal Reminder',
+  monthly_recap: 'Monthly Recap',
+  day1_superpowers: 'Day 1: Superpowers',
+  day3_collections: 'Day 3: Collections',
+  day7_researcher_stories: 'Day 7: Researcher Stories',
 };
 
 export default function EmailCampaignsPage() {
@@ -104,14 +119,27 @@ export default function EmailCampaignsPage() {
   const byEmailType = stats?.by_email_type ?? {};
   
   // Transform data for charts with null-safe handling
-  const byTypeData = Object.entries(byEmailType).map(([type, data]) => ({
-    name: EMAIL_TYPE_LABELS[type] || type,
-    type,
-    sent: data?.sent ?? 0,
-    converted: data?.converted ?? 0,
-    conversionRate: data?.conversionRate ?? 0,
-    avgDaysToConvert: data?.avgDaysToConvert ?? 0,
-  }));
+  const byTypeData = Object.entries(byEmailType).map(([type, data]) => {
+    const sent = data?.sent ?? 0;
+    const delivered = data?.delivered ?? 0;
+    const opened = data?.opened ?? 0;
+    const clicked = data?.clicked ?? 0;
+    
+    return {
+      name: EMAIL_TYPE_LABELS[type] || type,
+      type,
+      sent,
+      converted: data?.converted ?? 0,
+      conversionRate: data?.conversionRate ?? 0,
+      avgDaysToConvert: data?.avgDaysToConvert ?? 0,
+      delivered,
+      opened,
+      clicked,
+      bounced: data?.bounced ?? 0,
+      openRate: delivered > 0 ? Math.round((opened / delivered) * 100 * 10) / 10 : 0,
+      clickRate: delivered > 0 ? Math.round((clicked / delivered) * 100 * 10) / 10 : 0,
+    };
+  });
 
   const conversionData = byTypeData.map((item) => ({
     name: item.name,
@@ -127,12 +155,24 @@ export default function EmailCampaignsPage() {
     type: item.name,
     rate: item.conversionRate,
   }));
+  
+  // Calculate overall open and click rates
+  const totalDelivered = byTypeData.reduce((sum, item) => sum + item.delivered, 0);
+  const totalOpened = byTypeData.reduce((sum, item) => sum + item.opened, 0);
+  const totalClicked = byTypeData.reduce((sum, item) => sum + item.clicked, 0);
+  const overallOpenRate = totalDelivered > 0 ? (totalOpened / totalDelivered) : 0;
+  const overallClickRate = totalDelivered > 0 ? (totalClicked / totalDelivered) : 0;
 
   const tableData = byTypeData.map((item) => ({
     emailType: item.name,
     sent: item.sent,
+    delivered: item.delivered,
+    opened: item.opened,
+    clicked: item.clicked,
     converted: item.converted,
     conversionRate: `${item.conversionRate}%`,
+    openRate: `${item.openRate}%`,
+    clickRate: `${item.clickRate}%`,
     avgDays: item.avgDaysToConvert > 0 ? `${item.avgDaysToConvert} days` : '—',
   }));
 
@@ -159,7 +199,7 @@ export default function EmailCampaignsPage() {
       )}
 
       {/* Summary Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+      <div className="grid grid-cols-1 md:grid-cols-6 gap-6 mb-8">
         <StatCard 
           title="Emails Sent" 
           value={totals.sent ?? 0} 
@@ -194,6 +234,27 @@ export default function EmailCampaignsPage() {
           icon={
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+            </svg>
+          }
+        />
+        <StatCard 
+          title="Open Rate" 
+          value={overallOpenRate}
+          format="percentage"
+          icon={
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+            </svg>
+          }
+        />
+        <StatCard 
+          title="Click Rate" 
+          value={overallClickRate}
+          format="percentage"
+          icon={
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122" />
             </svg>
           }
         />
@@ -248,8 +309,13 @@ export default function EmailCampaignsPage() {
               columns={[
                 { key: 'emailType', header: 'Campaign' },
                 { key: 'sent', header: 'Sent' },
+                { key: 'delivered', header: 'Delivered' },
+                { key: 'opened', header: 'Opened' },
+                { key: 'clicked', header: 'Clicked' },
                 { key: 'converted', header: 'Converted' },
-                { key: 'conversionRate', header: 'Rate' },
+                { key: 'conversionRate', header: 'Conv Rate' },
+                { key: 'openRate', header: 'Open Rate' },
+                { key: 'clickRate', header: 'Click Rate' },
                 { key: 'avgDays', header: 'Avg Days' },
               ]}
             />
