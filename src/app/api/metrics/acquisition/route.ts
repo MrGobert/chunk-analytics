@@ -3,7 +3,6 @@ import {
   fetchMixpanelEvents,
   filterByPlatform,
   filterByUserType,
-  calculateTrend,
   getLastUpdated,
   UserType,
 } from '@/lib/mixpanel';
