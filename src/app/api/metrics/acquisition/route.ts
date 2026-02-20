@@ -69,8 +69,8 @@ export async function GET(request: NextRequest) {
       dropoff: i === 0 ? 0 : Math.round(((steps[i - 1].count - step.count) / (steps[i - 1].count || 1)) * 100 * 10) / 10,
     }));
 
-    // Conversion rates
-    const safeDiv = (a: number, b: number) => (b > 0 ? Math.round((a / b) * 100 * 10) / 10 : 0);
+    // Conversion rates — return decimal ratios (0-1); StatCard's formatPercentage handles ×100
+    const safeDiv = (a: number, b: number) => (b > 0 ? a / b : 0);
     const conversionRates = {
       marketingToGuest: safeDiv(guestUsers.size, marketingUsers.size),
       guestToSignup: safeDiv(signupUsers.size, guestUsers.size),

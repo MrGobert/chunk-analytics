@@ -100,7 +100,8 @@ export async function GET(request: NextRequest) {
     const totalShares = totalNotesShared + totalConversationsShared + totalResearchShared + totalCollectionsShared;
     const totalViews = totalSharedNoteViews + totalSharedConversationViews + totalSharedResearchViews;
     const viewToShareRatio = totalShares > 0 ? (totalViews / totalShares) : 0;
-    const saveToChunkClickRate = totalViews > 0 ? (totalSaveToChunkClicks / totalViews) * 100 : 0;
+    // Return as decimal ratio (0-1); StatCard's formatPercentage handles ×100
+    const saveToChunkClickRate = totalViews > 0 ? (totalSaveToChunkClicks / totalViews) : 0;
 
     // Daily data for shares created over time
     const days = getDaysInRange(dateRange.from, dateRange.to);
@@ -134,35 +135,30 @@ export async function GET(request: NextRequest) {
       };
     });
 
-    // Sharing funnel: Content Created → Shared → Viewed → Save Clicked
-    // Note: This is an approximation since we don't have exact user flow tracking
+    // Sharing funnel: Shared → Viewed → Save Clicked (all real data from chunk-notes)
     const shareCreated = totalShares;
     const shareViewed = totalViews;
     const saveClicked = totalSaveToChunkClicks;
 
-    // For content created, we'll need to estimate based on other events
-    // This would need to be improved with actual content creation data
-    const contentCreated = shareCreated * 10; // Rough estimate - 10% sharing rate
-
+    const funnelTop = shareCreated || 1;
     const sharingFunnel = [
-      { name: 'Content Created', count: contentCreated, percentage: 100, dropoff: 0 },
       { 
         name: 'Shared', 
         count: shareCreated, 
-        percentage: contentCreated > 0 ? (shareCreated / contentCreated) * 100 : 0,
-        dropoff: contentCreated > 0 ? ((contentCreated - shareCreated) / contentCreated) * 100 : 0
+        percentage: 100, 
+        dropoff: 0 
       },
       { 
         name: 'Viewed', 
         count: shareViewed, 
-        percentage: shareCreated > 0 ? (shareViewed / shareCreated) * 100 : 0,
-        dropoff: shareCreated > 0 ? Math.max(0, ((shareCreated - shareViewed) / shareCreated) * 100) : 0
+        percentage: Math.round((shareViewed / funnelTop) * 100 * 10) / 10,
+        dropoff: shareCreated > 0 ? Math.round(Math.max(0, ((shareCreated - shareViewed) / shareCreated) * 100) * 10) / 10 : 0
       },
       { 
         name: 'Save Clicked', 
         count: saveClicked, 
-        percentage: shareViewed > 0 ? (saveClicked / shareViewed) * 100 : 0,
-        dropoff: shareViewed > 0 ? Math.max(0, ((shareViewed - saveClicked) / shareViewed) * 100) : 0
+        percentage: Math.round((saveClicked / funnelTop) * 100 * 10) / 10,
+        dropoff: shareViewed > 0 ? Math.round(Math.max(0, ((shareViewed - saveClicked) / shareViewed) * 100) * 10) / 10 : 0
       },
     ];
 

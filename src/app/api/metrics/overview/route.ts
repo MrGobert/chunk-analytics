@@ -29,11 +29,15 @@ export async function GET(request: NextRequest) {
     const platformFilteredEvents = filterByPlatform(allEvents, platform);
     const events = filterByUserType(platformFilteredEvents, userType);
 
-    // Get user breakdown (before userType filter, but after platform filter)
-    const userBreakdown = getUserCountsByType(platformFilteredEvents);
+    // Exclude marketing events from user counting — marketing sessions track
+    // anonymous visitors on marketing pages and should NOT inflate app user counts
+    const appOnlyPlatformEvents = platformFilteredEvents.filter(e => e.event !== 'Marketing_Session_Started');
+
+    // Get user breakdown (before userType filter, excluding marketing-only visitors)
+    const userBreakdown = getUserCountsByType(appOnlyPlatformEvents);
 
     // Calculate metrics (after all filters)
-    const uniqueUsers = getUniqueUsersByType(platformFilteredEvents, userType);
+    const uniqueUsers = getUniqueUsersByType(appOnlyPlatformEvents, userType);
     const totalUsers = uniqueUsers.size;
     const marketingSessions = countEvents(events, 'Marketing_Session_Started');
     const appSessions = countEvents(events, 'App_Session_Started') + countEvents(events, '$ae_session') + countEvents(events, 'Session_Started');
@@ -59,15 +63,17 @@ export async function GET(request: NextRequest) {
     const previousTo = formatDate(subDays(new Date(dateRange.to), rangeDays));
 
     let previousEvents: Awaited<ReturnType<typeof fetchMixpanelEvents>> = [];
+    let previousAppOnlyPlatformEvents: Awaited<ReturnType<typeof fetchMixpanelEvents>> = [];
     try {
       const allPreviousEvents = await fetchMixpanelEvents(previousFrom, previousTo);
       const previousPlatformFiltered = filterByPlatform(allPreviousEvents, platform);
       previousEvents = filterByUserType(previousPlatformFiltered, userType);
+      previousAppOnlyPlatformEvents = previousPlatformFiltered.filter(e => e.event !== 'Marketing_Session_Started');
     } catch {
       // Use empty array if previous period data unavailable
     }
 
-    const previousUsers = getUniqueUsersByType(previousEvents, userType).size;
+    const previousUsers = getUniqueUsersByType(previousAppOnlyPlatformEvents, userType).size;
     const previousMarketingSessions = countEvents(previousEvents, 'Marketing_Session_Started');
     const previousAppSessions = countEvents(previousEvents, 'App_Session_Started') + countEvents(previousEvents, '$ae_session') + countEvents(previousEvents, 'Session_Started');
     const previousSessions = previousMarketingSessions + previousAppSessions;
@@ -81,8 +87,9 @@ export async function GET(request: NextRequest) {
     const appSessionsTrend = calculateTrend(appSessions, previousAppSessions);
     const searchesTrend = calculateTrend(totalSearches, previousSearches);
 
-    // Daily data
-    const usersByDate = getUniqueUsersByDate(events);
+    // Daily data — exclude marketing events from user counts
+    const appOnlyFilteredEvents = events.filter(e => e.event !== 'Marketing_Session_Started');
+    const usersByDate = getUniqueUsersByDate(appOnlyFilteredEvents);
     const days = getDaysInRange(dateRange.from, dateRange.to);
 
     const dailyData = days.map((date) => {
