@@ -37,6 +37,32 @@ const FEATURE_EVENTS = [
   'Memory_Management_Viewed',
   'Collection_Created',
   'Collection_Viewed',
+  'Collection_Updated',
+  'Collection_Deleted',
+  'Collection_URL_Added',
+  'Collection_Chat_Started',
+  'Collection_Exported',
+  // Search/Chat additions
+  'Image_Attached',
+  'Document_Attached',
+  'Chart_Viewed',
+  'Chat_Saved_As_Note',
+  // Image generation
+  'Image_Generation_Failed',
+  // Documents
+  'Document_Deleted',
+  // Notes
+  'Note_Created_From_Template',
+  // Conversations
+  'Conversation_Published',
+  'Conversation_Shared',
+  // Memory
+  'Memory_Toggled',
+  'Memory_Added',
+  'Memory_Deleted',
+  // Paywall/Guest
+  'Feature_Limit_Reached',
+  'Guest_Activity',
   // Web events
   'Page_Viewed',
   'Session_Started',

@@ -25,6 +25,7 @@ const RESEARCH_EVENTS = [
   'Research_Report_Added_To_Collection',
   'Research_Report_Filtered',
   'Research_Report_Shared',
+  'Research_Published',
 ];
 
 const REPORT_TYPES = ['deep', 'research_report', 'detailed_report', 'outline_report', 'resource_report'];

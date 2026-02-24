@@ -130,12 +130,18 @@ export async function GET(request: NextRequest) {
       .map(([source, count]) => ({ source: source || 'Direct', count }))
       .sort((a, b) => b.count - a.count);
 
+    // Additional paywall metrics
+    const paywallDismissed = countEvents(events, 'Paywall Dismissed') + countEvents(events, 'Paywall_Dismissed');
+    const purchaseCancelled = countEvents(events, 'Purchase Cancelled') + countEvents(events, 'Purchase_Cancelled');
+
     return NextResponse.json({
       funnel,
       revenueByPlan,
       trialConversion,
       failedPurchases,
       paywallSources,
+      paywallDismissed,
+      purchaseCancelled,
       dateRange,
       platform,
       userType,

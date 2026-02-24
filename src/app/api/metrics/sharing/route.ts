@@ -16,8 +16,11 @@ import { subDays } from 'date-fns';
 // Events for share creation (from chunk-web)
 const SHARE_CREATION_EVENTS = [
   'Note_Shared',
+  'Note_Published',
   'Conversation_Shared',
+  'Conversation_Published',
   'Research_Report_Shared',
+  'Research_Published',
   'Collection_Shared',
 ];
 
@@ -55,9 +58,9 @@ export async function GET(request: NextRequest) {
     const saveClickEvents = filterEventsByType(events, SAVE_CLICK_EVENTS);
 
     // Summary counts
-    const totalNotesShared = countEvents(shareCreationEvents, 'Note_Shared');
-    const totalConversationsShared = countEvents(shareCreationEvents, 'Conversation_Shared');
-    const totalResearchShared = countEvents(shareCreationEvents, 'Research_Report_Shared');
+    const totalNotesShared = countEvents(shareCreationEvents, 'Note_Shared') + countEvents(shareCreationEvents, 'Note_Published');
+    const totalConversationsShared = countEvents(shareCreationEvents, 'Conversation_Shared') + countEvents(shareCreationEvents, 'Conversation_Published');
+    const totalResearchShared = countEvents(shareCreationEvents, 'Research_Report_Shared') + countEvents(shareCreationEvents, 'Research_Published');
     const totalCollectionsShared = countEvents(shareCreationEvents, 'Collection_Shared');
     
     const totalSharedNoteViews = countEvents(sharedViewEvents, 'Shared_Note_Viewed');
@@ -113,9 +116,9 @@ export async function GET(request: NextRequest) {
 
       return {
         date,
-        note: dayEvents.filter((e) => e.event === 'Note_Shared').length,
-        conversation: dayEvents.filter((e) => e.event === 'Conversation_Shared').length,
-        research: dayEvents.filter((e) => e.event === 'Research_Report_Shared').length,
+        note: dayEvents.filter((e) => e.event === 'Note_Shared' || e.event === 'Note_Published').length,
+        conversation: dayEvents.filter((e) => e.event === 'Conversation_Shared' || e.event === 'Conversation_Published').length,
+        research: dayEvents.filter((e) => e.event === 'Research_Report_Shared' || e.event === 'Research_Published').length,
         collection: dayEvents.filter((e) => e.event === 'Collection_Shared').length,
       };
     });

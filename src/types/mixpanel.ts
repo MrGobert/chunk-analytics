@@ -130,6 +130,8 @@ export interface FunnelMetrics {
   trialConversion: { converted: number; notConverted: number };
   failedPurchases: { error: string; count: number }[];
   paywallSources: { source: string; count: number }[];
+  paywallDismissed: number;
+  purchaseCancelled: number;
 }
 
 export interface FunnelStep {
@@ -263,5 +265,49 @@ export interface SharingMetrics {
   sharingFunnel: FunnelStep[];
   contentTypeDistribution: { name: string; value: number }[];
   viewToShareByType: { type: string; shares: number; views: number; ratio: number }[];
+  lastUpdated: string;
+}
+
+export interface CollectionsMetrics {
+  totalCreated: number;
+  totalViewed: number;
+  totalUpdated: number;
+  totalDeleted: number;
+  totalURLsAdded: number;
+  totalURLsRemoved: number;
+  totalChatStarted: number;
+  totalExported: number;
+  totalShared: number;
+  uniqueCollectionUsers: number;
+  createdTrend: number | null;
+  viewedTrend: number | null;
+  chatStartedTrend: number | null;
+  exportedTrend: number | null;
+  sharedTrend: number | null;
+  collectionsFunnel: FunnelStep[];
+  dailyData: { date: string; created: number; viewed: number; chatStarted: number; exported: number }[];
+  urlManagement: { date: string; added: number; removed: number }[];
+  lastUpdated: string;
+}
+
+export interface MarketingMetrics {
+  totalCTAClicks: number;
+  tryForFreeClicks: number;
+  createAccountClicks: number;
+  featurePagesVisited: number;
+  guestSignupPrompts: number;
+  paywallDismissals: number;
+  featureLimitReached: number;
+  marketingSessions: number;
+  ctaClicksTrend: number | null;
+  featurePagesTrend: number | null;
+  guestPromptsTrend: number | null;
+  paywallDismissalsTrend: number | null;
+  ctaSourceDistribution: { source: string; count: number }[];
+  featurePageDistribution: { page: string; count: number }[];
+  featureLimitDistribution: { feature: string; count: number }[];
+  guestPromptSourceDistribution: { source: string; count: number }[];
+  dailyData: { date: string; tryFree: number; createAccount: number; featurePages: number; guestPrompts: number }[];
+  marketingCTAFunnel: FunnelStep[];
   lastUpdated: string;
 }
