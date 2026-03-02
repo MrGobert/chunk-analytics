@@ -50,7 +50,7 @@ export async function GET(request: NextRequest) {
     const totalReportsInitiated = countEvents(researchEvents, 'Research_Report_Initiated');
     const totalReportsCompleted = countEvents(researchEvents, 'Research_Report_Completed');
     const completionRate = totalReportsInitiated > 0
-      ? Math.min(100, (totalReportsCompleted / totalReportsInitiated) * 100)
+      ? Math.min(1, Math.max(0, totalReportsCompleted / totalReportsInitiated))
       : 0;
     const totalReportsViewed = countEvents(researchEvents, 'Research_Report_Viewed');
     const totalExports = countEvents(researchEvents, 'Research_Report_Exported');

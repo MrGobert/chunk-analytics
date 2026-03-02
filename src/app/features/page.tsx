@@ -9,17 +9,25 @@ import { SkeletonPage } from '@/components/ui/Skeleton';
 import { useAnalytics } from '@/hooks/useAnalytics';
 import { FeatureMetrics } from '@/types/mixpanel';
 
-const FEATURE_COLORS: Record<string, string> = {
-  'Tab View': '#8b5cf6',
-  Notes: '#6366f1',
-  Documents: '#3b82f6',
-  Images: '#0ea5e9',
-  Maps: '#14b8a6',
-  'AI Memory': '#22c55e',
-  'Image Generation': '#eab308',
-  AISelection: '#f97316',
-  'Memory Management Viewed': '#ef4444',
-  'Keyboard Shortcut Used': '#ec4899',
+const CHUNK_COLORS = [
+  '#E63B2E', // Signal Red (Main Accent)
+  '#8b5cf6', // Violet
+  '#0ea5e9', // Sky Blue
+  '#14b8a6', // Teal
+  '#f97316', // Orange
+  '#eab308', // Yellow
+  '#22c55e', // Green
+  '#ec4899', // Pink
+  '#6366f1', // Indigo
+  '#3b82f6', // Blue
+];
+
+const getColorForString = (str: string) => {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = str.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return CHUNK_COLORS[Math.abs(hash) % CHUNK_COLORS.length];
 };
 
 export default function FeaturesPage() {
@@ -47,7 +55,7 @@ export default function FeaturesPage() {
   const topFeatures = metrics.featureUsage.slice(0, 5);
   const lineKeys = topFeatures.map((f) => ({
     key: f.feature,
-    color: FEATURE_COLORS[f.feature] || '#8b5cf6',
+    color: getColorForString(f.feature),
     name: f.feature,
   }));
 
@@ -73,7 +81,7 @@ export default function FeaturesPage() {
             xKey="feature"
             yKey="count"
             horizontal
-            colors={metrics.featureUsage.map((f) => FEATURE_COLORS[f.feature] || '#8b5cf6')}
+            colors={metrics.featureUsage.map((f) => getColorForString(f.feature))}
           />
         </ChartCard>
       </div>
@@ -101,7 +109,7 @@ export default function FeaturesPage() {
                           className="h-2 rounded"
                           style={{
                             width: `${Math.min((f.count / (segment.features[0]?.count || 1)) * 60, 60)}px`,
-                            backgroundColor: FEATURE_COLORS[f.feature] || '#8b5cf6',
+                            backgroundColor: getColorForString(segment.segment),
                           }}
                         />
                         <span className="text-sm text-foreground font-medium w-12 text-right">

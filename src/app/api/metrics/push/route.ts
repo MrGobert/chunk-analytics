@@ -35,7 +35,7 @@ export async function GET(request: NextRequest) {
 
     // Calculate opt-in rate (granted / (granted + denied))
     const totalResponses = permissionGranted + permissionDenied;
-    const optInRate = totalResponses > 0 ? Math.min(100, Math.max(0, (permissionGranted / totalResponses) * 100)) : 0;
+    const optInRate = totalResponses > 0 ? Math.min(1, Math.max(0, permissionGranted / totalResponses)) : 0;
 
     // Calculate open rate (would need sent data from OneSignal, estimate based on unique users with opens)
     const usersWithOpens = getUniqueUsers(
