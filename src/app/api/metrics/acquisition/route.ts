@@ -62,15 +62,19 @@ export async function GET(request: NextRequest) {
     ];
 
     const topCount = steps[0].count || 1;
-    const funnel = steps.map((step, i) => ({
-      name: step.name,
-      count: step.count,
-      percentage: Math.round((step.count / topCount) * 100 * 10) / 10,
-      dropoff: i === 0 ? 0 : Math.round(((steps[i - 1].count - step.count) / (steps[i - 1].count || 1)) * 100 * 10) / 10,
-    }));
+    const funnel = steps.map((step, i) => {
+      const percentage = Math.round((step.count / topCount) * 100 * 10) / 10;
+      const dropoff = i === 0 ? 0 : Math.round(((steps[i - 1].count - step.count) / (steps[i - 1].count || 1)) * 100 * 10) / 10;
+      return {
+        name: step.name,
+        count: step.count,
+        percentage: Math.min(100, Math.max(0, percentage)),
+        dropoff: Math.min(100, Math.max(0, dropoff)),
+      };
+    });
 
     // Conversion rates — return decimal ratios (0-1); StatCard's formatPercentage handles ×100
-    const safeDiv = (a: number, b: number) => (b > 0 ? a / b : 0);
+    const safeDiv = (a: number, b: number) => Math.min(1, Math.max(0, b > 0 ? a / b : 0));
     const conversionRates = {
       marketingToGuest: safeDiv(guestUsers.size, marketingUsers.size),
       guestToSignup: safeDiv(signupUsers.size, guestUsers.size),
