@@ -1,45 +1,27 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import PageHeader from '@/components/layout/PageHeader';
 import StatCard from '@/components/cards/StatCard';
 import ChartCard from '@/components/cards/ChartCard';
 import LineChart from '@/components/charts/LineChart';
 import FunnelChart from '@/components/charts/FunnelChart';
-import LoadingSpinner from '@/components/ui/LoadingSpinner';
+import { SkeletonPage } from '@/components/ui/Skeleton';
+import { useAnalytics } from '@/hooks/useAnalytics';
 import { AcquisitionFunnelMetrics } from '@/types/mixpanel';
 
 export default function AcquisitionPage() {
   const [dateRange, setDateRange] = useState('30d');
   const [platform, setPlatform] = useState('all');
   const [userType, setUserType] = useState('all');
-  const [metrics, setMetrics] = useState<AcquisitionFunnelMetrics | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [lastUpdated, setLastUpdated] = useState<string>('');
 
-  useEffect(() => {
-    async function fetchMetrics() {
-      setLoading(true);
-      try {
-        const res = await fetch(`/api/metrics/acquisition?range=${dateRange}&platform=${platform}&userType=${userType}`);
-        const data = await res.json();
-        setMetrics(data);
-        setLastUpdated(data.lastUpdated);
-      } catch (error) {
-        console.error('Failed to fetch acquisition metrics:', error);
-      } finally {
-        setLoading(false);
-      }
-    }
-    fetchMetrics();
-  }, [dateRange, platform, userType]);
+  const { data: metrics, isLoading, isRefreshing, lastUpdated } = useAnalytics<AcquisitionFunnelMetrics>(
+    '/api/metrics/acquisition',
+    { range: dateRange, platform, userType }
+  );
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-96">
-        <LoadingSpinner size="lg" />
-      </div>
-    );
+  if (isLoading) {
+    return <SkeletonPage statCards={4} chartCards={2} />;
   }
 
   if (!metrics) {
@@ -51,7 +33,7 @@ export default function AcquisitionPage() {
   }
 
   return (
-    <div>
+    <div className="animate-in fade-in duration-300">
       <PageHeader
         title="Acquisition Funnel"
         subtitle="Marketing to subscriber conversion pipeline"
@@ -62,6 +44,7 @@ export default function AcquisitionPage() {
         userType={userType}
         onUserTypeChange={setUserType}
         lastUpdated={lastUpdated}
+        isRefreshing={isRefreshing}
       />
 
       {/* Conversion Rate Cards */}

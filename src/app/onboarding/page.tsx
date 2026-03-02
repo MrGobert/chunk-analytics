@@ -1,13 +1,14 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import PageHeader from '@/components/layout/PageHeader';
 import StatCard from '@/components/cards/StatCard';
 import ChartCard from '@/components/cards/ChartCard';
 import FunnelChart from '@/components/charts/FunnelChart';
 import AreaChart from '@/components/charts/AreaChart';
 import BarChart from '@/components/charts/BarChart';
-import LoadingSpinner from '@/components/ui/LoadingSpinner';
+import { SkeletonPage } from '@/components/ui/Skeleton';
+import { useAnalytics } from '@/hooks/useAnalytics';
 
 interface OnboardingMetrics {
   funnel: { name: string; count: number; percentage: number; dropoff: number }[];
@@ -30,36 +31,14 @@ export default function OnboardingPage() {
   const [dateRange, setDateRange] = useState('30d');
   const [platformGroup, setPlatformGroup] = useState<string>('mobile');
   const [userType, setUserType] = useState('all');
-  const [metrics, setMetrics] = useState<OnboardingMetrics | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [lastUpdated, setLastUpdated] = useState<string>('');
 
-  useEffect(() => {
-    async function fetchMetrics() {
-      setLoading(true);
-      try {
-        const res = await fetch(
-          `/api/metrics/onboarding?range=${dateRange}&platform=${platformGroup}&userType=${userType}`
-        );
-        const data = await res.json();
-        setMetrics(data);
-        setLastUpdated(data.lastUpdated);
-      } catch (error) {
-        console.error('Failed to fetch onboarding metrics:', error);
-      } finally {
-        setLoading(false);
-      }
-    }
+  const { data: metrics, isLoading, isRefreshing, lastUpdated } = useAnalytics<OnboardingMetrics>(
+    '/api/metrics/onboarding',
+    { range: dateRange, platform: platformGroup, userType }
+  );
 
-    fetchMetrics();
-  }, [dateRange, platformGroup, userType]);
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-96">
-        <LoadingSpinner size="lg" />
-      </div>
-    );
+  if (isLoading) {
+    return <SkeletonPage statCards={3} statCardCols="grid-cols-1 md:grid-cols-3" chartCards={2} />;
   }
 
   if (!metrics) {
@@ -73,7 +52,7 @@ export default function OnboardingPage() {
   const firstStepLabel = platformGroup === 'web' ? 'Site Visitors' : 'First Opens';
 
   return (
-    <div>
+    <div className="animate-in fade-in duration-300">
       <PageHeader
         title="Onboarding"
         subtitle="User acquisition and onboarding funnel"
@@ -82,6 +61,7 @@ export default function OnboardingPage() {
         userType={userType}
         onUserTypeChange={setUserType}
         lastUpdated={lastUpdated}
+        isRefreshing={isRefreshing}
       />
 
       {/* Platform Tabs */}

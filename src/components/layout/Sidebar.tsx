@@ -3,6 +3,26 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useState, useEffect } from 'react';
+import { useAnalyticsPrefetch } from '@/hooks/useAnalytics';
+
+// Map sidebar href to the API endpoint each page fetches
+const ROUTE_TO_ENDPOINT: Record<string, string> = {
+  '/': '/api/metrics/overview',
+  '/acquisition': '/api/metrics/acquisition',
+  '/marketing': '/api/metrics/marketing',
+  '/insights': '/api/metrics/advanced',
+  '/users': '/api/metrics/users',
+  '/searches': '/api/metrics/searches',
+  '/subscriptions': '/api/metrics/funnel',
+  '/push': '/api/metrics/push',
+  '/emails': '/api/metrics/emails',
+  '/features': '/api/metrics/features',
+  '/research': '/api/metrics/research',
+  '/notes': '/api/metrics/notes',
+  '/collections': '/api/metrics/collections',
+  '/sharing': '/api/metrics/sharing',
+  '/onboarding': '/api/metrics/onboarding',
+};
 
 const navItems = [
   { href: '/', label: 'Overview', icon: HomeIcon },
@@ -161,6 +181,7 @@ function CloseIcon() {
 export default function Sidebar() {
   const pathname = usePathname();
   const [isOpen, setIsOpen] = useState(false);
+  const prefetch = useAnalyticsPrefetch();
 
   // Close sidebar when route changes (mobile)
   useEffect(() => {
@@ -175,6 +196,36 @@ export default function Sidebar() {
     document.addEventListener('keydown', handleEscape);
     return () => document.removeEventListener('keydown', handleEscape);
   }, []);
+
+  // Prefetch adjacent tabs when user lands on a page
+  useEffect(() => {
+    const currentIndex = navItems.findIndex((item) => item.href === pathname);
+    if (currentIndex === -1) return;
+
+    // Delay prefetch slightly so current page loads first
+    const timer = setTimeout(() => {
+      const adjacentIndices = [
+        currentIndex - 1,
+        currentIndex + 1,
+        currentIndex + 2,
+      ].filter((i) => i >= 0 && i < navItems.length && i !== currentIndex);
+
+      for (const idx of adjacentIndices) {
+        const route = navItems[idx].href;
+        const endpoint = ROUTE_TO_ENDPOINT[route];
+        if (!endpoint) continue;
+
+        // Emails page uses different params
+        if (route === '/emails') {
+          prefetch(endpoint, { days: '30' });
+        } else {
+          prefetch(endpoint, { range: '30d', platform: 'all', userType: 'all' });
+        }
+      }
+    }, 2000);
+
+    return () => clearTimeout(timer);
+  }, [pathname, prefetch]);
 
   return (
     <>

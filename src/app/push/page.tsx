@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import PageHeader from '@/components/layout/PageHeader';
 import StatCard from '@/components/cards/StatCard';
 import ChartCard from '@/components/cards/ChartCard';
@@ -9,7 +9,8 @@ import AreaChart from '@/components/charts/AreaChart';
 import PieChart from '@/components/charts/PieChart';
 import DataTable from '@/components/charts/DataTable';
 import FunnelChart from '@/components/charts/FunnelChart';
-import LoadingSpinner from '@/components/ui/LoadingSpinner';
+import { SkeletonPage } from '@/components/ui/Skeleton';
+import { useAnalytics } from '@/hooks/useAnalytics';
 
 interface PushMetrics {
   permissionRequested: number;
@@ -39,34 +40,14 @@ export default function PushNotificationsPage() {
   const [dateRange, setDateRange] = useState('30d');
   const [platform, setPlatform] = useState('all');
   const [userType, setUserType] = useState('all');
-  const [metrics, setMetrics] = useState<PushMetrics | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [lastUpdated, setLastUpdated] = useState<string>('');
 
-  useEffect(() => {
-    async function fetchMetrics() {
-      setLoading(true);
-      try {
-        const res = await fetch(`/api/metrics/push?range=${dateRange}&platform=${platform}&userType=${userType}`);
-        const data = await res.json();
-        setMetrics(data);
-        setLastUpdated(data.lastUpdated);
-      } catch (error) {
-        console.error('Failed to fetch push metrics:', error);
-      } finally {
-        setLoading(false);
-      }
-    }
+  const { data: metrics, isLoading, isRefreshing, lastUpdated } = useAnalytics<PushMetrics>(
+    '/api/metrics/push',
+    { range: dateRange, platform, userType }
+  );
 
-    fetchMetrics();
-  }, [dateRange, platform, userType]);
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-96">
-        <LoadingSpinner size="lg" />
-      </div>
-    );
+  if (isLoading) {
+    return <SkeletonPage statCards={4} chartCards={2} />;
   }
 
   if (!metrics) {
@@ -93,7 +74,7 @@ export default function PushNotificationsPage() {
   const totalOpens = metrics.destinations.reduce((acc, d) => acc + d.count, 0);
 
   return (
-    <div>
+    <div className="animate-in fade-in duration-300">
       <PageHeader
         title="Push Notifications"
         subtitle="Track push notification permissions, engagement, and deep link destinations"
@@ -104,6 +85,7 @@ export default function PushNotificationsPage() {
         userType={userType}
         onUserTypeChange={setUserType}
         lastUpdated={lastUpdated}
+        isRefreshing={isRefreshing}
       />
 
       {/* Summary Stats */}
@@ -218,8 +200,8 @@ export default function PushNotificationsPage() {
               data={metrics.sources.map((s) => ({
                 source: s.source || 'Unknown',
                 count: s.count,
-                percentage: metrics.permissionRequested > 0 
-                  ? `${((s.count / metrics.permissionRequested) * 100).toFixed(1)}%` 
+                percentage: metrics.permissionRequested > 0
+                  ? `${((s.count / metrics.permissionRequested) * 100).toFixed(1)}%`
                   : '0%',
               }))}
             />

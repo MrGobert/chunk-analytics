@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import PageHeader from '@/components/layout/PageHeader';
 import StatCard from '@/components/cards/StatCard';
 import ChartCard from '@/components/cards/ChartCard';
@@ -8,41 +8,22 @@ import AreaChart from '@/components/charts/AreaChart';
 import BarChart from '@/components/charts/BarChart';
 import PieChart from '@/components/charts/PieChart';
 import HeatmapChart from '@/components/charts/HeatmapChart';
-import LoadingSpinner from '@/components/ui/LoadingSpinner';
+import { SkeletonPage } from '@/components/ui/Skeleton';
+import { useAnalytics } from '@/hooks/useAnalytics';
 import { SearchMetrics } from '@/types/mixpanel';
 
 export default function SearchesPage() {
   const [dateRange, setDateRange] = useState('30d');
   const [platform, setPlatform] = useState('all');
   const [userType, setUserType] = useState('all');
-  const [metrics, setMetrics] = useState<(SearchMetrics & { totalSearches: number }) | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [lastUpdated, setLastUpdated] = useState<string>('');
 
-  useEffect(() => {
-    async function fetchMetrics() {
-      setLoading(true);
-      try {
-        const res = await fetch(`/api/metrics/searches?range=${dateRange}&platform=${platform}&userType=${userType}`);
-        const data = await res.json();
-        setMetrics(data);
-        setLastUpdated(data.lastUpdated);
-      } catch (error) {
-        console.error('Failed to fetch metrics:', error);
-      } finally {
-        setLoading(false);
-      }
-    }
+  const { data: metrics, isLoading, isRefreshing, lastUpdated } = useAnalytics<SearchMetrics & { totalSearches: number }>(
+    '/api/metrics/searches',
+    { range: dateRange, platform, userType }
+  );
 
-    fetchMetrics();
-  }, [dateRange, platform, userType]);
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-96">
-        <LoadingSpinner size="lg" />
-      </div>
-    );
+  if (isLoading) {
+    return <SkeletonPage statCards={3} statCardCols="grid-cols-1 md:grid-cols-3" chartCards={2} />;
   }
 
   if (!metrics) {
@@ -64,7 +45,7 @@ export default function SearchesPage() {
   }));
 
   return (
-    <div>
+    <div className="animate-in fade-in duration-300">
       <PageHeader
         title="Search Analytics"
         subtitle="Search patterns and usage insights"
@@ -75,6 +56,7 @@ export default function SearchesPage() {
         userType={userType}
         onUserTypeChange={setUserType}
         lastUpdated={lastUpdated}
+        isRefreshing={isRefreshing}
       />
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">

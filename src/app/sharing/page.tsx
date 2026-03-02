@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import PageHeader from '@/components/layout/PageHeader';
 import StatCard from '@/components/cards/StatCard';
 import ChartCard from '@/components/cards/ChartCard';
@@ -8,41 +8,22 @@ import LineChart from '@/components/charts/LineChart';
 import BarChart from '@/components/charts/BarChart';
 import PieChart from '@/components/charts/PieChart';
 import FunnelChart from '@/components/charts/FunnelChart';
-import LoadingSpinner from '@/components/ui/LoadingSpinner';
+import { SkeletonPage } from '@/components/ui/Skeleton';
+import { useAnalytics } from '@/hooks/useAnalytics';
 import { SharingMetrics } from '@/types/mixpanel';
 
 export default function SharingPage() {
   const [dateRange, setDateRange] = useState('30d');
   const [platform, setPlatform] = useState('all');
   const [userType, setUserType] = useState('all');
-  const [metrics, setMetrics] = useState<SharingMetrics | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [lastUpdated, setLastUpdated] = useState<string>('');
 
-  useEffect(() => {
-    async function fetchMetrics() {
-      setLoading(true);
-      try {
-        const res = await fetch(`/api/metrics/sharing?range=${dateRange}&platform=${platform}&userType=${userType}`);
-        const data = await res.json();
-        setMetrics(data);
-        setLastUpdated(data.lastUpdated);
-      } catch (error) {
-        console.error('Failed to fetch sharing metrics:', error);
-      } finally {
-        setLoading(false);
-      }
-    }
+  const { data: metrics, isLoading, isRefreshing, lastUpdated } = useAnalytics<SharingMetrics>(
+    '/api/metrics/sharing',
+    { range: dateRange, platform, userType }
+  );
 
-    fetchMetrics();
-  }, [dateRange, platform, userType]);
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-96">
-        <LoadingSpinner size="lg" />
-      </div>
-    );
+  if (isLoading) {
+    return <SkeletonPage statCards={4} chartCards={2} />;
   }
 
   if (!metrics) {
@@ -53,13 +34,13 @@ export default function SharingPage() {
     );
   }
 
-  const totalSharesCreated = metrics.totalNotesShared + metrics.totalConversationsShared + 
+  const totalSharesCreated = metrics.totalNotesShared + metrics.totalConversationsShared +
                            metrics.totalResearchShared + metrics.totalCollectionsShared;
-  const totalSharedViews = metrics.totalSharedNoteViews + metrics.totalSharedConversationViews + 
+  const totalSharedViews = metrics.totalSharedNoteViews + metrics.totalSharedConversationViews +
                           metrics.totalSharedResearchViews;
 
   return (
-    <div>
+    <div className="animate-in fade-in duration-300">
       <PageHeader
         title="Sharing Analytics"
         subtitle="Track content sharing, shared page views, and engagement metrics"
@@ -70,6 +51,7 @@ export default function SharingPage() {
         userType={userType}
         onUserTypeChange={setUserType}
         lastUpdated={lastUpdated}
+        isRefreshing={isRefreshing}
       />
 
       {/* Row 1 - Overview Cards */}
@@ -77,7 +59,7 @@ export default function SharingPage() {
         <StatCard
           title="Total Shares Created"
           value={totalSharesCreated}
-          trend={metrics.noteSharedTrend} // Using note trend as representative
+          trend={metrics.noteSharedTrend}
           icon={
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />

@@ -1,12 +1,13 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import PageHeader from '@/components/layout/PageHeader';
 import ChartCard from '@/components/cards/ChartCard';
 import LineChart from '@/components/charts/LineChart';
 import BarChart from '@/components/charts/BarChart';
 import DataTable from '@/components/charts/DataTable';
-import LoadingSpinner from '@/components/ui/LoadingSpinner';
+import { SkeletonPage } from '@/components/ui/Skeleton';
+import { useAnalytics } from '@/hooks/useAnalytics';
 import { UserMetrics, UserBreakdown } from '@/types/mixpanel';
 
 interface ExtendedUserMetrics extends UserMetrics {
@@ -17,34 +18,14 @@ export default function UsersPage() {
   const [dateRange, setDateRange] = useState('30d');
   const [platform, setPlatform] = useState('all');
   const [userType, setUserType] = useState('all');
-  const [metrics, setMetrics] = useState<ExtendedUserMetrics | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [lastUpdated, setLastUpdated] = useState<string>('');
 
-  useEffect(() => {
-    async function fetchMetrics() {
-      setLoading(true);
-      try {
-        const res = await fetch(`/api/metrics/users?range=${dateRange}&platform=${platform}&userType=${userType}`);
-        const data = await res.json();
-        setMetrics(data);
-        setLastUpdated(data.lastUpdated);
-      } catch (error) {
-        console.error('Failed to fetch metrics:', error);
-      } finally {
-        setLoading(false);
-      }
-    }
+  const { data: metrics, isLoading, isRefreshing, lastUpdated } = useAnalytics<ExtendedUserMetrics>(
+    '/api/metrics/users',
+    { range: dateRange, platform, userType }
+  );
 
-    fetchMetrics();
-  }, [dateRange, platform, userType]);
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-96">
-        <LoadingSpinner size="lg" />
-      </div>
-    );
+  if (isLoading) {
+    return <SkeletonPage statCards={0} chartCards={3} chartCardLayout="grid-cols-1 lg:grid-cols-3" />;
   }
 
   if (!metrics) {
@@ -56,7 +37,7 @@ export default function UsersPage() {
   }
 
   return (
-    <div>
+    <div className="animate-in fade-in duration-300">
       <PageHeader
         title="User Activity"
         subtitle="User engagement and activity metrics"
@@ -67,6 +48,7 @@ export default function UsersPage() {
         userType={userType}
         onUserTypeChange={setUserType}
         lastUpdated={lastUpdated}
+        isRefreshing={isRefreshing}
       />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">

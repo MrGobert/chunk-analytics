@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import PageHeader from '@/components/layout/PageHeader';
 import StatCard from '@/components/cards/StatCard';
 import ChartCard from '@/components/cards/ChartCard';
@@ -8,41 +8,22 @@ import FunnelChart from '@/components/charts/FunnelChart';
 import BarChart from '@/components/charts/BarChart';
 import PieChart from '@/components/charts/PieChart';
 import DataTable from '@/components/charts/DataTable';
-import LoadingSpinner from '@/components/ui/LoadingSpinner';
+import { SkeletonPage } from '@/components/ui/Skeleton';
+import { useAnalytics } from '@/hooks/useAnalytics';
 import { FunnelMetrics } from '@/types/mixpanel';
 
 export default function SubscriptionsPage() {
   const [dateRange, setDateRange] = useState('30d');
   const [platform, setPlatform] = useState('all');
   const [userType, setUserType] = useState('all');
-  const [metrics, setMetrics] = useState<FunnelMetrics | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [lastUpdated, setLastUpdated] = useState<string>('');
 
-  useEffect(() => {
-    async function fetchMetrics() {
-      setLoading(true);
-      try {
-        const res = await fetch(`/api/metrics/funnel?range=${dateRange}&platform=${platform}&userType=${userType}`);
-        const data = await res.json();
-        setMetrics(data);
-        setLastUpdated(data.lastUpdated);
-      } catch (error) {
-        console.error('Failed to fetch metrics:', error);
-      } finally {
-        setLoading(false);
-      }
-    }
+  const { data: metrics, isLoading, isRefreshing, lastUpdated } = useAnalytics<FunnelMetrics>(
+    '/api/metrics/funnel',
+    { range: dateRange, platform, userType }
+  );
 
-    fetchMetrics();
-  }, [dateRange, platform, userType]);
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-96">
-        <LoadingSpinner size="lg" />
-      </div>
-    );
+  if (isLoading) {
+    return <SkeletonPage statCards={4} chartCards={2} />;
   }
 
   if (!metrics) {
@@ -59,19 +40,13 @@ export default function SubscriptionsPage() {
       ? (metrics.funnel[metrics.funnel.length - 1].count / metrics.funnel[0].count) * 100
       : 0;
 
-  const trialConversionRate =
-    metrics.trialConversion.converted + metrics.trialConversion.notConverted > 0
-      ? metrics.trialConversion.converted /
-        (metrics.trialConversion.converted + metrics.trialConversion.notConverted)
-      : 0;
-
   const trialData = [
     { name: 'Converted', value: metrics.trialConversion.converted },
     { name: 'Not Converted', value: metrics.trialConversion.notConverted },
   ];
 
   return (
-    <div>
+    <div className="animate-in fade-in duration-300">
       <PageHeader
         title="Subscription Funnel"
         subtitle="Conversion metrics and revenue analysis"
@@ -82,6 +57,7 @@ export default function SubscriptionsPage() {
         userType={userType}
         onUserTypeChange={setUserType}
         lastUpdated={lastUpdated}
+        isRefreshing={isRefreshing}
       />
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">

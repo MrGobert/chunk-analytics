@@ -1,12 +1,13 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import PageHeader from '@/components/layout/PageHeader';
 import StatCard from '@/components/cards/StatCard';
 import ChartCard from '@/components/cards/ChartCard';
 import BarChart from '@/components/charts/BarChart';
 import DataTable from '@/components/charts/DataTable';
-import LoadingSpinner from '@/components/ui/LoadingSpinner';
+import { SkeletonPage } from '@/components/ui/Skeleton';
+import { useAnalytics } from '@/hooks/useAnalytics';
 
 interface RetentionData {
   day1: number;
@@ -53,34 +54,14 @@ export default function InsightsPage() {
   const [dateRange, setDateRange] = useState('30d');
   const [platform, setPlatform] = useState('all');
   const [userType, setUserType] = useState('all');
-  const [metrics, setMetrics] = useState<AdvancedMetrics | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [lastUpdated, setLastUpdated] = useState<string>('');
 
-  useEffect(() => {
-    async function fetchMetrics() {
-      setLoading(true);
-      try {
-        const res = await fetch(`/api/metrics/advanced?range=${dateRange}&platform=${platform}&userType=${userType}`);
-        const data = await res.json();
-        setMetrics(data);
-        setLastUpdated(data.lastUpdated);
-      } catch (error) {
-        console.error('Failed to fetch advanced metrics:', error);
-      } finally {
-        setLoading(false);
-      }
-    }
+  const { data: metrics, isLoading, isRefreshing, lastUpdated } = useAnalytics<AdvancedMetrics>(
+    '/api/metrics/advanced',
+    { range: dateRange, platform, userType }
+  );
 
-    fetchMetrics();
-  }, [dateRange, platform, userType]);
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-96">
-        <LoadingSpinner size="lg" />
-      </div>
-    );
+  if (isLoading) {
+    return <SkeletonPage statCards={5} statCardCols="grid-cols-1 md:grid-cols-2 lg:grid-cols-5" chartCards={2} />;
   }
 
   if (!metrics) {
@@ -113,7 +94,7 @@ export default function InsightsPage() {
   }));
 
   return (
-    <div>
+    <div className="animate-in fade-in duration-300">
       <PageHeader
         title="Business Insights"
         subtitle="Retention, engagement, and growth metrics"
@@ -124,6 +105,7 @@ export default function InsightsPage() {
         userType={userType}
         onUserTypeChange={setUserType}
         lastUpdated={lastUpdated}
+        isRefreshing={isRefreshing}
       />
 
       {/* Key Engagement Metrics */}
@@ -185,8 +167,8 @@ export default function InsightsPage() {
 
       {/* Retention & User Breakdown */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-        <ChartCard 
-          title="User Retention" 
+        <ChartCard
+          title="User Retention"
           subtitle={`Based on ${metrics.retention.totalNewUsers} new users`}
         >
           <div className="space-y-4">
@@ -225,69 +207,20 @@ export default function InsightsPage() {
                   const freeLength = circumference * freePercent;
                   const paidLength = circumference * paidPercent;
                   const center = 90;
-                  
+
                   return (
                     <>
-                      {/* Background circle */}
-                      <circle
-                        cx={center}
-                        cy={center}
-                        r={radius}
-                        fill="none"
-                        stroke="#27272a"
-                        strokeWidth={strokeWidth}
-                      />
-                      {/* Free users arc (indigo) */}
-                      <circle
-                        cx={center}
-                        cy={center}
-                        r={radius}
-                        fill="none"
-                        stroke="#6366f1"
-                        strokeWidth={strokeWidth}
-                        strokeDasharray={`${freeLength} ${circumference}`}
-                        strokeDashoffset={0}
-                        transform={`rotate(-90 ${center} ${center})`}
-                        strokeLinecap="round"
-                      />
-                      {/* Paid users arc (emerald) */}
-                      <circle
-                        cx={center}
-                        cy={center}
-                        r={radius}
-                        fill="none"
-                        stroke="#10b981"
-                        strokeWidth={strokeWidth}
-                        strokeDasharray={`${paidLength} ${circumference}`}
-                        strokeDashoffset={-freeLength}
-                        transform={`rotate(-90 ${center} ${center})`}
-                        strokeLinecap="round"
-                      />
-                      {/* Center text */}
-                      <text
-                        x={center}
-                        y={center - 8}
-                        textAnchor="middle"
-                        className="fill-white text-2xl font-bold"
-                        style={{ fontSize: '24px', fontWeight: 'bold' }}
-                      >
-                        {total.toLocaleString()}
-                      </text>
-                      <text
-                        x={center}
-                        y={center + 14}
-                        textAnchor="middle"
-                        className="fill-zinc-400 text-sm"
-                        style={{ fontSize: '12px' }}
-                      >
-                        total users
-                      </text>
+                      <circle cx={center} cy={center} r={radius} fill="none" stroke="#27272a" strokeWidth={strokeWidth} />
+                      <circle cx={center} cy={center} r={radius} fill="none" stroke="#6366f1" strokeWidth={strokeWidth} strokeDasharray={`${freeLength} ${circumference}`} strokeDashoffset={0} transform={`rotate(-90 ${center} ${center})`} strokeLinecap="round" />
+                      <circle cx={center} cy={center} r={radius} fill="none" stroke="#10b981" strokeWidth={strokeWidth} strokeDasharray={`${paidLength} ${circumference}`} strokeDashoffset={-freeLength} transform={`rotate(-90 ${center} ${center})`} strokeLinecap="round" />
+                      <text x={center} y={center - 8} textAnchor="middle" className="fill-white text-2xl font-bold" style={{ fontSize: '24px', fontWeight: 'bold' }}>{total.toLocaleString()}</text>
+                      <text x={center} y={center + 14} textAnchor="middle" className="fill-zinc-400 text-sm" style={{ fontSize: '12px' }}>total users</text>
                     </>
                   );
                 })()}
               </svg>
             </div>
-            
+
             {/* Legend & Stats */}
             <div className="w-full space-y-3">
               <div className="flex items-center justify-between">
@@ -295,25 +228,19 @@ export default function InsightsPage() {
                   <div className="w-3 h-3 rounded-full bg-indigo-500" />
                   <span className="text-sm text-zinc-300">Free Users</span>
                 </div>
-                <span className="text-lg font-semibold text-white">
-                  {metrics.userBreakdown.free.toLocaleString()}
-                </span>
+                <span className="text-lg font-semibold text-white">{metrics.userBreakdown.free.toLocaleString()}</span>
               </div>
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <div className="w-3 h-3 rounded-full bg-emerald-500" />
                   <span className="text-sm text-zinc-300">Paid Users</span>
                 </div>
-                <span className="text-lg font-semibold text-white">
-                  {metrics.userBreakdown.paid.toLocaleString()}
-                </span>
+                <span className="text-lg font-semibold text-white">{metrics.userBreakdown.paid.toLocaleString()}</span>
               </div>
               <div className="pt-3 border-t border-zinc-700">
                 <div className="flex items-center justify-between">
                   <span className="text-sm text-zinc-400">Conversion Rate</span>
-                  <span className="text-lg font-semibold text-emerald-400">
-                    {metrics.userBreakdown.paidPercentage.toFixed(1)}%
-                  </span>
+                  <span className="text-lg font-semibold text-emerald-400">{metrics.userBreakdown.paidPercentage.toFixed(1)}%</span>
                 </div>
               </div>
             </div>
@@ -324,13 +251,7 @@ export default function InsightsPage() {
       {/* Feature Adoption */}
       <div className="grid grid-cols-1 gap-6 mb-8">
         <ChartCard title="Feature Adoption" subtitle="Percentage of users who have used each feature">
-          <BarChart
-            data={featureAdoptionData}
-            xKey="name"
-            yKey="value"
-            color="#8b5cf6"
-            horizontal
-          />
+          <BarChart data={featureAdoptionData} xKey="name" yKey="value" color="#8b5cf6" horizontal />
         </ChartCard>
       </div>
 
@@ -346,9 +267,7 @@ export default function InsightsPage() {
               ]}
             />
           ) : (
-            <div className="text-center text-zinc-500 py-8">
-              No web traffic data yet
-            </div>
+            <div className="text-center text-zinc-500 py-8">No web traffic data yet</div>
           )}
         </ChartCard>
 
@@ -362,9 +281,7 @@ export default function InsightsPage() {
               ]}
             />
           ) : (
-            <div className="text-center text-zinc-500 py-8">
-              No UTM data yet. Add ?utm_source=xxx to your URLs.
-            </div>
+            <div className="text-center text-zinc-500 py-8">No UTM data yet. Add ?utm_source=xxx to your URLs.</div>
           )}
         </ChartCard>
       </div>

@@ -1,13 +1,14 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useMemo } from 'react';
 import PageHeader from '@/components/layout/PageHeader';
 import StatCard from '@/components/cards/StatCard';
 import ChartCard from '@/components/cards/ChartCard';
 import BarChart from '@/components/charts/BarChart';
 import PieChart from '@/components/charts/PieChart';
 import DataTable from '@/components/charts/DataTable';
-import LoadingSpinner from '@/components/ui/LoadingSpinner';
+import { SkeletonPage } from '@/components/ui/Skeleton';
+import { useAnalytics } from '@/hooks/useAnalytics';
 
 interface EmailTypeStats {
   sent: number;
@@ -55,52 +56,21 @@ const EMAIL_TYPE_LABELS: Record<string, string> = {
 
 export default function EmailCampaignsPage() {
   const [dateRange, setDateRange] = useState('30d');
-  const [stats, setStats] = useState<EmailStats | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [lastUpdated, setLastUpdated] = useState<string>('');
 
-  useEffect(() => {
-    async function fetchStats() {
-      setLoading(true);
-      setError(null);
-      
-      // Convert dateRange to days
-      const daysMap: Record<string, number> = {
-        '7d': 7,
-        '30d': 30,
-        '90d': 90,
-      };
-      const days = daysMap[dateRange] || 30;
+  const daysMap: Record<string, string> = {
+    '7d': '7',
+    '30d': '30',
+    '90d': '90',
+  };
+  const days = daysMap[dateRange] || '30';
 
-      try {
-        const res = await fetch(`/api/metrics/emails?days=${days}`);
-        const data = await res.json();
-        
-        if (data.error) {
-          setError(data.error);
-          return;
-        }
-        
-        setStats(data);
-        setLastUpdated(data.lastUpdated);
-      } catch (err) {
-        console.error('Failed to fetch email stats:', err);
-        setError('Failed to load email campaign data');
-      } finally {
-        setLoading(false);
-      }
-    }
+  const { data: stats, isLoading, isRefreshing, error, lastUpdated } = useAnalytics<EmailStats>(
+    '/api/metrics/emails',
+    { days }
+  );
 
-    fetchStats();
-  }, [dateRange]);
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-96">
-        <LoadingSpinner size="lg" />
-      </div>
-    );
+  if (isLoading) {
+    return <SkeletonPage statCards={6} statCardCols="grid-cols-1 md:grid-cols-6" chartCards={2} />;
   }
 
   if (error) {
@@ -117,14 +87,14 @@ export default function EmailCampaignsPage() {
   // Safely extract stats with defaults
   const totals = stats?.totals ?? { sent: 0, converted: 0, overallConversionRate: 0 };
   const byEmailType = stats?.by_email_type ?? {};
-  
+
   // Transform data for charts with null-safe handling
-  const byTypeData = Object.entries(byEmailType).map(([type, data]) => {
+  const byTypeData = useMemo(() => Object.entries(byEmailType).map(([type, data]) => {
     const sent = data?.sent ?? 0;
     const delivered = data?.delivered ?? 0;
     const opened = data?.opened ?? 0;
     const clicked = data?.clicked ?? 0;
-    
+
     return {
       name: EMAIL_TYPE_LABELS[type] || type,
       type,
@@ -139,7 +109,7 @@ export default function EmailCampaignsPage() {
       openRate: delivered > 0 ? Math.round((opened / delivered) * 100 * 10) / 10 : 0,
       clickRate: delivered > 0 ? Math.round((clicked / delivered) * 100 * 10) / 10 : 0,
     };
-  });
+  }), [byEmailType]);
 
   const conversionData = byTypeData.map((item) => ({
     name: item.name,
@@ -155,7 +125,7 @@ export default function EmailCampaignsPage() {
     type: item.name,
     rate: item.conversionRate,
   }));
-  
+
   // Calculate overall open and click rates
   const totalDelivered = byTypeData.reduce((sum, item) => sum + item.delivered, 0);
   const totalOpened = byTypeData.reduce((sum, item) => sum + item.opened, 0);
@@ -177,13 +147,14 @@ export default function EmailCampaignsPage() {
   }));
 
   return (
-    <div>
+    <div className="animate-in fade-in duration-300">
       <PageHeader
         title="Email Campaigns"
         subtitle="Track email sends and conversion attribution"
         dateRange={dateRange}
         onDateRangeChange={setDateRange}
         lastUpdated={lastUpdated}
+        isRefreshing={isRefreshing}
       />
 
       {/* Warning banner if data couldn't be loaded */}
@@ -200,17 +171,17 @@ export default function EmailCampaignsPage() {
 
       {/* Summary Stats */}
       <div className="grid grid-cols-1 md:grid-cols-6 gap-6 mb-8">
-        <StatCard 
-          title="Emails Sent" 
-          value={totals.sent ?? 0} 
+        <StatCard
+          title="Emails Sent"
+          value={totals.sent ?? 0}
           icon={
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
             </svg>
           }
         />
-        <StatCard 
-          title="Conversions" 
+        <StatCard
+          title="Conversions"
           value={totals.converted ?? 0}
           icon={
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -218,8 +189,8 @@ export default function EmailCampaignsPage() {
             </svg>
           }
         />
-        <StatCard 
-          title="Conversion Rate" 
+        <StatCard
+          title="Conversion Rate"
           value={(totals.overallConversionRate ?? 0) / 100}
           format="percentage"
           icon={
@@ -228,8 +199,8 @@ export default function EmailCampaignsPage() {
             </svg>
           }
         />
-        <StatCard 
-          title="Campaign Types" 
+        <StatCard
+          title="Campaign Types"
           value={Object.keys(byEmailType).length}
           icon={
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -237,8 +208,8 @@ export default function EmailCampaignsPage() {
             </svg>
           }
         />
-        <StatCard 
-          title="Open Rate" 
+        <StatCard
+          title="Open Rate"
           value={overallOpenRate}
           format="percentage"
           icon={
@@ -248,8 +219,8 @@ export default function EmailCampaignsPage() {
             </svg>
           }
         />
-        <StatCard 
-          title="Click Rate" 
+        <StatCard
+          title="Click Rate"
           value={overallClickRate}
           format="percentage"
           icon={
@@ -273,10 +244,10 @@ export default function EmailCampaignsPage() {
         </ChartCard>
         <ChartCard title="Conversion Rate by Campaign" subtitle="Performance comparison">
           {conversionRateData.length > 0 ? (
-            <BarChart 
-              data={conversionRateData} 
-              xKey="type" 
-              yKey="rate" 
+            <BarChart
+              data={conversionRateData}
+              xKey="type"
+              yKey="rate"
               horizontal
               color="#22c55e"
             />
@@ -292,8 +263,8 @@ export default function EmailCampaignsPage() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <ChartCard title="Conversions by Campaign" subtitle="Distribution of attributed conversions">
           {conversionData.some(d => d.value > 0) ? (
-            <PieChart 
-              data={conversionData.filter(d => d.value > 0)} 
+            <PieChart
+              data={conversionData.filter(d => d.value > 0)}
               colors={['#8b5cf6', '#06b6d4', '#22c55e', '#f59e0b', '#ef4444']}
             />
           ) : (
@@ -336,7 +307,7 @@ export default function EmailCampaignsPage() {
           <div className="text-sm text-zinc-400">
             <p className="font-medium text-zinc-300 mb-1">Attribution Window</p>
             <p>
-              Conversions are attributed to emails sent within 30 days of a purchase. 
+              Conversions are attributed to emails sent within 30 days of a purchase.
               If a user receives multiple emails before converting, all are credited.
             </p>
           </div>

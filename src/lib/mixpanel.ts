@@ -1,5 +1,6 @@
 import { MixpanelEvent } from '@/types/mixpanel';
 import { unstable_cache } from 'next/cache';
+import { getCachedEvents, setCachedEvents } from '@/lib/event-cache';
 
 const CACHE_REVALIDATE_SECONDS = 300; // 5 minutes
 
@@ -171,12 +172,12 @@ export function getUniqueUsersByType(
   return filteredUsers;
 }
 
-async function fetchMixpanelEventsInternal(
+async function fetchMixpanelEventsFromAPI(
   fromDate: string,
   toDate: string
 ): Promise<MixpanelEvent[]> {
   const MIXPANEL_API_SECRET = process.env.MIXPANEL_API_SECRET;
-  
+
   if (!MIXPANEL_API_SECRET) {
     throw new Error('MIXPANEL_API_SECRET environment variable is not set');
   }
@@ -185,7 +186,7 @@ async function fetchMixpanelEventsInternal(
   const auth = btoa(`${MIXPANEL_API_SECRET}:`);
 
   const url = `https://data.mixpanel.com/api/2.0/export?from_date=${fromDate}&to_date=${toDate}`;
-  
+
   const response = await fetch(url, {
     headers: {
       Authorization: `Basic ${auth}`,
@@ -206,12 +207,30 @@ async function fetchMixpanelEventsInternal(
   return events;
 }
 
-// Wrap with unstable_cache for additional server-side caching
-export const fetchMixpanelEvents = unstable_cache(
-  fetchMixpanelEventsInternal,
+const fetchMixpanelEventsInternal = unstable_cache(
+  fetchMixpanelEventsFromAPI,
   ['mixpanel-events'],
   { revalidate: CACHE_REVALIDATE_SECONDS, tags: ['mixpanel'] }
 );
+
+// Shared event cache: first route to request a date range fetches from Mixpanel;
+// subsequent routes for the same range get it from the in-memory cache instantly.
+export async function fetchMixpanelEvents(
+  fromDate: string,
+  toDate: string
+): Promise<MixpanelEvent[]> {
+  // Check in-memory cache first (shared across routes within same invocation)
+  const cached = getCachedEvents(fromDate, toDate);
+  if (cached) return cached;
+
+  // Fetch via unstable_cache (Next.js server-side cache)
+  const events = await fetchMixpanelEventsInternal(fromDate, toDate);
+
+  // Store in the in-memory cache for other routes in the same request
+  setCachedEvents(fromDate, toDate, events);
+
+  return events;
+}
 
 export function filterEventsByType(
   events: MixpanelEvent[],
