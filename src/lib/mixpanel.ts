@@ -1,5 +1,5 @@
 import { MixpanelEvent } from '@/types/mixpanel';
-import { getCachedEvents, setCachedEvents } from '@/lib/event-cache';
+import { getCachedEventsAsync, setCachedEventsAsync, acquireLock, releaseLock } from '@/lib/event-cache';
 
 const CACHE_REVALIDATE_SECONDS = 300; // 5 minutes
 
@@ -205,37 +205,37 @@ async function fetchMixpanelEventsFromAPI(
   return events;
 }
 
-const pendingRequests = new Map<string, Promise<MixpanelEvent[]>>();
-
 export async function fetchMixpanelEvents(
   fromDate: string,
   toDate: string
 ): Promise<MixpanelEvent[]> {
   const cacheKey = `${fromDate}:${toDate}`;
 
-  // Check in-memory cache first (shared across routes within same invocation)
-  const cached = getCachedEvents(fromDate, toDate);
+  // 1. Ask the Event Cache for data (checks memory, waits for locks, checks disk)
+  const cached = await getCachedEventsAsync(fromDate, toDate);
   if (cached) return cached;
 
-  // Deduplicate in-flight requests that ask for the same date range
-  if (pendingRequests.has(cacheKey)) {
-    return pendingRequests.get(cacheKey)!;
+  // 2. Try to acquire the system file lock for this date range
+  const hasLock = acquireLock(fromDate, toDate);
+
+  if (!hasLock) {
+    // If we missed the lock right after checking cache, wait a tiny bit and retry the async cache getter
+    await new Promise(r => setTimeout(r, 1000));
+    const retryCached = await getCachedEventsAsync(fromDate, toDate);
+    if (retryCached) return retryCached;
+    throw new Error('Mixpanel fetch timed out waiting for file lock.');
   }
 
-  // Fetch directly from API, passing the promise around to prevent rate limits
-  const requestPromise = fetchMixpanelEventsFromAPI(fromDate, toDate)
-    .then((events) => {
-      setCachedEvents(fromDate, toDate, events);
-      pendingRequests.delete(cacheKey);
-      return events;
-    })
-    .catch((err) => {
-      pendingRequests.delete(cacheKey);
-      throw err;
-    });
-
-  pendingRequests.set(cacheKey, requestPromise);
-  return requestPromise;
+  // 3. We have the lock; fetch from Mixpanel
+  try {
+    const events = await fetchMixpanelEventsFromAPI(fromDate, toDate);
+    await setCachedEventsAsync(fromDate, toDate, events);
+    releaseLock(fromDate, toDate);
+    return events;
+  } catch (err) {
+    releaseLock(fromDate, toDate);
+    throw err;
+  }
 }
 
 export function filterEventsByType(
