@@ -190,8 +190,7 @@ async function fetchMixpanelEventsFromAPI(
     headers: {
       Authorization: `Basic ${auth}`,
     },
-    // Use Next.js fetch cache with revalidation
-    next: { revalidate: CACHE_REVALIDATE_SECONDS },
+    cache: 'no-store', // Manually handle caching to avoid 2MB limit restrictions
   });
 
   if (!response.ok) {
@@ -206,21 +205,37 @@ async function fetchMixpanelEventsFromAPI(
   return events;
 }
 
+const pendingRequests = new Map<string, Promise<MixpanelEvent[]>>();
+
 export async function fetchMixpanelEvents(
   fromDate: string,
   toDate: string
 ): Promise<MixpanelEvent[]> {
+  const cacheKey = `${fromDate}:${toDate}`;
+
   // Check in-memory cache first (shared across routes within same invocation)
   const cached = getCachedEvents(fromDate, toDate);
   if (cached) return cached;
 
-  // Fetch directly from API, circumventing unstable_cache to avoid the 2MB limit
-  const events = await fetchMixpanelEventsFromAPI(fromDate, toDate);
+  // Deduplicate in-flight requests that ask for the same date range
+  if (pendingRequests.has(cacheKey)) {
+    return pendingRequests.get(cacheKey)!;
+  }
 
-  // Store in the in-memory cache for other routes in the same request
-  setCachedEvents(fromDate, toDate, events);
+  // Fetch directly from API, passing the promise around to prevent rate limits
+  const requestPromise = fetchMixpanelEventsFromAPI(fromDate, toDate)
+    .then((events) => {
+      setCachedEvents(fromDate, toDate, events);
+      pendingRequests.delete(cacheKey);
+      return events;
+    })
+    .catch((err) => {
+      pendingRequests.delete(cacheKey);
+      throw err;
+    });
 
-  return events;
+  pendingRequests.set(cacheKey, requestPromise);
+  return requestPromise;
 }
 
 export function filterEventsByType(
