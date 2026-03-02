@@ -1,5 +1,5 @@
 import { MixpanelEvent } from '@/types/mixpanel';
-import { getCachedEventsAsync, setCachedEventsAsync, acquireLock, releaseLock } from '@/lib/event-cache';
+import { getCachedEventsAsync, setCachedEventsAsync, acquireLock, releaseLock, getStaleCachedEvents } from '@/lib/event-cache';
 
 const CACHE_REVALIDATE_SECONDS = 300; // 5 minutes
 
@@ -223,19 +223,35 @@ export async function fetchMixpanelEvents(
     await new Promise(r => setTimeout(r, 1000));
     const retryCached = await getCachedEventsAsync(fromDate, toDate);
     if (retryCached) return retryCached;
-    throw new Error('Mixpanel fetch timed out waiting for file lock.');
+    console.warn(`Mixpanel fetch timed out waiting for lock ${cacheKey}, falling back to stale data.`);
   }
 
   // 3. We have the lock; fetch from Mixpanel
-  try {
-    const events = await fetchMixpanelEventsFromAPI(fromDate, toDate);
-    await setCachedEventsAsync(fromDate, toDate, events);
-    releaseLock(fromDate, toDate);
-    return events;
-  } catch (err) {
-    releaseLock(fromDate, toDate);
-    throw err;
+  let events: MixpanelEvent[] | null = null;
+  if (hasLock) {
+    try {
+      events = await fetchMixpanelEventsFromAPI(fromDate, toDate);
+      await setCachedEventsAsync(fromDate, toDate, events);
+    } catch (err) {
+      console.error(`Mixpanel API fetch failed for ${cacheKey}:`, err);
+      // Fall through to grab stale data instead of crashing the dashboard
+    } finally {
+      releaseLock(fromDate, toDate);
+    }
   }
+
+  if (events) return events;
+
+  // 4. Fallback: serve stale data ignoring TTL if Mixpanel returns 429
+  const stale = await getStaleCachedEvents(fromDate, toDate);
+  if (stale) {
+    console.warn(`Serving ${stale.length} stale events for ${cacheKey} due to API rate limits or timeout.`);
+    return stale;
+  }
+
+  // 5. Ultimate Fallback: Return empty so the page can still render '0' stats instead of throwing a 500 error
+  console.warn(`No stale cache available for ${cacheKey}. Returning empty events list.`);
+  return [];
 }
 
 export function filterEventsByType(

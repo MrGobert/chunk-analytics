@@ -62,6 +62,23 @@ export async function getCachedEventsAsync(fromDate: string, toDate: string): Pr
   return null;
 }
 
+export async function getStaleCachedEvents(fromDate: string, toDate: string): Promise<MixpanelEvent[] | null> {
+  const key = buildKey(fromDate, toDate);
+  const diskFile = getCacheFilePath(key);
+
+  // Return disk cache regardless of TTL, to prevent page crashes during 429 rate limits
+  if (fs.existsSync(diskFile)) {
+    try {
+      const data = fs.readFileSync(diskFile, 'utf8');
+      const parsed = JSON.parse(data) as MixpanelEvent[];
+      return parsed;
+    } catch (e) {
+      console.error('Error reading STALE disk cache', e);
+    }
+  }
+  return null;
+}
+
 export function acquireLock(fromDate: string, toDate: string): boolean {
   const key = buildKey(fromDate, toDate);
   const lockFile = getLockFilePath(key);
