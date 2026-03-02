@@ -30,7 +30,7 @@ export default function UsersPage() {
 
   if (!metrics) {
     return (
-      <div className="text-center text-zinc-400 py-20">
+      <div className="text-center text-zinc-500 py-20">
         Failed to load metrics. Please try again.
       </div>
     );

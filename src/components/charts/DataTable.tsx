@@ -47,7 +47,7 @@ export default function DataTable<T extends Record<string, unknown>>({
         <div className="flex justify-end mb-3">
           <button
             onClick={handleExport}
-            className="text-xs text-zinc-400 hover:text-white transition-colors"
+            className="text-xs text-zinc-500 hover:text-foreground transition-colors"
           >
             Export CSV
           </button>
@@ -55,12 +55,12 @@ export default function DataTable<T extends Record<string, unknown>>({
       )}
       <div className="flex-1 overflow-auto">
         <table className="w-full text-sm">
-          <thead className="sticky top-0 bg-zinc-900">
+          <thead className="sticky top-0 bg-primary">
             <tr className="border-b border-zinc-800">
               {columns.map((col) => (
                 <th
                   key={String(col.key)}
-                  className="text-left py-3 px-4 text-zinc-400 font-medium"
+                  className="text-left py-3 px-4 text-zinc-500 font-medium"
                 >
                   {col.header}
                 </th>
@@ -69,9 +69,9 @@ export default function DataTable<T extends Record<string, unknown>>({
           </thead>
           <tbody>
             {data.map((row, index) => (
-              <tr key={index} className="border-b border-zinc-800/50 hover:bg-zinc-800/30">
+              <tr key={index} className="border-b border-zinc-800/50 hover:bg-primary/30">
                 {columns.map((col) => (
-                  <td key={String(col.key)} className="py-3 px-4 text-white">
+                  <td key={String(col.key)} className="py-3 px-4 text-foreground">
                     {col.render ? col.render(row[col.key], row) : String(row[col.key] ?? '')}
                   </td>
                 ))}

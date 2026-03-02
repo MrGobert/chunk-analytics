@@ -43,7 +43,7 @@ export default function OnboardingPage() {
 
   if (!metrics) {
     return (
-      <div className="text-center text-zinc-400 py-20">
+      <div className="text-center text-zinc-500 py-20">
         Failed to load metrics. Please try again.
       </div>
     );
@@ -72,8 +72,8 @@ export default function OnboardingPage() {
             onClick={() => setPlatformGroup(tab.key)}
             className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
               platformGroup === tab.key
-                ? 'bg-violet-600 text-white'
-                : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200'
+                ? 'bg-violet-600 text-foreground'
+                : 'bg-primary text-zinc-500 hover:bg-zinc-700 hover:text-zinc-200'
             }`}
           >
             <div>{tab.label}</div>

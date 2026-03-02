@@ -1,15 +1,24 @@
 @import "tailwindcss";
 
 :root {
-  --background: #09090b;
-  --foreground: #fafafa;
+  /* Preset C — "Brutalist Signal" */
+  --background: #F5F3EE; /* Off-white */
+  --foreground: #111111; /* Black text */
+  --primary: #E8E4DD; /* Paper surface */
+  --accent: #E63B2E; /* Signal Red */
+  --surface-dark: #111111; /* Control room dark */
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-primary: var(--primary);
+  --color-accent: var(--accent);
+  --color-surface-dark: var(--surface-dark);
+
+  --font-sans: var(--font-space-grotesk);
+  --font-mono: var(--font-space-mono);
+  --font-serif: var(--font-dm-serif);
 }
 
 body {
@@ -25,38 +34,69 @@ body {
 }
 
 ::-webkit-scrollbar-track {
-  background: #18181b;
+  background: var(--primary);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #3f3f46;
+  background: #A09E99; /* Neutral gray matching paper */
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #52525b;
+  background: var(--foreground);
 }
 
-/* Fade-in animation for page transitions */
-@keyframes fadeIn {
-  from { opacity: 0; transform: translateY(4px); }
-  to { opacity: 1; transform: translateY(0); }
+/* Add noise overlay */
+.noise-overlay {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 50;
+  opacity: 0.05;
 }
 
-.animate-in {
-  animation-fill-mode: both;
+/* Base button micro-interactions */
+.btn-magnetic {
+  transition: transform 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  position: relative;
+  overflow: hidden;
 }
 
-.fade-in {
-  animation-name: fadeIn;
+.btn-magnetic:hover {
+  transform: scale(1.03);
 }
 
-.duration-200 {
-  animation-duration: 200ms;
+.btn-hover-slide {
+  position: relative;
+  overflow: hidden;
+  z-index: 1;
 }
 
-.duration-300 {
-  animation-duration: 300ms;
+.btn-hover-slide::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-color: var(--accent);
+  transform: translateY(100%);
+  transition: transform 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  z-index: -1;
+}
+
+.btn-hover-slide:hover::after {
+  transform: translateY(0);
+}
+
+.btn-hover-slide:hover {
+  color: #fff;
+}
+
+/* Lift effect for links/icons */
+.hover-lift {
+  transition: transform 0.2s ease-out;
+}
+
+.hover-lift:hover {
+  transform: translateY(-1px);
 }
 
 /* Chart tooltip fix */

@@ -89,7 +89,7 @@ export default function EmailCampaignsPage() {
   const byEmailType = stats?.by_email_type ?? {};
 
   // Transform data for charts with null-safe handling
-  const byTypeData = useMemo(() => Object.entries(byEmailType).map(([type, data]) => {
+  const byTypeData = useMemo(() => Object.entries(byEmailType || {}).map(([type, data]) => {
     const sent = data?.sent ?? 0;
     const delivered = data?.delivered ?? 0;
     const opened = data?.opened ?? 0;
@@ -299,12 +299,12 @@ export default function EmailCampaignsPage() {
       </div>
 
       {/* Attribution Info */}
-      <div className="mt-8 p-4 bg-zinc-900 rounded-lg border border-zinc-800">
+      <div className="mt-8 p-4 bg-primary rounded-lg border border-zinc-800">
         <div className="flex items-start gap-3">
           <svg className="w-5 h-5 text-zinc-500 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
-          <div className="text-sm text-zinc-400">
+          <div className="text-sm text-zinc-500">
             <p className="font-medium text-zinc-300 mb-1">Attribution Window</p>
             <p>
               Conversions are attributed to emails sent within 30 days of a purchase.

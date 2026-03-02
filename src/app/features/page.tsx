@@ -38,7 +38,7 @@ export default function FeaturesPage() {
 
   if (!metrics) {
     return (
-      <div className="text-center text-zinc-400 py-20">
+      <div className="text-center text-zinc-500 py-20">
         Failed to load metrics. Please try again.
       </div>
     );
@@ -93,7 +93,7 @@ export default function FeaturesPage() {
                 <div className="space-y-2">
                   {segment.features.slice(0, 5).map((f) => (
                     <div key={f.feature} className="flex items-center justify-between">
-                      <span className="text-sm text-zinc-400 truncate max-w-[150px]">
+                      <span className="text-sm text-zinc-500 truncate max-w-[150px]">
                         {f.feature}
                       </span>
                       <div className="flex items-center gap-2">
@@ -104,7 +104,7 @@ export default function FeaturesPage() {
                             backgroundColor: FEATURE_COLORS[f.feature] || '#8b5cf6',
                           }}
                         />
-                        <span className="text-sm text-white font-medium w-12 text-right">
+                        <span className="text-sm text-foreground font-medium w-12 text-right">
                           {f.count}
                         </span>
                       </div>

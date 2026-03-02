@@ -62,11 +62,11 @@ export async function GET(request: NextRequest) {
     const totalConversationsShared = countEvents(shareCreationEvents, 'Conversation_Shared') + countEvents(shareCreationEvents, 'Conversation_Published');
     const totalResearchShared = countEvents(shareCreationEvents, 'Research_Report_Shared') + countEvents(shareCreationEvents, 'Research_Published');
     const totalCollectionsShared = countEvents(shareCreationEvents, 'Collection_Shared');
-    
+
     const totalSharedNoteViews = countEvents(sharedViewEvents, 'Shared_Note_Viewed');
     const totalSharedConversationViews = countEvents(sharedViewEvents, 'Shared_Conversation_Viewed');
     const totalSharedResearchViews = countEvents(sharedViewEvents, 'Shared_Research_Viewed');
-    
+
     const totalSaveToChunkClicks = countEvents(saveClickEvents, 'Save_To_Chunk_Clicked');
 
     // Previous period for trends
@@ -90,13 +90,13 @@ export async function GET(request: NextRequest) {
     const noteSharedTrend = calculateTrend(totalNotesShared, countEvents(prevShareCreation, 'Note_Shared'));
     const conversationSharedTrend = calculateTrend(totalConversationsShared, countEvents(prevShareCreation, 'Conversation_Shared'));
     const researchSharedTrend = calculateTrend(totalResearchShared, countEvents(prevShareCreation, 'Research_Report_Shared'));
-    
-    const prevTotalViews = countEvents(prevSharedViews, 'Shared_Note_Viewed') + 
-                          countEvents(prevSharedViews, 'Shared_Conversation_Viewed') + 
-                          countEvents(prevSharedViews, 'Shared_Research_Viewed');
+
+    const prevTotalViews = countEvents(prevSharedViews, 'Shared_Note_Viewed') +
+      countEvents(prevSharedViews, 'Shared_Conversation_Viewed') +
+      countEvents(prevSharedViews, 'Shared_Research_Viewed');
     const currentTotalViews = totalSharedNoteViews + totalSharedConversationViews + totalSharedResearchViews;
     const sharedViewsTrend = calculateTrend(currentTotalViews, prevTotalViews);
-    
+
     const saveClickTrend = calculateTrend(totalSaveToChunkClicks, countEvents(prevSaveClicks, 'Save_To_Chunk_Clicked'));
 
     // Calculated metrics
@@ -145,23 +145,23 @@ export async function GET(request: NextRequest) {
 
     const funnelTop = shareCreated || 1;
     const sharingFunnel = [
-      { 
-        name: 'Shared', 
-        count: shareCreated, 
-        percentage: 100, 
-        dropoff: 0 
+      {
+        name: 'Shared',
+        count: shareCreated,
+        percentage: 100,
+        dropoff: 0
       },
-      { 
-        name: 'Viewed', 
-        count: shareViewed, 
-        percentage: Math.round((shareViewed / funnelTop) * 100 * 10) / 10,
-        dropoff: shareCreated > 0 ? Math.round(Math.max(0, ((shareCreated - shareViewed) / shareCreated) * 100) * 10) / 10 : 0
+      {
+        name: 'Viewed',
+        count: shareViewed,
+        percentage: Math.min(100, Math.round((shareViewed / funnelTop) * 100 * 10) / 10),
+        dropoff: shareCreated > 0 ? Math.min(100, Math.round(Math.max(0, ((shareCreated - shareViewed) / shareCreated) * 100) * 10) / 10) : 0
       },
-      { 
-        name: 'Save Clicked', 
-        count: saveClicked, 
-        percentage: Math.round((saveClicked / funnelTop) * 100 * 10) / 10,
-        dropoff: shareViewed > 0 ? Math.round(Math.max(0, ((shareViewed - saveClicked) / shareViewed) * 100) * 10) / 10 : 0
+      {
+        name: 'Save Clicked',
+        count: saveClicked,
+        percentage: Math.min(100, Math.round((saveClicked / funnelTop) * 100 * 10) / 10),
+        dropoff: shareViewed > 0 ? Math.min(100, Math.round(Math.max(0, ((shareViewed - saveClicked) / shareViewed) * 100) * 10) / 10) : 0
       },
     ];
 
@@ -175,21 +175,21 @@ export async function GET(request: NextRequest) {
 
     // View-to-share ratio by type
     const viewToShareByType = [
-      { 
-        type: 'Notes', 
-        shares: totalNotesShared, 
+      {
+        type: 'Notes',
+        shares: totalNotesShared,
         views: totalSharedNoteViews,
         ratio: totalNotesShared > 0 ? (totalSharedNoteViews / totalNotesShared) : 0
       },
-      { 
-        type: 'Conversations', 
-        shares: totalConversationsShared, 
+      {
+        type: 'Conversations',
+        shares: totalConversationsShared,
         views: totalSharedConversationViews,
         ratio: totalConversationsShared > 0 ? (totalSharedConversationViews / totalConversationsShared) : 0
       },
-      { 
-        type: 'Research', 
-        shares: totalResearchShared, 
+      {
+        type: 'Research',
+        shares: totalResearchShared,
         views: totalSharedResearchViews,
         ratio: totalResearchShared > 0 ? (totalSharedResearchViews / totalResearchShared) : 0
       },

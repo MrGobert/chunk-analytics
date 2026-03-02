@@ -6,7 +6,7 @@ interface SkeletonProps {
 function Skeleton({ className = '', style }: SkeletonProps) {
   return (
     <div
-      className={`animate-pulse rounded-lg bg-zinc-800/60 ${className}`}
+      className={`animate-pulse rounded-lg bg-primary/60 ${className}`}
       style={style}
     />
   );
@@ -14,7 +14,7 @@ function Skeleton({ className = '', style }: SkeletonProps) {
 
 export function SkeletonStatCard() {
   return (
-    <div className="rounded-xl bg-zinc-900 border border-zinc-800 p-4 sm:p-6">
+    <div className="rounded-xl bg-primary border border-zinc-800 p-4 sm:p-6">
       <div className="flex items-center justify-between mb-2">
         <Skeleton className="h-4 w-24" />
         <Skeleton className="h-5 w-5 rounded hidden sm:block" />
@@ -29,7 +29,7 @@ export function SkeletonStatCard() {
 
 export function SkeletonChartCard() {
   return (
-    <div className="rounded-xl bg-zinc-900 border border-zinc-800 p-4 sm:p-6">
+    <div className="rounded-xl bg-primary border border-zinc-800 p-4 sm:p-6">
       <div className="mb-3 sm:mb-4">
         <Skeleton className="h-5 w-40 mb-2" />
         <Skeleton className="h-3 w-56" />

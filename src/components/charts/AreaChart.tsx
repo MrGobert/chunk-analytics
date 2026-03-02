@@ -22,7 +22,7 @@ export default function AreaChart({
   data,
   xKey,
   yKey,
-  color = '#8b5cf6',
+  color = '#E63B2E',
   gradient = true,
 }: AreaChartProps) {
   const gradientId = `gradient-${yKey}`;
@@ -38,11 +38,12 @@ export default function AreaChart({
             </linearGradient>
           )}
         </defs>
-        <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
+        <CartesianGrid strokeDasharray="3 3" stroke="#d4d4d8" vertical={false} />
         <XAxis
           dataKey={xKey}
           stroke="#71717a"
           fontSize={12}
+          fontFamily="var(--font-mono)"
           tickLine={false}
           axisLine={false}
           tickFormatter={(value) => {
@@ -53,21 +54,22 @@ export default function AreaChart({
             return value;
           }}
         />
-        <YAxis stroke="#71717a" fontSize={12} tickLine={false} axisLine={false} />
+        <YAxis stroke="#71717a" fontSize={12} fontFamily="var(--font-mono)" tickLine={false} axisLine={false} />
         <Tooltip
           contentStyle={{
-            backgroundColor: '#18181b',
-            border: '1px solid #27272a',
-            borderRadius: '8px',
+            backgroundColor: '#E8E4DD',
+            border: '1px solid #d4d4d8',
+            borderRadius: '0',
+            fontFamily: 'var(--font-mono)',
           }}
-          labelStyle={{ color: '#a1a1aa' }}
-          itemStyle={{ color: '#fff' }}
+          labelStyle={{ color: '#71717a', fontWeight: 'bold' }}
+          itemStyle={{ color: '#111111' }}
         />
         <Area
           type="monotone"
           dataKey={yKey}
           stroke={color}
-          strokeWidth={2}
+          strokeWidth={3}
           fill={gradient ? `url(#${gradientId})` : color}
           fillOpacity={gradient ? 1 : 0.3}
         />

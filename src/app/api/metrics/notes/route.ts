@@ -91,12 +91,18 @@ export async function GET(request: NextRequest) {
 
     const notesFunnel = [
       { name: 'Created', count: createdCount, percentage: 100, dropoff: 0 },
-      { name: 'Saved', count: savedCount, percentage: Math.min(savedPct, 100),
-        dropoff: createdCount > 0 ? Math.max(0, ((createdCount - savedCount) / createdCount) * 100) : 0 },
-      { name: 'Published', count: publishedCount, percentage: publishedPct,
-        dropoff: savedCount > 0 ? Math.max(0, ((savedCount - publishedCount) / savedCount) * 100) : 0 },
-      { name: 'Shared', count: sharedCount, percentage: sharedPct,
-        dropoff: publishedCount > 0 ? Math.max(0, ((publishedCount - sharedCount) / publishedCount) * 100) : 0 },
+      {
+        name: 'Saved', count: savedCount, percentage: Math.min(savedPct, 100),
+        dropoff: createdCount > 0 ? Math.min(100, Math.max(0, ((createdCount - savedCount) / createdCount) * 100)) : 0
+      },
+      {
+        name: 'Published', count: publishedCount, percentage: Math.min(publishedPct, 100),
+        dropoff: savedCount > 0 ? Math.min(100, Math.max(0, ((savedCount - publishedCount) / savedCount) * 100)) : 0
+      },
+      {
+        name: 'Shared', count: sharedCount, percentage: Math.min(sharedPct, 100),
+        dropoff: publishedCount > 0 ? Math.min(100, Math.max(0, ((publishedCount - sharedCount) / publishedCount) * 100)) : 0
+      },
     ];
 
     // Daily activity
@@ -138,13 +144,13 @@ export async function GET(request: NextRequest) {
 
     // Note survival rate (created vs deleted ratio) - measures notes kept, not user retention
     const retentionRate = totalNotesCreated > 0
-      ? ((totalNotesCreated - totalNotesDeleted) / totalNotesCreated) * 100
+      ? Math.max(0, Math.min(100, ((totalNotesCreated - totalNotesDeleted) / totalNotesCreated) * 100))
       : 0;
     const retentionRateLabel = 'Note Survival Rate';
 
     // Document upload rate
     const documentUploadRate = totalNotesCreated > 0
-      ? (totalDocumentUploads / totalNotesCreated) * 100
+      ? Math.min(100, (totalDocumentUploads / totalNotesCreated) * 100)
       : 0;
 
     return NextResponse.json({

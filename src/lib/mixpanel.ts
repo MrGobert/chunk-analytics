@@ -1,5 +1,4 @@
 import { MixpanelEvent } from '@/types/mixpanel';
-import { unstable_cache } from 'next/cache';
 import { getCachedEvents, setCachedEvents } from '@/lib/event-cache';
 
 const CACHE_REVALIDATE_SECONDS = 300; // 5 minutes
@@ -31,12 +30,12 @@ const SUBSCRIBER_EVENTS = [
  */
 export function categorizeUsers(events: MixpanelEvent[]): Map<string, 'visitor' | 'authenticated' | 'subscriber'> {
   const userCategories = new Map<string, 'visitor' | 'authenticated' | 'subscriber'>();
-  
+
   // First pass: identify all users and their highest category
   for (const event of events) {
     const userId = event.properties.distinct_id;
     const currentCategory = userCategories.get(userId) || 'visitor';
-    
+
     // Check for subscriber indicators (highest priority)
     if (
       SUBSCRIBER_EVENTS.includes(event.event) ||
@@ -46,7 +45,7 @@ export function categorizeUsers(events: MixpanelEvent[]): Map<string, 'visitor' 
       userCategories.set(userId, 'subscriber');
       continue;
     }
-    
+
     // Check for authenticated user indicators (if not already subscriber)
     if (currentCategory !== 'subscriber') {
       if (
@@ -59,13 +58,13 @@ export function categorizeUsers(events: MixpanelEvent[]): Map<string, 'visitor' 
         continue;
       }
     }
-    
+
     // Default to visitor if not already categorized
     if (!userCategories.has(userId)) {
       userCategories.set(userId, 'visitor');
     }
   }
-  
+
   return userCategories;
 }
 
@@ -77,13 +76,13 @@ export function filterByUserType(
   userType: UserType
 ): MixpanelEvent[] {
   if (userType === 'all') return events;
-  
+
   const userCategories = categorizeUsers(events);
-  
+
   return events.filter((event) => {
     const userId = event.properties.distinct_id;
     const category = userCategories.get(userId) || 'visitor';
-    
+
     switch (userType) {
       case 'authenticated':
         // Authenticated includes subscribers (subscribers are also authenticated)
@@ -108,11 +107,11 @@ export function getUserCountsByType(events: MixpanelEvent[]): {
   subscribers: number;
 } {
   const userCategories = categorizeUsers(events);
-  
+
   let visitors = 0;
   let authenticated = 0;
   let subscribers = 0;
-  
+
   for (const category of userCategories.values()) {
     switch (category) {
       case 'visitor':
@@ -126,7 +125,7 @@ export function getUserCountsByType(events: MixpanelEvent[]): {
         break;
     }
   }
-  
+
   return {
     total: userCategories.size,
     visitors,
@@ -145,10 +144,10 @@ export function getUniqueUsersByType(
   if (userType === 'all') {
     return new Set(events.map((e) => e.properties.distinct_id));
   }
-  
+
   const userCategories = categorizeUsers(events);
   const filteredUsers = new Set<string>();
-  
+
   for (const [userId, category] of userCategories.entries()) {
     switch (userType) {
       case 'authenticated':
@@ -168,7 +167,7 @@ export function getUniqueUsersByType(
         break;
     }
   }
-  
+
   return filteredUsers;
 }
 
@@ -207,14 +206,6 @@ async function fetchMixpanelEventsFromAPI(
   return events;
 }
 
-const fetchMixpanelEventsInternal = unstable_cache(
-  fetchMixpanelEventsFromAPI,
-  ['mixpanel-events'],
-  { revalidate: CACHE_REVALIDATE_SECONDS, tags: ['mixpanel'] }
-);
-
-// Shared event cache: first route to request a date range fetches from Mixpanel;
-// subsequent routes for the same range get it from the in-memory cache instantly.
 export async function fetchMixpanelEvents(
   fromDate: string,
   toDate: string
@@ -223,8 +214,8 @@ export async function fetchMixpanelEvents(
   const cached = getCachedEvents(fromDate, toDate);
   if (cached) return cached;
 
-  // Fetch via unstable_cache (Next.js server-side cache)
-  const events = await fetchMixpanelEventsInternal(fromDate, toDate);
+  // Fetch directly from API, circumventing unstable_cache to avoid the 2MB limit
+  const events = await fetchMixpanelEventsFromAPI(fromDate, toDate);
 
   // Store in the in-memory cache for other routes in the same request
   setCachedEvents(fromDate, toDate, events);
@@ -244,34 +235,34 @@ export function filterByPlatform(
   platform: string
 ): MixpanelEvent[] {
   if (platform === 'all') return events;
-  
+
   return events.filter((e) => {
     const props = e.properties;
     // Check various platform indicators
     const eventPlatform = props.platform || props.$os || '';
     const mpLib = props.mp_lib || '';
-    
+
     if (platform === 'web') {
       // Web events use mixpanel-browser library OR have platform: 'web'
       return mpLib === 'web' || props.platform === 'web';
     }
-    
+
     if (platform === 'iOS') {
       return eventPlatform === 'iOS' || props.$os === 'iOS' || props.$os === 'iPadOS';
     }
-    
+
     if (platform === 'iPadOS') {
       return props.$os === 'iPadOS';
     }
-    
+
     if (platform === 'macOS') {
       return eventPlatform === 'macOS' || props.$os === 'macOS';
     }
-    
+
     if (platform === 'visionOS') {
       return eventPlatform === 'visionOS' || props.$os === 'visionOS';
     }
-    
+
     return false;
   });
 }

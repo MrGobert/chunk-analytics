@@ -66,7 +66,7 @@ export default function InsightsPage() {
 
   if (!metrics) {
     return (
-      <div className="text-center text-zinc-400 py-20">
+      <div className="text-center text-zinc-500 py-20">
         Failed to load metrics. Please try again.
       </div>
     );
@@ -174,14 +174,14 @@ export default function InsightsPage() {
           <div className="space-y-4">
             {retentionData.map((item) => (
               <div key={item.name} className="flex items-center gap-4">
-                <div className="w-20 text-sm text-zinc-400">{item.name}</div>
-                <div className="flex-1 bg-zinc-800 rounded-full h-4 overflow-hidden">
+                <div className="w-20 text-sm text-zinc-500">{item.name}</div>
+                <div className="flex-1 bg-primary rounded-full h-4 overflow-hidden">
                   <div
                     className="h-full bg-gradient-to-r from-violet-500 to-indigo-500 rounded-full transition-all duration-500"
                     style={{ width: `${Math.min(item.value, 100)}%` }}
                   />
                 </div>
-                <div className="w-16 text-right text-sm font-medium text-white">
+                <div className="w-16 text-right text-sm font-medium text-foreground">
                   {item.value.toFixed(1)}%
                 </div>
               </div>
@@ -228,18 +228,18 @@ export default function InsightsPage() {
                   <div className="w-3 h-3 rounded-full bg-indigo-500" />
                   <span className="text-sm text-zinc-300">Free Users</span>
                 </div>
-                <span className="text-lg font-semibold text-white">{metrics.userBreakdown.free.toLocaleString()}</span>
+                <span className="text-lg font-semibold text-foreground">{metrics.userBreakdown.free.toLocaleString()}</span>
               </div>
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <div className="w-3 h-3 rounded-full bg-emerald-500" />
                   <span className="text-sm text-zinc-300">Paid Users</span>
                 </div>
-                <span className="text-lg font-semibold text-white">{metrics.userBreakdown.paid.toLocaleString()}</span>
+                <span className="text-lg font-semibold text-foreground">{metrics.userBreakdown.paid.toLocaleString()}</span>
               </div>
               <div className="pt-3 border-t border-zinc-700">
                 <div className="flex items-center justify-between">
-                  <span className="text-sm text-zinc-400">Conversion Rate</span>
+                  <span className="text-sm text-zinc-500">Conversion Rate</span>
                   <span className="text-lg font-semibold text-emerald-400">{metrics.userBreakdown.paidPercentage.toFixed(1)}%</span>
                 </div>
               </div>
@@ -287,32 +287,32 @@ export default function InsightsPage() {
       </div>
 
       {/* Quick Stats Summary */}
-      <div className="bg-zinc-900 rounded-xl p-6 border border-zinc-800">
-        <h3 className="text-lg font-semibold text-white mb-4">Quick Health Check</h3>
+      <div className="bg-primary rounded-xl p-6 border border-zinc-800">
+        <h3 className="text-lg font-semibold text-foreground mb-4">Quick Health Check</h3>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
           <div>
-            <div className="text-sm text-zinc-400 mb-1">Engagement</div>
+            <div className="text-sm text-zinc-500 mb-1">Engagement</div>
             <div className={`text-2xl font-bold ${metrics.dauMauRatio >= 0.2 ? 'text-emerald-400' : metrics.dauMauRatio >= 0.1 ? 'text-yellow-400' : 'text-red-400'}`}>
               {metrics.dauMauRatio >= 0.2 ? '🟢 Good' : metrics.dauMauRatio >= 0.1 ? '🟡 Fair' : '🔴 Low'}
             </div>
             <div className="text-xs text-zinc-500 mt-1">DAU/MAU {'>'}20% is healthy</div>
           </div>
           <div>
-            <div className="text-sm text-zinc-400 mb-1">Day 1 Retention</div>
+            <div className="text-sm text-zinc-500 mb-1">Day 1 Retention</div>
             <div className={`text-2xl font-bold ${metrics.retention.day1 >= 40 ? 'text-emerald-400' : metrics.retention.day1 >= 25 ? 'text-yellow-400' : 'text-red-400'}`}>
               {metrics.retention.day1 >= 40 ? '🟢 Good' : metrics.retention.day1 >= 25 ? '🟡 Fair' : '🔴 Low'}
             </div>
             <div className="text-xs text-zinc-500 mt-1">{'>'}40% is healthy for apps</div>
           </div>
           <div>
-            <div className="text-sm text-zinc-400 mb-1">Monetization</div>
+            <div className="text-sm text-zinc-500 mb-1">Monetization</div>
             <div className={`text-2xl font-bold ${metrics.userBreakdown.paidPercentage >= 5 ? 'text-emerald-400' : metrics.userBreakdown.paidPercentage >= 2 ? 'text-yellow-400' : 'text-red-400'}`}>
               {metrics.userBreakdown.paidPercentage >= 5 ? '🟢 Good' : metrics.userBreakdown.paidPercentage >= 2 ? '🟡 Fair' : '🔴 Low'}
             </div>
             <div className="text-xs text-zinc-500 mt-1">{'>'}5% conversion is great</div>
           </div>
           <div>
-            <div className="text-sm text-zinc-400 mb-1">Session Depth</div>
+            <div className="text-sm text-zinc-500 mb-1">Session Depth</div>
             <div className={`text-2xl font-bold ${metrics.searchesPerUser >= 3 ? 'text-emerald-400' : metrics.searchesPerUser >= 1.5 ? 'text-yellow-400' : 'text-red-400'}`}>
               {metrics.searchesPerUser >= 3 ? '🟢 Good' : metrics.searchesPerUser >= 1.5 ? '🟡 Fair' : '🔴 Low'}
             </div>

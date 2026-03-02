@@ -7,10 +7,10 @@ interface ChartCardProps {
 
 export default function ChartCard({ title, subtitle, children, className = '' }: ChartCardProps) {
   return (
-    <div className={`rounded-xl bg-zinc-900 border border-zinc-800 p-4 sm:p-6 ${className}`}>
-      <div className="mb-3 sm:mb-4">
-        <h3 className="text-base sm:text-lg font-semibold text-white">{title}</h3>
-        {subtitle && <p className="text-xs sm:text-sm text-zinc-400 mt-1">{subtitle}</p>}
+    <div className={`card-animate rounded-[2rem] bg-primary border border-zinc-300/50 p-6 sm:p-8 shadow-sm ${className}`}>
+      <div className="mb-6 sm:mb-8 border-b border-zinc-300/50 pb-4">
+        <h3 className="text-xl sm:text-2xl font-bold font-sans tracking-tight text-foreground">{title}</h3>
+        {subtitle && <p className="text-sm font-mono text-zinc-500 mt-2 uppercase tracking-wide">{subtitle}</p>}
       </div>
       <div className="h-[250px] sm:h-[300px]">{children}</div>
     </div>

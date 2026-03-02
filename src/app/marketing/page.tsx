@@ -27,7 +27,7 @@ export default function MarketingPage() {
 
   if (!metrics) {
     return (
-      <div className="text-center text-zinc-400 py-20">
+      <div className="text-center text-zinc-500 py-20">
         Failed to load marketing metrics. Please try again.
       </div>
     );

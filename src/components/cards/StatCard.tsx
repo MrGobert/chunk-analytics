@@ -20,28 +20,30 @@ export default function StatCard({ title, value, trend, format = 'number', subti
 
   const formattedValue = getFormattedValue();
   const isNewTrend = trend === null;
-  const trendColor = isNewTrend ? 'text-blue-400' : (trend !== undefined && trend >= 0 ? 'text-emerald-400' : 'text-red-400');
+  const trendColor = isNewTrend ? 'text-accent' : (trend !== undefined && trend >= 0 ? 'text-[#34D399]' : 'text-accent');
   const trendIcon = isNewTrend ? '' : (trend !== undefined && trend >= 0 ? '↑' : '↓');
 
   return (
-    <div className="rounded-xl bg-zinc-900 border border-zinc-800 p-4 sm:p-6">
-      <div className="flex items-center justify-between mb-2">
-        <span className="text-xs sm:text-sm font-medium text-zinc-400">{title}</span>
+    <div className="card-animate rounded-[2rem] bg-primary border border-zinc-300/50 p-5 sm:p-7 shadow-sm transition-transform duration-300 hover:-translate-y-1">
+      <div className="flex items-center justify-between mb-4">
+        <span className="text-sm font-bold tracking-tight text-zinc-600 font-sans">{title}</span>
         {icon && <div className="text-zinc-500 hidden sm:block">{icon}</div>}
       </div>
-      <div className="flex items-end gap-2">
-        <span className="text-2xl sm:text-3xl font-bold text-white">{formattedValue}</span>
-        {isNewTrend && (
-          <span className={`text-sm font-medium ${trendColor} mb-1`}>New</span>
-        )}
-        {trend !== undefined && trend !== null && (
-          <span className={`text-sm font-medium ${trendColor} mb-1`}>
-            {trendIcon} {Math.abs(trend).toFixed(1)}%
-          </span>
-        )}
+      <div className="flex items-baseline gap-3">
+        <span className="text-3xl sm:text-4xl font-bold font-mono text-foreground tracking-tight">{formattedValue}</span>
+        <div className="flex flex-col">
+          {isNewTrend && (
+            <span className={`text-sm font-mono font-medium ${trendColor}`}>New</span>
+          )}
+          {trend !== undefined && trend !== null && (
+            <span className={`text-sm font-mono font-medium ${trendColor}`}>
+              {trendIcon} {Math.abs(trend).toFixed(1)}%
+            </span>
+          )}
+        </div>
       </div>
       {subtitle && (
-        <div className="mt-1 text-xs text-zinc-500">{subtitle}</div>
+        <div className="mt-2 text-xs font-mono text-zinc-500 uppercase tracking-widest">{subtitle}</div>
       )}
     </div>
   );

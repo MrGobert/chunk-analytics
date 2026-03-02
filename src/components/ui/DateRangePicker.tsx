@@ -17,16 +17,15 @@ const ranges = [
 
 export default function DateRangePicker({ value, onChange }: DateRangePickerProps) {
   return (
-    <div className="flex items-center gap-1 rounded-lg bg-zinc-800 p-1">
+    <div className="flex items-center gap-1 rounded-[1.5rem] bg-primary border border-zinc-300/50 p-1 shadow-sm">
       {ranges.map((range) => (
         <button
           key={range.value}
           onClick={() => onChange(range.value)}
-          className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
-            value === range.value
-              ? 'bg-violet-600 text-white'
-              : 'text-zinc-400 hover:text-white hover:bg-zinc-700'
-          }`}
+          className={`px-3 py-1.5 text-xs uppercase tracking-widest font-mono font-bold rounded-full transition-all duration-300 ${value === range.value
+              ? 'bg-accent text-white shadow-sm'
+              : 'text-zinc-500 hover:text-foreground hover:bg-zinc-200'
+            }`}
         >
           {range.label}
         </button>
