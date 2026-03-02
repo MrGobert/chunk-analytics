@@ -10,10 +10,10 @@ export default function HeatmapChart({ data }: HeatmapChartProps) {
   const getIntensity = (count: number) => {
     const ratio = count / maxCount;
     if (ratio === 0) return 'bg-primary';
-    if (ratio < 0.25) return 'bg-violet-900/50';
-    if (ratio < 0.5) return 'bg-violet-700/60';
-    if (ratio < 0.75) return 'bg-violet-600/70';
-    return 'bg-violet-500';
+    if (ratio < 0.25) return 'bg-accent/20';
+    if (ratio < 0.5) return 'bg-accent/40';
+    if (ratio < 0.75) return 'bg-accent/60';
+    return 'bg-accent';
   };
 
   const formatHour = (hour: number) => {
@@ -31,7 +31,7 @@ export default function HeatmapChart({ data }: HeatmapChartProps) {
             key={item.hour}
             className={`aspect-square rounded-md ${getIntensity(item.count)} flex items-center justify-center group relative cursor-default`}
           >
-            <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 bg-primary border border-zinc-700 rounded px-2 py-1 text-xs text-foreground opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10">
+            <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 bg-primary border border-zinc-300/50 shadow-sm rounded px-2 py-1 text-xs text-foreground opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10">
               {formatHour(item.hour)}: {item.count} searches
             </div>
           </div>
@@ -48,10 +48,10 @@ export default function HeatmapChart({ data }: HeatmapChartProps) {
         <span className="text-xs text-zinc-500">Less</span>
         <div className="flex gap-1">
           <div className="w-4 h-4 rounded bg-primary" />
-          <div className="w-4 h-4 rounded bg-violet-900/50" />
-          <div className="w-4 h-4 rounded bg-violet-700/60" />
-          <div className="w-4 h-4 rounded bg-violet-600/70" />
-          <div className="w-4 h-4 rounded bg-violet-500" />
+          <div className="w-4 h-4 rounded bg-accent/20" />
+          <div className="w-4 h-4 rounded bg-accent/40" />
+          <div className="w-4 h-4 rounded bg-accent/60" />
+          <div className="w-4 h-4 rounded bg-accent" />
         </div>
         <span className="text-xs text-zinc-500">More</span>
       </div>

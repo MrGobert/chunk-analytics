@@ -305,7 +305,7 @@ export default function EmailCampaignsPage() {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
           <div className="text-sm text-zinc-500">
-            <p className="font-medium text-zinc-300 mb-1">Attribution Window</p>
+            <p className="font-medium text-foreground mb-1">Attribution Window</p>
             <p>
               Conversions are attributed to emails sent within 30 days of a purchase.
               If a user receives multiple emails before converting, all are credited.

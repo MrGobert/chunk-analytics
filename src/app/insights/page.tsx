@@ -226,14 +226,14 @@ export default function InsightsPage() {
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <div className="w-3 h-3 rounded-full bg-indigo-500" />
-                  <span className="text-sm text-zinc-300">Free Users</span>
+                  <span className="text-sm text-foreground">Free Users</span>
                 </div>
                 <span className="text-lg font-semibold text-foreground">{metrics.userBreakdown.free.toLocaleString()}</span>
               </div>
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <div className="w-3 h-3 rounded-full bg-emerald-500" />
-                  <span className="text-sm text-zinc-300">Paid Users</span>
+                  <span className="text-sm text-foreground">Paid Users</span>
                 </div>
                 <span className="text-lg font-semibold text-foreground">{metrics.userBreakdown.paid.toLocaleString()}</span>
               </div>

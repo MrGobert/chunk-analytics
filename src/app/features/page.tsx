@@ -89,7 +89,7 @@ export default function FeaturesPage() {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 h-full overflow-auto">
             {metrics.featuresBySegment.map((segment) => (
               <div key={segment.segment} className="space-y-3">
-                <h4 className="text-sm font-medium text-zinc-300">{segment.segment}</h4>
+                <h4 className="text-sm font-medium text-foreground">{segment.segment}</h4>
                 <div className="space-y-2">
                   {segment.features.slice(0, 5).map((f) => (
                     <div key={f.feature} className="flex items-center justify-between">

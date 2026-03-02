@@ -56,19 +56,20 @@ export default function PieChart({
         </Pie>
         <Tooltip
           contentStyle={{
-            backgroundColor: '#18181b',
-            border: '1px solid #27272a',
-            borderRadius: '8px',
+            backgroundColor: '#E8E4DD',
+            border: '1px solid #d4d4d8',
+            borderRadius: '0',
+            fontFamily: 'var(--font-mono)',
           }}
-          labelStyle={{ color: '#a1a1aa' }}
-          itemStyle={{ color: '#fff' }}
+          labelStyle={{ color: '#71717a', fontWeight: 'bold' }}
+          itemStyle={{ color: '#111111' }}
         />
         {showLegend && (
           <Legend
             layout="vertical"
             align="right"
             verticalAlign="middle"
-            formatter={(value) => <span className="text-zinc-300 text-sm">{value}</span>}
+            formatter={(value) => <span className="text-foreground tracking-tight font-sans text-sm">{value}</span>}
           />
         )}
       </RechartsPieChart>
