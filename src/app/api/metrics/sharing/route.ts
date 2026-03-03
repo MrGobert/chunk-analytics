@@ -213,6 +213,7 @@ export async function GET(request: NextRequest) {
       totalSharedNoteViews,
       totalSharedConversationViews,
       totalSharedResearchViews,
+      totalSharedCollectionViews,
       totalSaveToChunkClicks,
       noteSharedTrend,
       conversationSharedTrend,
