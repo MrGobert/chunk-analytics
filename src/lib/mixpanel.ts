@@ -202,7 +202,10 @@ async function fetchMixpanelEventsFromAPI(
   const lines = text.trim().split('\n').filter(Boolean);
   const events: MixpanelEvent[] = lines.map((line) => JSON.parse(line));
 
-  return events;
+  // Filter out the test account UID to prevent skewing analytics data
+  const filteredEvents = events.filter((e) => e.properties.distinct_id !== 'I3JdK0ufgyN9So4rSOf4yxK1Drl1');
+
+  return filteredEvents;
 }
 
 export async function fetchMixpanelEvents(
