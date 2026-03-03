@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useDashboardFilters } from '@/hooks/useDashboardFilters';
 import PageHeader from '@/components/layout/PageHeader';
 import StatCard from '@/components/cards/StatCard';
 import ChartCard from '@/components/cards/ChartCard';
@@ -12,9 +12,9 @@ import { useAnalytics } from '@/hooks/useAnalytics';
 import { CollectionsMetrics } from '@/types/mixpanel';
 
 export default function CollectionsPage() {
-  const [dateRange, setDateRange] = useState('30d');
-  const [platform, setPlatform] = useState('all');
-  const [userType, setUserType] = useState('all');
+  const { dateRange, setDateRange, platform, setPlatform, userType, setUserType } = useDashboardFilters();
+  
+  
 
   const { data: metrics, isLoading, isRefreshing, lastUpdated } = useAnalytics<CollectionsMetrics>(
     '/api/metrics/collections',

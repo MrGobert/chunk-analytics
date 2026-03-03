@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { useDashboardFilters } from '@/hooks/useDashboardFilters';
 import PageHeader from '@/components/layout/PageHeader';
 import StatCard from '@/components/cards/StatCard';
 import ChartCard from '@/components/cards/ChartCard';
@@ -28,9 +29,9 @@ const PLATFORM_TABS = [
 ] as const;
 
 export default function OnboardingPage() {
-  const [dateRange, setDateRange] = useState('30d');
+  const { dateRange, setDateRange, platform, setPlatform, userType, setUserType } = useDashboardFilters();
   const [platformGroup, setPlatformGroup] = useState<string>('mobile');
-  const [userType, setUserType] = useState('all');
+
 
   const { data: metrics, isLoading, isRefreshing, lastUpdated } = useAnalytics<OnboardingMetrics>(
     '/api/metrics/onboarding',
@@ -70,11 +71,10 @@ export default function OnboardingPage() {
           <button
             key={tab.key}
             onClick={() => setPlatformGroup(tab.key)}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-              platformGroup === tab.key
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${platformGroup === tab.key
                 ? 'bg-violet-600 text-foreground'
                 : 'bg-primary text-zinc-500 hover:bg-zinc-700 hover:text-zinc-200'
-            }`}
+              }`}
           >
             <div>{tab.label}</div>
             <div className={`text-xs ${platformGroup === tab.key ? 'text-violet-200' : 'text-zinc-500'}`}>

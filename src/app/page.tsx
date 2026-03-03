@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
+import { useDashboardFilters } from '@/hooks/useDashboardFilters';
 import gsap from 'gsap';
 import PageHeader from '@/components/layout/PageHeader';
 import StatCard from '@/components/cards/StatCard';
@@ -16,9 +17,9 @@ interface ExtendedOverviewMetrics extends OverviewMetrics {
 }
 
 export default function OverviewPage() {
-  const [dateRange, setDateRange] = useState('30d');
-  const [platform, setPlatform] = useState('all');
-  const [userType, setUserType] = useState('all');
+  const { dateRange, setDateRange, platform, setPlatform, userType, setUserType } = useDashboardFilters();
+
+
   const containerRef = useRef<HTMLDivElement>(null);
 
   const { data: metrics, isLoading, isRefreshing, lastUpdated } = useAnalytics<ExtendedOverviewMetrics>(

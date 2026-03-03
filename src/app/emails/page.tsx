@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useMemo } from 'react';
+import { useDashboardFilters } from '@/hooks/useDashboardFilters';
 import PageHeader from '@/components/layout/PageHeader';
 import StatCard from '@/components/cards/StatCard';
 import ChartCard from '@/components/cards/ChartCard';
@@ -55,7 +56,7 @@ const EMAIL_TYPE_LABELS: Record<string, string> = {
 };
 
 export default function EmailCampaignsPage() {
-  const [dateRange, setDateRange] = useState('30d');
+  const { dateRange, setDateRange, platform, setPlatform, userType, setUserType } = useDashboardFilters();
 
   const daysMap: Record<string, string> = {
     '7d': '7',

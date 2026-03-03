@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useDashboardFilters } from '@/hooks/useDashboardFilters';
 import PageHeader from '@/components/layout/PageHeader';
 import StatCard from '@/components/cards/StatCard';
 import ChartCard from '@/components/cards/ChartCard';
@@ -22,9 +22,9 @@ const REPORT_TYPE_COLORS: Record<string, string> = {
 };
 
 export default function ResearchPage() {
-  const [dateRange, setDateRange] = useState('30d');
-  const [platform, setPlatform] = useState('all');
-  const [userType, setUserType] = useState('all');
+  const { dateRange, setDateRange, platform, setPlatform, userType, setUserType } = useDashboardFilters();
+  
+  
 
   const { data: metrics, isLoading, isRefreshing, lastUpdated } = useAnalytics<ResearchMetrics>(
     '/api/metrics/research',

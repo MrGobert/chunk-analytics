@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useDashboardFilters } from '@/hooks/useDashboardFilters';
 import PageHeader from '@/components/layout/PageHeader';
 import ChartCard from '@/components/cards/ChartCard';
 import LineChart from '@/components/charts/LineChart';
@@ -15,9 +15,9 @@ interface ExtendedUserMetrics extends UserMetrics {
 }
 
 export default function UsersPage() {
-  const [dateRange, setDateRange] = useState('30d');
-  const [platform, setPlatform] = useState('all');
-  const [userType, setUserType] = useState('all');
+  const { dateRange, setDateRange, platform, setPlatform, userType, setUserType } = useDashboardFilters();
+  
+  
 
   const { data: metrics, isLoading, isRefreshing, lastUpdated } = useAnalytics<ExtendedUserMetrics>(
     '/api/metrics/users',
