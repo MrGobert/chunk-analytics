@@ -144,13 +144,12 @@ export async function GET(request: NextRequest) {
 
     // Note survival rate (created vs deleted ratio) - measures notes kept, not user retention
     const retentionRate = totalNotesCreated > 0
-      ? Math.max(0, Math.min(100, ((totalNotesCreated - totalNotesDeleted) / totalNotesCreated) * 100))
+      ? Math.max(0, Math.min(1, (totalNotesCreated - totalNotesDeleted) / totalNotesCreated))
       : 0;
     const retentionRateLabel = 'Note Survival Rate';
 
-    // Document upload rate
     const documentUploadRate = totalNotesCreated > 0
-      ? Math.min(100, (totalDocumentUploads / totalNotesCreated) * 100)
+      ? Math.min(1, Math.max(0, totalDocumentUploads / totalNotesCreated))
       : 0;
 
     return NextResponse.json({
