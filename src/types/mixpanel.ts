@@ -143,7 +143,7 @@ export interface FunnelStep {
 
 export interface FeatureMetrics {
   featureUsage: { feature: string; count: number }[];
-  featureOverTime: { date: string; [key: string]: string | number }[];
+  featureOverTime: { date: string;[key: string]: string | number }[];
   featuresBySegment: { segment: string; features: { feature: string; count: number }[] }[];
 }
 
@@ -209,7 +209,7 @@ export interface ResearchMetrics {
   reportTypeDistribution: { name: string; value: number }[];
   researchFunnel: FunnelStep[];
   dailyData: { date: string; initiated: number; completed: number; viewed: number }[];
-  reportTypeOverTime: { date: string; [key: string]: string | number }[];
+  reportTypeOverTime: { date: string;[key: string]: string | number }[];
   tonePreferences: { name: string; value: number }[];
   citationFormatPreferences: { format: string; count: number }[];
   exportFormatDistribution: { name: string; value: number }[];
@@ -251,6 +251,7 @@ export interface SharingMetrics {
   totalCollectionsShared: number;
   totalSharedNoteViews: number;
   totalSharedConversationViews: number;
+  totalSharedCollectionViews: number;
   totalSharedResearchViews: number;
   totalSaveToChunkClicks: number;
   noteSharedTrend: number | null;

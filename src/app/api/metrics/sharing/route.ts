@@ -29,6 +29,7 @@ const SHARED_VIEW_EVENTS = [
   'Shared_Note_Viewed',
   'Shared_Conversation_Viewed',
   'Shared_Research_Viewed',
+  'Shared_Collection_Viewed',
 ];
 
 // Event for save to chunk clicks
@@ -66,6 +67,7 @@ export async function GET(request: NextRequest) {
     const totalSharedNoteViews = countEvents(sharedViewEvents, 'Shared_Note_Viewed');
     const totalSharedConversationViews = countEvents(sharedViewEvents, 'Shared_Conversation_Viewed');
     const totalSharedResearchViews = countEvents(sharedViewEvents, 'Shared_Research_Viewed');
+    const totalSharedCollectionViews = countEvents(sharedViewEvents, 'Shared_Collection_Viewed');
 
     const totalSaveToChunkClicks = countEvents(saveClickEvents, 'Save_To_Chunk_Clicked');
 
@@ -93,18 +95,19 @@ export async function GET(request: NextRequest) {
 
     const prevTotalViews = countEvents(prevSharedViews, 'Shared_Note_Viewed') +
       countEvents(prevSharedViews, 'Shared_Conversation_Viewed') +
-      countEvents(prevSharedViews, 'Shared_Research_Viewed');
-    const currentTotalViews = totalSharedNoteViews + totalSharedConversationViews + totalSharedResearchViews;
+      countEvents(prevSharedViews, 'Shared_Research_Viewed') +
+      countEvents(prevSharedViews, 'Shared_Collection_Viewed');
+    const currentTotalViews = totalSharedNoteViews + totalSharedConversationViews + totalSharedResearchViews + totalSharedCollectionViews;
     const sharedViewsTrend = calculateTrend(currentTotalViews, prevTotalViews);
 
     const saveClickTrend = calculateTrend(totalSaveToChunkClicks, countEvents(prevSaveClicks, 'Save_To_Chunk_Clicked'));
 
     // Calculated metrics
     const totalShares = totalNotesShared + totalConversationsShared + totalResearchShared + totalCollectionsShared;
-    const totalViews = totalSharedNoteViews + totalSharedConversationViews + totalSharedResearchViews;
+    const totalViews = totalSharedNoteViews + totalSharedConversationViews + totalSharedResearchViews + totalSharedCollectionViews;
     const viewToShareRatio = totalShares > 0 ? (totalViews / totalShares) : 0;
     // Return as decimal ratio (0-1); StatCard's formatPercentage handles ×100
-    const saveToChunkClickRate = totalViews > 0 ? (totalSaveToChunkClicks / totalViews) : 0;
+    const saveToChunkClickRate = totalViews > 0 ? Math.min(1, Math.max(0, totalSaveToChunkClicks / totalViews)) : 0;
 
     // Daily data for shares created over time
     const days = getDaysInRange(dateRange.from, dateRange.to);
@@ -135,6 +138,7 @@ export async function GET(request: NextRequest) {
         note: dayEvents.filter((e) => e.event === 'Shared_Note_Viewed').length,
         conversation: dayEvents.filter((e) => e.event === 'Shared_Conversation_Viewed').length,
         research: dayEvents.filter((e) => e.event === 'Shared_Research_Viewed').length,
+        collection: dayEvents.filter((e) => e.event === 'Shared_Collection_Viewed').length,
       };
     });
 
@@ -192,6 +196,12 @@ export async function GET(request: NextRequest) {
         shares: totalResearchShared,
         views: totalSharedResearchViews,
         ratio: totalResearchShared > 0 ? (totalSharedResearchViews / totalResearchShared) : 0
+      },
+      {
+        type: 'Collections',
+        shares: totalCollectionsShared,
+        views: totalSharedCollectionViews,
+        ratio: totalCollectionsShared > 0 ? (totalSharedCollectionViews / totalCollectionsShared) : 0
       },
     ];
 
