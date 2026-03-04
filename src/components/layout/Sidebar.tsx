@@ -8,11 +8,9 @@ import { useAnalyticsPrefetch } from '@/hooks/useAnalytics';
 import {
   Home,
   Filter,
-  Megaphone,
   BarChart2,
   Users,
   Search,
-  CreditCard,
   Bell,
   Mail,
   LayoutGrid,
@@ -23,18 +21,23 @@ import {
   Rocket,
   Menu,
   X,
-  Eye
+  Eye,
+  DollarSign,
+  RefreshCw,
+  AlertTriangle,
+  type LucideIcon,
 } from 'lucide-react';
 
 // Map sidebar href to the API endpoint each page fetches
 const ROUTE_TO_ENDPOINT: Record<string, string> = {
   '/': '/api/metrics/overview',
+  '/revenue': '/api/rc/revenue-summary',
+  '/funnel': '/api/rc/subscriber-funnel',
+  '/churn': '/api/rc/churn-intelligence',
   '/acquisition': '/api/metrics/acquisition',
-  '/marketing': '/api/metrics/marketing',
   '/insights': '/api/metrics/advanced',
   '/users': '/api/metrics/users',
   '/searches': '/api/metrics/searches',
-  '/subscriptions': '/api/metrics/funnel',
   '/push': '/api/metrics/push',
   '/emails': '/api/metrics/emails',
   '/features': '/api/metrics/features',
@@ -42,26 +45,53 @@ const ROUTE_TO_ENDPOINT: Record<string, string> = {
   '/notes': '/api/metrics/notes',
   '/collections': '/api/metrics/collections',
   '/sharing': '/api/metrics/sharing',
-  '/onboarding': '/api/metrics/onboarding',
 };
 
-const navItems = [
-  { href: '/', label: 'Overview', icon: Home },
-  { href: '/acquisition', label: 'Acquisition', icon: Filter },
-  { href: '/marketing', label: 'Marketing', icon: Megaphone },
-  { href: '/insights', label: 'Insights', icon: BarChart2 },
-  { href: '/users', label: 'Users', icon: Users },
-  { href: '/searches', label: 'Searches', icon: Search },
-  { href: '/subscriptions', label: 'Subscriptions', icon: CreditCard },
-  { href: '/push', label: 'Push Notifications', icon: Bell },
-  { href: '/emails', label: 'Email Campaigns', icon: Mail },
-  { href: '/features', label: 'Features', icon: LayoutGrid },
-  { href: '/research', label: 'Research', icon: FileText },
-  { href: '/notes', label: 'Notes', icon: StickyNote },
-  { href: '/collections', label: 'Collections', icon: FolderOpen },
-  { href: '/sharing', label: 'Sharing', icon: Share2 },
-  { href: '/onboarding', label: 'Onboarding', icon: Rocket },
+interface NavItem {
+  href: string;
+  label: string;
+  icon: LucideIcon;
+}
+
+interface NavSection {
+  title: string;
+  items: NavItem[];
+}
+
+const navSections: NavSection[] = [
+  {
+    title: 'COMMAND CENTER',
+    items: [
+      { href: '/', label: 'Overview', icon: Home },
+      { href: '/revenue', label: 'Revenue', icon: DollarSign },
+      { href: '/funnel', label: 'Subscriber Funnel', icon: RefreshCw },
+      { href: '/churn', label: 'Churn Intelligence', icon: AlertTriangle },
+    ],
+  },
+  {
+    title: 'PRODUCT ANALYTICS',
+    items: [
+      { href: '/searches', label: 'Searches', icon: Search },
+      { href: '/research', label: 'Research', icon: FileText },
+      { href: '/notes', label: 'Notes', icon: StickyNote },
+      { href: '/collections', label: 'Collections', icon: FolderOpen },
+      { href: '/features', label: 'Features', icon: LayoutGrid },
+      { href: '/acquisition', label: 'Acquisition', icon: Rocket },
+    ],
+  },
+  {
+    title: 'OPERATIONS',
+    items: [
+      { href: '/emails', label: 'Email Campaigns', icon: Mail },
+      { href: '/users', label: 'Users', icon: Users },
+      { href: '/push', label: 'Push Notifications', icon: Bell },
+      { href: '/sharing', label: 'Sharing', icon: Share2 },
+    ],
+  },
 ];
+
+// Flat list for prefetching
+const allNavItems = navSections.flatMap((s) => s.items);
 
 export default function Sidebar() {
   const pathname = usePathname();
@@ -84,24 +114,24 @@ export default function Sidebar() {
 
   // Prefetch adjacent tabs when user lands on a page
   useEffect(() => {
-    const currentIndex = navItems.findIndex((item) => item.href === pathname);
+    const currentIndex = allNavItems.findIndex((item) => item.href === pathname);
     if (currentIndex === -1) return;
 
-    // Delay prefetch slightly so current page loads first
     const timer = setTimeout(() => {
       const adjacentIndices = [
         currentIndex - 1,
         currentIndex + 1,
         currentIndex + 2,
-      ].filter((i) => i >= 0 && i < navItems.length && i !== currentIndex);
+      ].filter((i) => i >= 0 && i < allNavItems.length && i !== currentIndex);
 
       for (const idx of adjacentIndices) {
-        const route = navItems[idx].href;
+        const route = allNavItems[idx].href;
         const endpoint = ROUTE_TO_ENDPOINT[route];
         if (!endpoint) continue;
 
-        // Emails page uses different params
         if (route === '/emails') {
+          prefetch(endpoint, { days: '30' });
+        } else if (endpoint.startsWith('/api/rc/')) {
           prefetch(endpoint, { days: '30' });
         } else {
           prefetch(endpoint, { range: '30d', platform: 'all', userType: 'all' });
@@ -152,27 +182,36 @@ export default function Sidebar() {
         </div>
 
         <nav className="flex-1 p-4 overflow-y-auto">
-          <ul className="space-y-2">
-            {navItems.map((item) => {
-              const isActive = pathname === item.href;
-              const Icon = item.icon;
+          {navSections.map((section) => (
+            <div key={section.title} className="mb-6">
+              <div className="px-4 mb-2">
+                <span className="text-[10px] font-mono font-bold text-zinc-600 uppercase tracking-[0.15em]">
+                  {section.title}
+                </span>
+              </div>
+              <ul className="space-y-1">
+                {section.items.map((item) => {
+                  const isActive = pathname === item.href;
+                  const Icon = item.icon;
 
-              return (
-                <li key={item.href}>
-                  <Link
-                    href={item.href}
-                    className={`flex items-center gap-3 px-4 py-3 rounded-[2rem] transition-all duration-300 hover-lift ${isActive
-                      ? 'bg-accent text-white font-medium'
-                      : 'text-zinc-500 hover:text-white hover:bg-primary font-medium'
-                      }`}
-                  >
-                    <Icon className="w-5 h-5" strokeWidth={isActive ? 2.5 : 2} />
-                    <span className="font-sans tracking-tight">{item.label}</span>
-                  </Link>
-                </li>
-              );
-            })}
-          </ul>
+                  return (
+                    <li key={item.href}>
+                      <Link
+                        href={item.href}
+                        className={`flex items-center gap-3 px-4 py-2.5 rounded-[2rem] transition-all duration-300 hover-lift ${isActive
+                          ? 'bg-accent text-white font-medium'
+                          : 'text-zinc-500 hover:text-white hover:bg-primary font-medium'
+                          }`}
+                      >
+                        <Icon className="w-4 h-4" strokeWidth={isActive ? 2.5 : 2} />
+                        <span className="font-sans tracking-tight text-sm">{item.label}</span>
+                      </Link>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          ))}
         </nav>
 
         <div className="p-4 border-t border-zinc-900 space-y-3">
@@ -188,7 +227,7 @@ export default function Sidebar() {
             <span className="font-sans tracking-tight text-sm">Email Templates</span>
           </Link>
           <div className="text-xs font-mono text-zinc-600 text-center tracking-tight">
-            SYSTEM.ANALYTICS
+            CHUNK COMMAND CENTER
           </div>
         </div>
       </aside>

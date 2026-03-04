@@ -1,34 +1,76 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import { useDashboardFilters } from '@/hooks/useDashboardFilters';
 import gsap from 'gsap';
 import PageHeader from '@/components/layout/PageHeader';
 import StatCard from '@/components/cards/StatCard';
 import ChartCard from '@/components/cards/ChartCard';
-import LineChart from '@/components/charts/LineChart';
 import AreaChart from '@/components/charts/AreaChart';
+import FunnelChart from '@/components/charts/FunnelChart';
+import BarChart from '@/components/charts/BarChart';
 import { SkeletonPage } from '@/components/ui/Skeleton';
 import { useAnalytics } from '@/hooks/useAnalytics';
-import { OverviewMetrics, UserBreakdown } from '@/types/mixpanel';
 
-interface ExtendedOverviewMetrics extends OverviewMetrics {
-  userBreakdown?: UserBreakdown;
+interface RevenueSummary {
+  mrr: number;
+  mrrChange: number;
+  arr: number;
+  todayRevenue: number;
+  totalSubscribers: number;
+  trialUsers: number;
+  churnRate: number;
+  byPlatform: Record<string, number>;
+  byProduct: Record<string, number>;
+  mrrTrend: { date: string; mrr: number }[];
+  newSubscribers: number;
+  churned: number;
+  netNew: number;
+  lastUpdated: string;
+  note?: string;
+}
+
+interface SubscriberFunnel {
+  funnel: { stage: string; count: number; rate: number }[];
+  trialConversionRate: number;
+  medianDaysToConvert: number;
+  conversionByPlatform: Record<string, number>;
+  weekOverWeek: { trialStarts: number; conversions: number };
+  lastUpdated: string;
+  note?: string;
+}
+
+interface EmailStats {
+  totals: {
+    sent: number;
+    converted: number;
+    overallConversionRate: number;
+  };
+  by_email_type: Record<string, { sent: number; converted: number; conversionRate: number }>;
+  lastUpdated: string;
+  note?: string;
 }
 
 export default function OverviewPage() {
-  const { dateRange, setDateRange, platform, setPlatform, userType, setUserType } = useDashboardFilters();
-
-
+  const { dateRange, setDateRange } = useDashboardFilters();
   const containerRef = useRef<HTMLDivElement>(null);
 
-  const { data: metrics, isLoading, isRefreshing, lastUpdated } = useAnalytics<ExtendedOverviewMetrics>(
-    '/api/metrics/overview',
-    { range: dateRange, platform, userType }
-  );
+  const daysMap: Record<string, string> = { '7d': '7', '30d': '30', '90d': '90' };
+  const days = daysMap[dateRange] || '30';
+
+  const { data: revenue, isLoading: revenueLoading, isRefreshing: revenueRefreshing, lastUpdated: revenueUpdated } =
+    useAnalytics<RevenueSummary>('/api/rc/revenue-summary', { days });
+
+  const { data: funnel, isLoading: funnelLoading } =
+    useAnalytics<SubscriberFunnel>('/api/rc/subscriber-funnel', { days });
+
+  const { data: emailStats, isLoading: emailsLoading } =
+    useAnalytics<EmailStats>('/api/metrics/emails', { days });
+
+  const isLoading = revenueLoading || funnelLoading || emailsLoading;
 
   useEffect(() => {
-    if (!isLoading && metrics) {
+    if (!isLoading && revenue) {
       const ctx = gsap.context(() => {
         gsap.fromTo('.card-animate',
           { y: 30, opacity: 0 },
@@ -37,13 +79,13 @@ export default function OverviewPage() {
       }, containerRef);
       return () => ctx.revert();
     }
-  }, [isLoading, metrics]);
+  }, [isLoading, revenue]);
 
   if (isLoading) {
-    return <SkeletonPage statCards={5} statCardCols="grid-cols-1 md:grid-cols-2 lg:grid-cols-5" chartCards={2} />;
+    return <SkeletonPage statCards={5} statCardCols="grid-cols-1 md:grid-cols-2 lg:grid-cols-5" chartCards={3} />;
   }
 
-  if (!metrics) {
+  if (!revenue) {
     return (
       <div className="text-center font-mono text-zinc-500 py-20 tracking-wide uppercase">
         Failed to load metrics. Please try again.
@@ -51,67 +93,80 @@ export default function OverviewPage() {
     );
   }
 
-  // Helper to get the right label for the current filter
-  const getUserTypeLabel = () => {
-    switch (userType) {
-      case 'authenticated': return 'Authenticated Users';
-      case 'subscribers': return 'Subscribers';
-      case 'visitors': return 'Visitors';
-      default: return 'Total Users';
-    }
-  };
+  // Format MRR trend for chart
+  const mrrChartData = (revenue.mrrTrend || []).map((d) => ({
+    date: d.date,
+    mrr: d.mrr,
+  }));
+
+  // Build funnel data for the mini funnel
+  const funnelData = (funnel?.funnel || []).map((step, index, arr) => ({
+    name: step.stage,
+    count: step.count,
+    percentage: step.rate,
+    dropoff: index > 0 ? arr[index - 1].rate - step.rate : 0,
+  }));
+
+  // Build email campaign summary data
+  const emailCampaignData = Object.entries(emailStats?.by_email_type || {})
+    .map(([type, data]) => ({
+      type: type.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase()),
+      sent: data.sent || 0,
+      converted: data.converted || 0,
+    }))
+    .filter((d) => d.sent > 0)
+    .sort((a, b) => b.sent - a.sent)
+    .slice(0, 6);
 
   return (
     <div ref={containerRef} className="animate-in fade-in duration-300">
       <PageHeader
-        title="Overview"
-        subtitle="Key metrics and trends for Chunk AI"
+        title="Command Center"
+        subtitle="Chunk AI — Key business metrics at a glance"
         dateRange={dateRange}
         onDateRangeChange={setDateRange}
-        platform={platform}
-        onPlatformChange={setPlatform}
-        userType={userType}
-        onUserTypeChange={setUserType}
-        lastUpdated={lastUpdated}
-        isRefreshing={isRefreshing}
+        lastUpdated={revenueUpdated}
+        isRefreshing={revenueRefreshing}
       />
 
-      {/* User Breakdown Cards - Always shows full breakdown regardless of filter */}
-      {metrics.userBreakdown && userType === 'all' && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-          <div className="card-animate rounded-[2rem] bg-primary border border-zinc-300/50 p-5 shadow-sm transition-transform duration-300 hover:-translate-y-1">
-            <p className="text-xs font-mono text-zinc-500 uppercase tracking-widest">Total Unique</p>
-            <p className="text-3xl font-bold font-mono text-foreground mt-2 tracking-tight">{metrics.userBreakdown.total.toLocaleString()}</p>
-          </div>
-          <div className="card-animate rounded-[2rem] bg-primary border border-zinc-300/50 p-5 shadow-sm transition-transform duration-300 hover:-translate-y-1">
-            <p className="text-xs font-mono text-zinc-500 uppercase tracking-widest">Visitors (Anonymous)</p>
-            <p className="text-3xl font-bold font-mono text-foreground mt-2 tracking-tight">{metrics.userBreakdown.visitors.toLocaleString()}</p>
-            <p className="text-xs font-mono text-zinc-500 mt-1">
-              {metrics.userBreakdown.total > 0 ? ((metrics.userBreakdown.visitors / metrics.userBreakdown.total) * 100).toFixed(1) : 0}%
-            </p>
-          </div>
-          <div className="card-animate rounded-[2rem] bg-primary border border-zinc-300/50 p-5 shadow-sm transition-transform duration-300 hover:-translate-y-1">
-            <p className="text-xs font-mono text-zinc-500 uppercase tracking-widest">Authenticated</p>
-            <p className="text-3xl font-bold font-mono text-foreground mt-2 tracking-tight">{metrics.userBreakdown.authenticated.toLocaleString()}</p>
-            <p className="text-xs font-mono text-zinc-500 mt-1">
-              {metrics.userBreakdown.total > 0 ? ((metrics.userBreakdown.authenticated / metrics.userBreakdown.total) * 100).toFixed(1) : 0}%
-            </p>
-          </div>
-          <div className="card-animate rounded-[2rem] bg-primary border border-zinc-300/50 p-5 shadow-sm transition-transform duration-300 hover:-translate-y-1">
-            <p className="text-xs font-mono text-zinc-500 uppercase tracking-widest">Subscribers</p>
-            <p className="text-3xl font-bold font-mono text-foreground mt-2 tracking-tight">{metrics.userBreakdown.subscribers.toLocaleString()}</p>
-            <p className="text-xs font-mono text-zinc-500 mt-1">
-              {metrics.userBreakdown.total > 0 ? ((metrics.userBreakdown.subscribers / metrics.userBreakdown.total) * 100).toFixed(1) : 0}%
-            </p>
+      {/* Warning banner */}
+      {revenue.note && (
+        <div className="mb-6 p-4 bg-yellow-900/20 border border-yellow-700/50 rounded-lg">
+          <div className="flex items-center gap-2 text-yellow-400 text-sm">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+            <span>{revenue.note}</span>
           </div>
         </div>
       )}
 
+      {/* Hero Row — Key Business Metrics */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 mb-8">
         <StatCard
-          title={getUserTypeLabel()}
-          value={metrics.totalUsers}
-          trend={metrics.usersTrend}
+          title="MRR"
+          value={`$${revenue.mrr.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+          trend={revenue.mrrChange}
+          format="text"
+          icon={
+            <svg className="w-5 h-5 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          }
+        />
+        <StatCard
+          title="Today's Revenue"
+          value={`$${revenue.todayRevenue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+          format="text"
+          icon={
+            <svg className="w-5 h-5 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
+            </svg>
+          }
+        />
+        <StatCard
+          title="Active Subscribers"
+          value={revenue.totalSubscribers}
           icon={
             <svg className="w-5 h-5 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
@@ -119,77 +174,100 @@ export default function OverviewPage() {
           }
         />
         <StatCard
-          title="Marketing Sessions"
-          value={metrics.marketingSessions}
-          trend={metrics.marketingSessionsTrend}
+          title="Trial Users"
+          value={revenue.trialUsers}
           icon={
             <svg className="w-5 h-5 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
             </svg>
           }
         />
         <StatCard
-          title="App Sessions"
-          value={metrics.appSessions}
-          trend={metrics.appSessionsTrend}
+          title="Churn Rate"
+          value={revenue.churnRate / 100}
+          format="percentage"
+          icon={
+            <svg className="w-5 h-5 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 17h8m0 0V9m0 8l-8-8-4 4-6-6" />
+            </svg>
+          }
+        />
+      </div>
+
+      {/* MRR Trend Chart */}
+      <div className="grid grid-cols-1 gap-6 mb-8">
+        <ChartCard title="MRR Trend" subtitle={`Monthly recurring revenue — last ${days} days`}>
+          {mrrChartData.length > 0 ? (
+            <AreaChart data={mrrChartData} xKey="date" yKey="mrr" color="#E63B2E" />
+          ) : (
+            <div className="flex items-center justify-center h-full text-zinc-500 font-mono text-sm">
+              No MRR trend data available yet
+            </div>
+          )}
+        </ChartCard>
+      </div>
+
+      {/* Two-column: Funnel Mini + Email Campaign Performance */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+        <ChartCard title="Subscriber Funnel" subtitle="Signup → Trial → Paid → Active">
+          {funnelData.length > 0 ? (
+            <FunnelChart data={funnelData} />
+          ) : (
+            <div className="flex items-center justify-center h-full text-zinc-500 font-mono text-sm">
+              No funnel data available yet
+            </div>
+          )}
+        </ChartCard>
+
+        <ChartCard title="Email Campaign Performance" subtitle="Send volume by campaign type">
+          {emailCampaignData.length > 0 ? (
+            <BarChart
+              data={emailCampaignData}
+              xKey="type"
+              yKey="sent"
+              horizontal
+              color="#E63B2E"
+            />
+          ) : (
+            <div className="flex items-center justify-center h-full text-zinc-500 font-mono text-sm">
+              No email campaign data available yet
+            </div>
+          )}
+        </ChartCard>
+      </div>
+
+      {/* Quick stats row */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <StatCard
+          title="New Subscribers"
+          value={revenue.newSubscribers}
+          subtitle={`Last ${days} days`}
+          icon={
+            <svg className="w-5 h-5 text-[#34D399]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+            </svg>
+          }
+        />
+        <StatCard
+          title="Churned"
+          value={revenue.churned}
+          subtitle={`Last ${days} days`}
+          icon={
+            <svg className="w-5 h-5 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 17h8m0 0V9m0 8l-8-8-4 4-6-6" />
+            </svg>
+          }
+        />
+        <StatCard
+          title="Net New"
+          value={revenue.netNew}
+          subtitle={`Last ${days} days`}
           icon={
             <svg className="w-5 h-5 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
             </svg>
           }
         />
-        <StatCard
-          title="Total Searches"
-          value={metrics.totalSearches}
-          trend={metrics.searchesTrend}
-          icon={
-            <svg className="w-5 h-5 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-            </svg>
-          }
-        />
-        <StatCard
-          title="Conversion Rate"
-          value={metrics.conversionRate}
-          format="percentage"
-          icon={
-            <svg className="w-5 h-5 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
-            </svg>
-          }
-        />
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-        <ChartCard title="Daily Active Users" subtitle="Unique users per day">
-          <AreaChart data={metrics.dailyData} xKey="date" yKey="users" color="#E63B2E" />
-        </ChartCard>
-        <ChartCard title="Daily Sessions" subtitle="Marketing vs App sessions per day">
-          <LineChart
-            data={metrics.dailyData}
-            xKey="date"
-            lines={[
-              { key: 'marketingSessions', color: '#111111', name: 'Marketing' },
-              { key: 'appSessions', color: '#E63B2E', name: 'App' },
-            ]}
-            showLegend
-          />
-        </ChartCard>
-      </div>
-
-      <div className="grid grid-cols-1 gap-6">
-        <ChartCard title="Activity Overview" subtitle="Users, sessions, and searches over time">
-          <LineChart
-            data={metrics.dailyData}
-            xKey="date"
-            lines={[
-              { key: 'users', color: '#111111', name: 'Users' },
-              { key: 'sessions', color: '#E63B2E', name: 'Sessions' },
-              { key: 'searches', color: '#7ABAE1', name: 'Searches' },
-            ]}
-            showLegend
-          />
-        </ChartCard>
       </div>
     </div>
   );
