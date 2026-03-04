@@ -22,7 +22,8 @@ import {
   Share2,
   Rocket,
   Menu,
-  X
+  X,
+  Eye
 } from 'lucide-react';
 
 // Map sidebar href to the API endpoint each page fetches
@@ -174,7 +175,18 @@ export default function Sidebar() {
           </ul>
         </nav>
 
-        <div className="p-4 border-t border-zinc-900">
+        <div className="p-4 border-t border-zinc-900 space-y-3">
+          <Link
+            href="/emails/templates"
+            className={`flex items-center gap-3 px-4 py-3 rounded-[2rem] transition-all duration-300 hover-lift ${
+              pathname === '/emails/templates'
+                ? 'bg-accent text-white font-medium'
+                : 'text-zinc-600 hover:text-white hover:bg-primary font-medium'
+            }`}
+          >
+            <Eye className="w-4 h-4" strokeWidth={pathname === '/emails/templates' ? 2.5 : 2} />
+            <span className="font-sans tracking-tight text-sm">Email Templates</span>
+          </Link>
           <div className="text-xs font-mono text-zinc-600 text-center tracking-tight">
             SYSTEM.ANALYTICS
           </div>

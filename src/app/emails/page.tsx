@@ -1,10 +1,13 @@
 'use client';
 
 import { useMemo } from 'react';
+import Link from 'next/link';
+import { Eye } from 'lucide-react';
 import { useDashboardFilters } from '@/hooks/useDashboardFilters';
 import PageHeader from '@/components/layout/PageHeader';
 import StatCard from '@/components/cards/StatCard';
 import ChartCard from '@/components/cards/ChartCard';
+import AreaChart from '@/components/charts/AreaChart';
 import BarChart from '@/components/charts/BarChart';
 import PieChart from '@/components/charts/PieChart';
 import DataTable from '@/components/charts/DataTable';
@@ -24,10 +27,18 @@ interface EmailTypeStats {
   clickRate: number;
 }
 
+interface DailyEmailData {
+  date: string;
+  sent: number;
+  converted: number;
+  by_type: Record<string, number>;
+}
+
 interface EmailStats {
   period_days: number;
   generated_at: string;
   by_email_type: Record<string, EmailTypeStats>;
+  by_day: DailyEmailData[];
   totals: {
     sent: number;
     converted: number;
@@ -126,6 +137,14 @@ export default function EmailCampaignsPage() {
     type: item.name,
     rate: item.conversionRate,
   }));
+
+  // Time-series data for the area chart
+  const byDay = stats?.by_day ?? [];
+  const dailyChartData = useMemo(() => byDay.map((day) => ({
+    date: new Date(day.date + 'T00:00:00Z').toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+    sent: day.sent,
+    converted: day.converted,
+  })), [byDay]);
 
   // Calculate overall open and click rates
   const totalDelivered = byTypeData.reduce((sum, item) => sum + item.delivered, 0);
@@ -232,6 +251,19 @@ export default function EmailCampaignsPage() {
         />
       </div>
 
+      {/* Send Volume Over Time */}
+      <div className="grid grid-cols-1 gap-6 mb-8">
+        <ChartCard title="Email Volume Over Time" subtitle="Daily sends and conversions">
+          {dailyChartData.length > 0 ? (
+            <AreaChart data={dailyChartData} xKey="date" yKey="sent" color="#E63B2E" />
+          ) : (
+            <div className="flex items-center justify-center h-full text-zinc-500">
+              No time-series data available
+            </div>
+          )}
+        </ChartCard>
+      </div>
+
       {/* Charts Row */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
         <ChartCard title="Emails Sent by Campaign" subtitle="Volume breakdown by email type">
@@ -299,20 +331,29 @@ export default function EmailCampaignsPage() {
         </ChartCard>
       </div>
 
-      {/* Attribution Info */}
-      <div className="mt-8 p-4 bg-primary rounded-lg border border-zinc-800">
-        <div className="flex items-start gap-3">
-          <svg className="w-5 h-5 text-zinc-500 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-          <div className="text-sm text-zinc-500">
-            <p className="font-medium text-foreground mb-1">Attribution Window</p>
-            <p>
-              Conversions are attributed to emails sent within 30 days of a purchase.
-              If a user receives multiple emails before converting, all are credited.
-            </p>
+      {/* Footer Row: Attribution Info + View Templates */}
+      <div className="mt-8 flex flex-col lg:flex-row gap-4">
+        <div className="flex-1 p-4 bg-primary rounded-lg border border-zinc-800">
+          <div className="flex items-start gap-3">
+            <svg className="w-5 h-5 text-zinc-500 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <div className="text-sm text-zinc-500">
+              <p className="font-medium text-foreground mb-1">Attribution Window</p>
+              <p>
+                Conversions are attributed to emails sent within 30 days of a purchase.
+                If a user receives multiple emails before converting, all are credited.
+              </p>
+            </div>
           </div>
         </div>
+        <Link
+          href="/emails/templates"
+          className="flex items-center justify-center gap-2 px-6 py-4 bg-accent hover:bg-accent/90 text-white rounded-lg font-medium transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-accent/20 shrink-0"
+        >
+          <Eye className="w-5 h-5" />
+          Preview Email Templates
+        </Link>
       </div>
     </div>
   );

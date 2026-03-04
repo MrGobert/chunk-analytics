@@ -51,6 +51,7 @@ export async function GET(request: NextRequest) {
       period_days: data.period_days ?? 30,
       generated_at: data.generated_at ?? new Date().toISOString(),
       by_email_type: data.by_email_type ?? {},
+      by_day: data.by_day ?? [],
       totals: {
         sent: data.totals?.sent ?? 0,
         converted: data.totals?.converted ?? 0,
