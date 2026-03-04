@@ -111,7 +111,7 @@ export async function GET(request: NextRequest) {
     const days = getDaysInRange(dateRange.from, dateRange.to);
     const dailyData = days.map((date) => {
       const dayEvents = researchEvents.filter((e) => {
-        const eventDate = new Date(e.properties.time * 1000).toISOString().split('T')[0];
+        const eventDate = formatDate(new Date(e.properties.time * 1000));
         return eventDate === date;
       });
 
@@ -126,7 +126,7 @@ export async function GET(request: NextRequest) {
     // Report type popularity over time
     const reportTypeOverTime = days.map((date) => {
       const dayEvents = initiatedEvents.filter((e) => {
-        const eventDate = new Date(e.properties.time * 1000).toISOString().split('T')[0];
+        const eventDate = formatDate(new Date(e.properties.time * 1000));
         return eventDate === date;
       });
 

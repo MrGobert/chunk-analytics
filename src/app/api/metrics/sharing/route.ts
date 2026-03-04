@@ -113,7 +113,7 @@ export async function GET(request: NextRequest) {
     const days = getDaysInRange(dateRange.from, dateRange.to);
     const sharesCreatedOverTime = days.map((date) => {
       const dayEvents = shareCreationEvents.filter((e) => {
-        const eventDate = new Date(e.properties.time * 1000).toISOString().split('T')[0];
+        const eventDate = formatDate(new Date(e.properties.time * 1000));
         return eventDate === date;
       });
 
@@ -129,7 +129,7 @@ export async function GET(request: NextRequest) {
     // Daily data for shared page views over time
     const sharedViewsOverTime = days.map((date) => {
       const dayEvents = sharedViewEvents.filter((e) => {
-        const eventDate = new Date(e.properties.time * 1000).toISOString().split('T')[0];
+        const eventDate = formatDate(new Date(e.properties.time * 1000));
         return eventDate === date;
       });
 

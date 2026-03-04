@@ -1,5 +1,6 @@
 import { MixpanelEvent } from '@/types/mixpanel';
 import { getCachedEventsAsync, setCachedEventsAsync, acquireLock, releaseLock, getStaleCachedEvents } from '@/lib/event-cache';
+import { formatDate } from '@/lib/utils';
 
 const CACHE_REVALIDATE_SECONDS = 300; // 5 minutes
 
@@ -315,9 +316,7 @@ export function groupEventsByDate(
   const grouped = new Map<string, MixpanelEvent[]>();
 
   for (const event of events) {
-    const date = new Date(event.properties.time * 1000)
-      .toISOString()
-      .split('T')[0];
+    const date = formatDate(new Date(event.properties.time * 1000));
 
     if (!grouped.has(date)) {
       grouped.set(date, []);
@@ -334,9 +333,7 @@ export function getUniqueUsersByDate(
   const grouped = new Map<string, Set<string>>();
 
   for (const event of events) {
-    const date = new Date(event.properties.time * 1000)
-      .toISOString()
-      .split('T')[0];
+    const date = formatDate(new Date(event.properties.time * 1000));
 
     if (!grouped.has(date)) {
       grouped.set(date, new Set());

@@ -43,14 +43,14 @@ export async function GET(request: NextRequest) {
     const appSessions = countEvents(events, 'App_Session_Started') + countEvents(events, '$ae_session') + countEvents(events, 'Session_Started');
     const totalSessions = marketingSessions + appSessions;
     // Count both old and new event names for backwards compatibility
-    const totalSearches = countEvents(events, 'Search Performed') + 
-                          countEvents(events, 'Search') + 
-                          countEvents(events, 'Search_Performed');
-    
+    const totalSearches = countEvents(events, 'Search Performed') +
+      countEvents(events, 'Search') +
+      countEvents(events, 'Search_Performed');
+
     // Count unique users who signed up (both old and new event names)
-    const signupEvents = events.filter((e) => 
-      e.event === 'SignUp' || 
-      e.event === 'Signup_Completed' || 
+    const signupEvents = events.filter((e) =>
+      e.event === 'SignUp' ||
+      e.event === 'Signup_Completed' ||
       e.event === 'Account Created'
     );
     const uniqueSignups = new Set(signupEvents.map((e) => e.properties.distinct_id)).size;
@@ -77,9 +77,9 @@ export async function GET(request: NextRequest) {
     const previousMarketingSessions = countEvents(previousEvents, 'Marketing_Session_Started');
     const previousAppSessions = countEvents(previousEvents, 'App_Session_Started') + countEvents(previousEvents, '$ae_session') + countEvents(previousEvents, 'Session_Started');
     const previousSessions = previousMarketingSessions + previousAppSessions;
-    const previousSearches = countEvents(previousEvents, 'Search Performed') + 
-                             countEvents(previousEvents, 'Search') + 
-                             countEvents(previousEvents, 'Search_Performed');
+    const previousSearches = countEvents(previousEvents, 'Search Performed') +
+      countEvents(previousEvents, 'Search') +
+      countEvents(previousEvents, 'Search_Performed');
 
     const usersTrend = calculateTrend(totalUsers, previousUsers);
     const sessionsTrend = calculateTrend(totalSessions, previousSessions);
@@ -94,7 +94,7 @@ export async function GET(request: NextRequest) {
 
     const dailyData = days.map((date) => {
       const dayEvents = events.filter((e) => {
-        const eventDate = new Date(e.properties.time * 1000).toISOString().split('T')[0];
+        const eventDate = formatDate(new Date(e.properties.time * 1000));
         return eventDate === date;
       });
 
@@ -107,9 +107,9 @@ export async function GET(request: NextRequest) {
         sessions: dayMarketingSessions + dayAppSessions,
         marketingSessions: dayMarketingSessions,
         appSessions: dayAppSessions,
-        searches: dayEvents.filter((e) => 
-          e.event === 'Search Performed' || 
-          e.event === 'Search' || 
+        searches: dayEvents.filter((e) =>
+          e.event === 'Search Performed' ||
+          e.event === 'Search' ||
           e.event === 'Search_Performed'
         ).length,
       };

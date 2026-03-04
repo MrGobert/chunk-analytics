@@ -109,7 +109,7 @@ export async function GET(request: NextRequest) {
     const days = getDaysInRange(dateRange.from, dateRange.to);
     const dailyData = days.map((date) => {
       const dayEvents = notesEvents.filter((e) => {
-        const eventDate = new Date(e.properties.time * 1000).toISOString().split('T')[0];
+        const eventDate = formatDate(new Date(e.properties.time * 1000));
         return eventDate === date;
       });
 

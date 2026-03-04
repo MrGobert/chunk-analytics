@@ -1,7 +1,17 @@
 import { format, subDays, parseISO } from 'date-fns';
 
 export function formatDate(date: Date): string {
-  return format(date, 'yyyy-MM-dd');
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Los_Angeles',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+  const parts = formatter.formatToParts(date);
+  const year = parts.find(p => p.type === 'year')?.value;
+  const month = parts.find(p => p.type === 'month')?.value;
+  const day = parts.find(p => p.type === 'day')?.value;
+  return `${year}-${month}-${day}`;
 }
 
 export function getDateRange(range: string): { from: string; to: string } {
@@ -62,12 +72,12 @@ export function getWeekNumber(date: Date): number {
 
 export function getDaysInRange(from: string, to: string): string[] {
   const days: string[] = [];
-  const start = parseISO(from);
-  const end = parseISO(to);
+  // Use noon UTC to avoid time zone shifts pushing the date backward/forward
+  let current = new Date(`${from}T12:00:00Z`);
+  const end = new Date(`${to}T12:00:00Z`);
 
-  let current = start;
   while (current <= end) {
-    days.push(formatDate(current));
+    days.push(current.toISOString().split('T')[0]);
     current = new Date(current.getTime() + 86400000);
   }
 

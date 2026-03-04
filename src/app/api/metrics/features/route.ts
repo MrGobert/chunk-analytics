@@ -7,7 +7,7 @@ import {
   getLastUpdated,
   UserType,
 } from '@/lib/mixpanel';
-import { getDateRange, getDaysInRange } from '@/lib/utils';
+import { getDateRange, getDaysInRange, formatDate } from '@/lib/utils';
 
 // Include both old and new event names for backwards compatibility
 const FEATURE_EVENTS = [
@@ -98,7 +98,7 @@ export async function GET(request: NextRequest) {
     const days = getDaysInRange(dateRange.from, dateRange.to);
     const featureOverTime = days.map((date) => {
       const dayEvents = featureEvents.filter((e) => {
-        const eventDate = new Date(e.properties.time * 1000).toISOString().split('T')[0];
+        const eventDate = formatDate(new Date(e.properties.time * 1000));
         return eventDate === date;
       });
 

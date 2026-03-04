@@ -5,7 +5,7 @@ import {
   getLastUpdated,
   UserType,
 } from '@/lib/mixpanel';
-import { getDateRange, getDaysInRange } from '@/lib/utils';
+import { getDateRange, getDaysInRange, formatDate } from '@/lib/utils';
 
 // Platform groupings
 type PlatformGroup = 'mobile' | 'macOS' | 'web';
@@ -22,7 +22,7 @@ function getPlatformGroup(event: { properties: Record<string, unknown> }): Platf
   if (os === 'macOS' || platform === 'macOS') return 'macOS';
   // Mobile (iOS, iPadOS, visionOS)
   if (os === 'iOS' || os === 'iPadOS' || os === 'visionOS' ||
-      platform === 'iOS' || platform === 'visionOS') return 'mobile';
+    platform === 'iOS' || platform === 'visionOS') return 'mobile';
 
   return null;
 }
@@ -124,7 +124,7 @@ export async function GET(request: NextRequest) {
         platformEvents
           .filter((e) => {
             if (!SIGNUP_EVENTS.includes(e.event)) return false;
-            const eventDate = new Date(e.properties.time * 1000).toISOString().split('T')[0];
+            const eventDate = formatDate(new Date(e.properties.time * 1000));
             return eventDate === date;
           })
           .map((e) => e.properties.distinct_id)
