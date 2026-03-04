@@ -185,7 +185,7 @@ export default function EmailTemplatesPage() {
           {/* Modal */}
           <div
             ref={modalRef}
-            className="relative w-full max-w-4xl max-h-[90vh] bg-surface-dark rounded-3xl border border-zinc-800 shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 fade-in duration-200"
+            className="relative w-full max-w-4xl h-[90vh] bg-surface-dark rounded-3xl border border-zinc-800 shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 fade-in duration-200"
           >
             {/* Modal Header */}
             <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800 shrink-0">
@@ -222,7 +222,7 @@ export default function EmailTemplatesPage() {
             </div>
 
             {/* Modal Body — iframe preview */}
-            <div className="flex-1 overflow-hidden bg-[#EAEAEA]">
+            <div className="flex-1 overflow-hidden bg-[#EAEAEA]" style={{ minHeight: '70vh' }}>
               {previewLoading ? (
                 <div className="flex items-center justify-center h-full">
                   <div className="flex flex-col items-center gap-3">
