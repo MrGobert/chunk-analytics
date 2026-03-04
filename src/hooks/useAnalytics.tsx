@@ -180,6 +180,9 @@ export function useAnalytics<T>(
   // Keep a stable ref to params so the callback doesn't depend on the object reference
   const paramsRef = useRef(params);
   paramsRef.current = params;
+  // Keep a stable ref to data to avoid stale closure in fetchData
+  const dataRef = useRef(data);
+  dataRef.current = data;
 
   useEffect(() => {
     mountedRef.current = true;
@@ -222,7 +225,7 @@ export function useAnalytics<T>(
       // No exact cache match — but we might have fallback data from different params
       // Keep whatever data we have, just mark as refreshing (not full loading)
       setIsRefreshing(true);
-      if (!data) {
+      if (!dataRef.current) {
         // Truly no data at all — first ever load
         setIsLoading(true);
         setIsRefreshing(false);

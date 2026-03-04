@@ -87,6 +87,7 @@ export async function GET(request: NextRequest) {
 
     // Research funnel
     const completedPct = totalReportsInitiated > 0 ? Math.min(100, (totalReportsCompleted / totalReportsInitiated) * 100) : 0;
+    // Note: viewedPct is based on event counts (not unique users), so it can exceed 100% if reports are viewed multiple times
     const viewedPct = totalReportsInitiated > 0 ? Math.min(100, (totalReportsViewed / totalReportsInitiated) * 100) : 0;
     const exportedAndShared = totalExports + totalShares;
     const exportedPct = totalReportsInitiated > 0 ? Math.min(100, (exportedAndShared / totalReportsInitiated) * 100) : 0;

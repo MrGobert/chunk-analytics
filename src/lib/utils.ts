@@ -77,7 +77,7 @@ export function getDaysInRange(from: string, to: string): string[] {
   const end = new Date(`${to}T12:00:00Z`);
 
   while (current <= end) {
-    days.push(current.toISOString().split('T')[0]);
+    days.push(formatDate(current));
     current = new Date(current.getTime() + 86400000);
   }
 

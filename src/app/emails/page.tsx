@@ -70,9 +70,11 @@ export default function EmailCampaignsPage() {
   const { dateRange, setDateRange, platform, setPlatform, userType, setUserType } = useDashboardFilters();
 
   const daysMap: Record<string, string> = {
+    '1d': '1',
     '7d': '7',
     '30d': '30',
     '90d': '90',
+    '365d': '365',
   };
   const days = daysMap[dateRange] || '30';
 

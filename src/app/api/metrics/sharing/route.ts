@@ -89,9 +89,18 @@ export async function GET(request: NextRequest) {
     const prevSharedViews = filterEventsByType(previousEvents, SHARED_VIEW_EVENTS);
     const prevSaveClicks = filterEventsByType(previousEvents, SAVE_CLICK_EVENTS);
 
-    const noteSharedTrend = calculateTrend(totalNotesShared, countEvents(prevShareCreation, 'Note_Shared'));
-    const conversationSharedTrend = calculateTrend(totalConversationsShared, countEvents(prevShareCreation, 'Conversation_Shared'));
-    const researchSharedTrend = calculateTrend(totalResearchShared, countEvents(prevShareCreation, 'Research_Report_Shared'));
+    const noteSharedTrend = calculateTrend(
+      totalNotesShared,
+      countEvents(prevShareCreation, 'Note_Shared') + countEvents(prevShareCreation, 'Note_Published')
+    );
+    const conversationSharedTrend = calculateTrend(
+      totalConversationsShared,
+      countEvents(prevShareCreation, 'Conversation_Shared') + countEvents(prevShareCreation, 'Conversation_Published')
+    );
+    const researchSharedTrend = calculateTrend(
+      totalResearchShared,
+      countEvents(prevShareCreation, 'Research_Report_Shared') + countEvents(prevShareCreation, 'Research_Published')
+    );
 
     const prevTotalViews = countEvents(prevSharedViews, 'Shared_Note_Viewed') +
       countEvents(prevSharedViews, 'Shared_Conversation_Viewed') +

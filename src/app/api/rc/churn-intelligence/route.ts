@@ -57,6 +57,7 @@ export async function GET(request: NextRequest) {
       atRiskCount: data.atRiskCount ?? 0,
       winbackRate: data.winbackRate ?? 0,
       lastUpdated: new Date().toISOString(),
+      ...(data.note ? { note: data.note } : {}),
     });
   } catch (error) {
     clearTimeout(timeoutId);
@@ -68,8 +69,9 @@ export async function GET(request: NextRequest) {
         winbackEffectiveness: {}, churnReasons: {},
         avgTenureBeforeChurn: 0, atRiskCount: 0, winbackRate: 0,
         lastUpdated: new Date().toISOString(),
+        dataUnavailable: true,
         note: 'Data unavailable - Cerebral server timeout. Try refreshing.',
-      });
+      }, { status: 504 });
     }
 
     console.error('Failed to fetch churn intelligence:', error);
@@ -78,7 +80,8 @@ export async function GET(request: NextRequest) {
       winbackEffectiveness: {}, churnReasons: {},
       avgTenureBeforeChurn: 0, atRiskCount: 0, winbackRate: 0,
       lastUpdated: new Date().toISOString(),
+      dataUnavailable: true,
       note: `Data unavailable - ${error instanceof Error ? error.message : 'Unknown error'}`,
-    });
+    }, { status: 502 });
   }
 }

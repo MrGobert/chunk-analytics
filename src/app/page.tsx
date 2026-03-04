@@ -58,13 +58,13 @@ export default function OverviewPage() {
   const daysMap: Record<string, string> = { '7d': '7', '30d': '30', '90d': '90' };
   const days = daysMap[dateRange] || '30';
 
-  const { data: revenue, isLoading: revenueLoading, isRefreshing: revenueRefreshing, lastUpdated: revenueUpdated } =
+  const { data: revenue, isLoading: revenueLoading, isRefreshing: revenueRefreshing, lastUpdated: revenueUpdated, error: revenueError } =
     useAnalytics<RevenueSummary>('/api/rc/revenue-summary', { days });
 
-  const { data: funnel, isLoading: funnelLoading } =
+  const { data: funnel, isLoading: funnelLoading, error: funnelError } =
     useAnalytics<SubscriberFunnel>('/api/rc/subscriber-funnel', { days });
 
-  const { data: emailStats, isLoading: emailsLoading } =
+  const { data: emailStats, isLoading: emailsLoading, error: emailsError } =
     useAnalytics<EmailStats>('/api/metrics/emails', { days });
 
   const isLoading = revenueLoading || funnelLoading || emailsLoading;
@@ -83,6 +83,16 @@ export default function OverviewPage() {
 
   if (isLoading) {
     return <SkeletonPage statCards={5} statCardCols="grid-cols-1 md:grid-cols-2 lg:grid-cols-5" chartCards={3} />;
+  }
+
+  if (revenueError || funnelError || emailsError) {
+    const errorMsg = revenueError || funnelError || emailsError;
+    return (
+      <div className="text-center py-20">
+        <div className="text-red-400 mb-4">{errorMsg}</div>
+        <p className="text-zinc-500 text-sm">Make sure CEREBRAL_AUTH_TOKEN is configured.</p>
+      </div>
+    );
   }
 
   if (!revenue) {

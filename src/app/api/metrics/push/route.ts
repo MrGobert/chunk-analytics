@@ -43,7 +43,7 @@ export async function GET(request: NextRequest) {
     ).size;
 
     // Get previous period for trends
-    const rangeDays = range === '7d' ? 7 : range === '90d' ? 90 : 30;
+    const rangeDays = range === '1d' ? 1 : range === '7d' ? 7 : range === '90d' ? 90 : range === '365d' ? 365 : 30;
     const previousFrom = formatDate(subDays(new Date(dateRange.from), rangeDays));
     const previousTo = formatDate(subDays(new Date(dateRange.to), rangeDays));
 

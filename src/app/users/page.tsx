@@ -82,7 +82,7 @@ export default function UsersPage() {
             data={metrics.geographic}
             columns={[
               { key: 'country', header: 'Country' },
-              { key: 'users', header: 'Events' },
+              { key: 'users', header: 'Users' },
               {
                 key: 'percentage',
                 header: 'Share',

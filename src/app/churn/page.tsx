@@ -51,6 +51,7 @@ interface ChurnIntelligence {
   winbackRate: number;
   lastUpdated: string;
   note?: string;
+  dataUnavailable?: boolean;
 }
 
 export default function ChurnIntelligencePage() {
@@ -162,6 +163,13 @@ export default function ChurnIntelligencePage() {
     );
   }
 
+  const dataUnavailable = churn.dataUnavailable || (
+    churn.churnRate === 0 &&
+    churn.atRiskCount === 0 &&
+    churn.winbackRate === 0 &&
+    !!churn.note
+  );
+
   const handleAtRiskSortClick = (col: 'healthScore' | 'daysSinceActive' | 'subscriptionAge') => {
     if (atRiskSort === col) {
       setAtRiskSortDir((d) => d === 'asc' ? 'desc' : 'asc');
@@ -182,8 +190,23 @@ export default function ChurnIntelligencePage() {
         isRefreshing={isRefreshing}
       />
 
-      {/* Warning banner */}
-      {churn.note && (
+      {/* Data unavailable banner */}
+      {dataUnavailable && churn.note && (
+        <div className="mb-6 p-4 bg-amber-900/30 border border-amber-600/50 rounded-lg">
+          <div className="flex items-center gap-3 text-amber-400">
+            <svg className="w-6 h-6 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+            <div>
+              <p className="font-semibold text-sm">Data Temporarily Unavailable</p>
+              <p className="text-amber-400/80 text-xs mt-1">{churn.note}</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Warning banner (non-unavailable notes) */}
+      {!dataUnavailable && churn.note && (
         <div className="mb-6 p-4 bg-yellow-900/20 border border-yellow-700/50 rounded-lg">
           <div className="flex items-center gap-2 text-yellow-400 text-sm">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -198,8 +221,8 @@ export default function ChurnIntelligencePage() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
         <StatCard
           title="Monthly Churn Rate"
-          value={churn.churnRate / 100}
-          format="percentage"
+          value={dataUnavailable ? '—' : churn.churnRate / 100}
+          format={dataUnavailable ? 'text' : 'percentage'}
           icon={
             <svg className="w-5 h-5 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 17h8m0 0V9m0 8l-8-8-4 4-6-6" />
@@ -208,7 +231,8 @@ export default function ChurnIntelligencePage() {
         />
         <StatCard
           title="At-Risk Users"
-          value={churn.atRiskCount || (churn.atRiskUsers || []).length}
+          value={dataUnavailable ? '—' : (churn.atRiskCount || (churn.atRiskUsers || []).length)}
+          format={dataUnavailable ? 'text' : undefined}
           icon={
             <svg className="w-5 h-5 text-yellow-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
@@ -217,8 +241,8 @@ export default function ChurnIntelligencePage() {
         />
         <StatCard
           title="Winback Rate"
-          value={churn.winbackRate / 100}
-          format="percentage"
+          value={dataUnavailable ? '—' : churn.winbackRate / 100}
+          format={dataUnavailable ? 'text' : 'percentage'}
           icon={
             <svg className="w-5 h-5 text-[#34D399]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
@@ -227,7 +251,7 @@ export default function ChurnIntelligencePage() {
         />
         <StatCard
           title="Avg Tenure Before Churn"
-          value={`${churn.avgTenureBeforeChurn}d`}
+          value={dataUnavailable ? '—' : `${churn.avgTenureBeforeChurn}d`}
           format="text"
           icon={
             <svg className="w-5 h-5 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">

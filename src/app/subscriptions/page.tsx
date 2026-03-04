@@ -17,13 +17,22 @@ export default function SubscriptionsPage() {
   
   
 
-  const { data: metrics, isLoading, isRefreshing, lastUpdated } = useAnalytics<FunnelMetrics>(
+  const { data: metrics, isLoading, isRefreshing, lastUpdated, error } = useAnalytics<FunnelMetrics>(
     '/api/metrics/funnel',
     { range: dateRange, platform, userType }
   );
 
   if (isLoading) {
     return <SkeletonPage statCards={4} chartCards={2} />;
+  }
+
+  if (error) {
+    return (
+      <div className="text-center py-20">
+        <div className="text-red-400 mb-4">{error}</div>
+        <p className="text-zinc-500 text-sm">Failed to load subscription funnel data.</p>
+      </div>
+    );
   }
 
   if (!metrics) {

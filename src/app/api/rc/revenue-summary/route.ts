@@ -61,6 +61,7 @@ export async function GET(request: NextRequest) {
       churned: data.churned ?? 0,
       netNew: data.netNew ?? 0,
       lastUpdated: new Date().toISOString(),
+      ...(data.note ? { note: data.note } : {}),
     });
   } catch (error) {
     clearTimeout(timeoutId);

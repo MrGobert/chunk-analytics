@@ -262,7 +262,7 @@ export interface SharingMetrics {
   viewToShareRatio: number;
   saveToChunkClickRate: number;
   sharesCreatedOverTime: { date: string; note: number; conversation: number; research: number; collection: number }[];
-  sharedViewsOverTime: { date: string; note: number; conversation: number; research: number }[];
+  sharedViewsOverTime: { date: string; note: number; conversation: number; research: number; collection: number }[];
   sharingFunnel: FunnelStep[];
   contentTypeDistribution: { name: string; value: number }[];
   viewToShareByType: { type: string; shares: number; views: number; ratio: number }[];

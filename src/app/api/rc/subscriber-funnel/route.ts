@@ -53,6 +53,7 @@ export async function GET(request: NextRequest) {
       conversionByPlatform: data.conversionByPlatform ?? {},
       weekOverWeek: data.weekOverWeek ?? { trialStarts: 0, conversions: 0 },
       lastUpdated: new Date().toISOString(),
+      ...(data.note ? { note: data.note } : {}),
     });
   } catch (error) {
     clearTimeout(timeoutId);

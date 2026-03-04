@@ -67,9 +67,9 @@ export default function SearchesPage() {
         />
         <StatCard
           title="Peak Hour"
-          value={metrics.hourlyDistribution.reduce((max, curr) =>
-            curr.count > max.count ? curr : max
-          ).hour}
+          value={metrics.hourlyDistribution.length > 0
+            ? metrics.hourlyDistribution.reduce((max, curr) => curr.count > max.count ? curr : max).hour
+            : 0}
           format="number"
         />
       </div>
