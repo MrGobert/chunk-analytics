@@ -81,26 +81,9 @@ export default function EmailCampaignsPage() {
     { days }
   );
 
-  if (isLoading) {
-    return <SkeletonPage statCards={6} statCardCols="grid-cols-1 md:grid-cols-6" chartCards={2} />;
-  }
-
-  if (error) {
-    return (
-      <div className="text-center py-20">
-        <div className="text-red-400 mb-4">{error}</div>
-        <p className="text-zinc-500 text-sm">
-          Make sure CEREBRAL_AUTH_TOKEN is configured in your environment.
-        </p>
-      </div>
-    );
-  }
-
-  // Safely extract stats with defaults
-  const totals = stats?.totals ?? { sent: 0, converted: 0, overallConversionRate: 0 };
+  // ALL hooks must be called before any conditional returns (Rules of Hooks)
   const byEmailType = stats?.by_email_type ?? {};
 
-  // Transform data for charts with null-safe handling
   const byTypeData = useMemo(() => Object.entries(byEmailType || {}).map(([type, data]) => {
     const sent = data?.sent ?? 0;
     const delivered = data?.delivered ?? 0;
@@ -123,6 +106,33 @@ export default function EmailCampaignsPage() {
     };
   }), [byEmailType]);
 
+  const dailyChartData = useMemo(() => {
+    const byDay = stats?.by_day ?? [];
+    return byDay.map((day) => ({
+      date: new Date(day.date + 'T00:00:00Z').toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+      sent: day.sent,
+      converted: day.converted,
+    }));
+  }, [stats?.by_day]);
+
+  // Early returns AFTER all hooks
+  if (isLoading) {
+    return <SkeletonPage statCards={6} statCardCols="grid-cols-1 md:grid-cols-6" chartCards={2} />;
+  }
+
+  if (error) {
+    return (
+      <div className="text-center py-20">
+        <div className="text-red-400 mb-4">{error}</div>
+        <p className="text-zinc-500 text-sm">
+          Make sure CEREBRAL_AUTH_TOKEN is configured in your environment.
+        </p>
+      </div>
+    );
+  }
+
+  const totals = stats?.totals ?? { sent: 0, converted: 0, overallConversionRate: 0 };
+
   const conversionData = byTypeData.map((item) => ({
     name: item.name,
     value: item.converted,
@@ -137,14 +147,6 @@ export default function EmailCampaignsPage() {
     type: item.name,
     rate: item.conversionRate,
   }));
-
-  // Time-series data for the area chart
-  const byDay = stats?.by_day ?? [];
-  const dailyChartData = useMemo(() => byDay.map((day) => ({
-    date: new Date(day.date + 'T00:00:00Z').toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-    sent: day.sent,
-    converted: day.converted,
-  })), [byDay]);
 
   // Calculate overall open and click rates
   const totalDelivered = byTypeData.reduce((sum, item) => sum + item.delivered, 0);
