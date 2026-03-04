@@ -152,7 +152,7 @@ export async function GET(request: NextRequest) {
       ? Math.min(1, Math.max(0, totalDocumentUploads / totalNotesCreated))
       : 0;
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       totalNotesCreated,
       totalNotesViewed,
       totalNotesSaved,
@@ -181,6 +181,8 @@ export async function GET(request: NextRequest) {
       userType,
       lastUpdated: getLastUpdated(),
     });
+    response.headers.set('Cache-Control', 'public, s-maxage=300, stale-while-revalidate=600');
+    return response;
   } catch (error) {
     console.error('Error fetching notes metrics:', error);
     return NextResponse.json(

@@ -133,7 +133,7 @@ export async function GET(request: NextRequest) {
       .map(([hour, count]) => ({ hour, count }))
       .sort((a, b) => a.hour - b.hour);
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       // Summary stats
       permissionRequested,
       permissionGranted,
@@ -160,6 +160,8 @@ export async function GET(request: NextRequest) {
       userType,
       lastUpdated: getLastUpdated(),
     });
+    response.headers.set('Cache-Control', 'public, s-maxage=300, stale-while-revalidate=600');
+    return response;
   } catch (error) {
     console.error('Error fetching push metrics:', error);
     return NextResponse.json(

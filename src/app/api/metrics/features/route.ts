@@ -148,15 +148,25 @@ export async function GET(request: NextRequest) {
       };
     }).filter((s) => s.features.length > 0);
 
-    return NextResponse.json({
+    // Filter overTime data to only include top 5 features
+    const topFeatures = featureUsage.slice(0, 5);
+    const filteredOverTime = featureOverTime.map(day => {
+      const filtered: Record<string, string | number> = { date: day.date };
+      topFeatures.forEach(f => { filtered[f.feature] = day[f.feature] || 0; });
+      return filtered;
+    });
+
+    const response = NextResponse.json({
       featureUsage,
-      featureOverTime,
+      featureOverTime: filteredOverTime,
       featuresBySegment,
       dateRange,
       platform,
       userType,
       lastUpdated: getLastUpdated(),
     });
+    response.headers.set('Cache-Control', 'public, s-maxage=300, stale-while-revalidate=600');
+    return response;
   } catch (error) {
     console.error('Error fetching feature metrics:', error);
     return NextResponse.json(

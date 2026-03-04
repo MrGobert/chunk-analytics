@@ -171,7 +171,7 @@ export default function RevenuePage() {
           }
         />
         <StatCard
-          title="Net New MRR"
+          title="Est. Net New MRR"
           value={`$${netNewMrr.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
           format="text"
           icon={

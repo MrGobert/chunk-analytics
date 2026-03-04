@@ -125,7 +125,7 @@ export async function GET(request: NextRequest) {
       .sort((a, b) => b.users - a.users)
       .slice(0, 10);
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       dau,
       wau,
       mau,
@@ -138,6 +138,8 @@ export async function GET(request: NextRequest) {
       userBreakdown,
       lastUpdated: getLastUpdated(),
     });
+    response.headers.set('Cache-Control', 'public, s-maxage=300, stale-while-revalidate=600');
+    return response;
   } catch (error) {
     console.error('Error fetching user metrics:', error);
     return NextResponse.json(

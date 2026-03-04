@@ -17,7 +17,7 @@ export default function SearchesPage() {
   
   
 
-  const { data: metrics, isLoading, isRefreshing, lastUpdated } = useAnalytics<SearchMetrics & { totalSearches: number }>(
+  const { data: metrics, isLoading, isRefreshing, lastUpdated } = useAnalytics<SearchMetrics & { totalSearches: number; searchTrend: number | null }>(
     '/api/metrics/searches',
     { range: dateRange, platform, userType }
   );
@@ -60,7 +60,7 @@ export default function SearchesPage() {
       />
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-        <StatCard title="Total Searches" value={metrics.totalSearches} />
+        <StatCard title="Total Searches" value={metrics.totalSearches} trend={metrics.searchTrend} />
         <StatCard
           title="Avg Daily Searches"
           value={Math.round(metrics.totalSearches / metrics.searchesOverTime.length) || 0}

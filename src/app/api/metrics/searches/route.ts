@@ -5,10 +5,12 @@ import {
   filterByUserType,
   filterEventsByType,
   getPropertyDistribution,
+  calculateTrend,
   getLastUpdated,
   UserType,
 } from '@/lib/mixpanel';
 import { getDateRange, getDaysInRange, formatDate } from '@/lib/utils';
+import { subDays } from 'date-fns';
 
 export async function GET(request: NextRequest) {
   try {
@@ -26,6 +28,23 @@ export async function GET(request: NextRequest) {
 
     // Include both old and new event names for backwards compatibility
     const searchEvents = filterEventsByType(events, ['Search Performed', 'Search', 'Search_Performed']);
+
+    // Previous period for trend
+    const rangeDays = range === '1d' ? 1 : range === '7d' ? 7 : range === '90d' ? 90 : range === '365d' ? 365 : 30;
+    const previousFrom = formatDate(subDays(new Date(dateRange.from), rangeDays));
+    const previousTo = formatDate(subDays(new Date(dateRange.to), rangeDays));
+
+    let previousEvents: Awaited<ReturnType<typeof fetchMixpanelEvents>> = [];
+    try {
+      const allPreviousEvents = await fetchMixpanelEvents(previousFrom, previousTo);
+      const prevPlatformFiltered = filterByPlatform(allPreviousEvents, platform);
+      previousEvents = filterByUserType(prevPlatformFiltered, userType);
+    } catch {
+      // Use empty array if previous period data unavailable
+    }
+
+    const prevSearchEvents = filterEventsByType(previousEvents, ['Search Performed', 'Search', 'Search_Performed']);
+    const searchTrend = calculateTrend(searchEvents.length, prevSearchEvents.length);
 
     // Searches over time
     const days = getDaysInRange(dateRange.from, dateRange.to);
@@ -65,18 +84,21 @@ export async function GET(request: NextRequest) {
     }
     const hourlyDistribution = hourlyCount.map((count, hour) => ({ hour, count }));
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       searchesOverTime,
       searchModes,
       modelsUsed,
       contextUsage,
       hourlyDistribution,
       totalSearches: searchEvents.length,
+      searchTrend,
       dateRange,
       platform,
       userType,
       lastUpdated: getLastUpdated(),
     });
+    response.headers.set('Cache-Control', 'public, s-maxage=300, stale-while-revalidate=600');
+    return response;
   } catch (error) {
     console.error('Error fetching search metrics:', error);
     return NextResponse.json(

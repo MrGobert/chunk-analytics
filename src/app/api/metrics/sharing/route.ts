@@ -214,7 +214,7 @@ export async function GET(request: NextRequest) {
       },
     ];
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       totalNotesShared,
       totalConversationsShared,
       totalResearchShared,
@@ -241,6 +241,8 @@ export async function GET(request: NextRequest) {
       userType,
       lastUpdated: getLastUpdated(),
     });
+    response.headers.set('Cache-Control', 'public, s-maxage=300, stale-while-revalidate=600');
+    return response;
   } catch (error) {
     console.error('Error fetching sharing metrics:', error);
     return NextResponse.json(

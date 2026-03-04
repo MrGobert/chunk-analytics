@@ -164,7 +164,7 @@ export async function GET(request: NextRequest) {
     const averageSourceCount = completedEvents.length > 0 ? Math.round(totalSources / completedEvents.length) : 0;
     const averageWordCount = completedEvents.length > 0 ? Math.round(totalWords / completedEvents.length) : 0;
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       totalReportsInitiated,
       totalReportsCompleted,
       completionRate,
@@ -191,6 +191,8 @@ export async function GET(request: NextRequest) {
       userType,
       lastUpdated: getLastUpdated(),
     });
+    response.headers.set('Cache-Control', 'public, s-maxage=300, stale-while-revalidate=600');
+    return response;
   } catch (error) {
     console.error('Error fetching research metrics:', error);
     return NextResponse.json(

@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import Link from 'next/link';
 import { ArrowLeft, Mail, Clock, Zap, Calendar, Eye, X } from 'lucide-react';
+import { useAnalytics } from '@/hooks/useAnalytics';
 
 interface EmailTemplate {
   id: string;
@@ -33,25 +34,17 @@ const TRIGGER_CONFIG = {
 };
 
 export default function EmailTemplatesPage() {
-  const [templates, setTemplates] = useState<EmailTemplate[]>([]);
+  const { data: templateData, isLoading: loading, error: fetchError } =
+    useAnalytics<{ templates: EmailTemplate[] }>('/api/email-templates', {});
+  const templates = templateData?.templates || [];
   const [selectedTemplate, setSelectedTemplate] = useState<TemplatePreview | null>(null);
-  const [loading, setLoading] = useState(true);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const modalRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    fetch('/api/email-templates')
-      .then(res => res.json())
-      .then(data => {
-        setTemplates(data.templates || []);
-        setLoading(false);
-      })
-      .catch(err => {
-        setError('Failed to load templates');
-        setLoading(false);
-      });
-  }, []);
+    if (fetchError) setError(fetchError);
+  }, [fetchError]);
 
   const openPreview = useCallback(async (template: EmailTemplate) => {
     setPreviewLoading(true);

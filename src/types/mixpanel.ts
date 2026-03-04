@@ -126,7 +126,7 @@ export interface SearchMetrics {
 
 export interface FunnelMetrics {
   funnel: FunnelStep[];
-  revenueByPlan: { plan: string; revenue: number; count: number }[];
+  revenueByPlan: { plan: string; revenue: number; count: number; estimated?: boolean }[];
   trialConversion: { converted: number; notConverted: number };
   failedPurchases: { error: string; count: number }[];
   paywallSources: { source: string; count: number }[];
