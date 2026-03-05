@@ -23,7 +23,6 @@ const FEATURE_EVENTS = [
   'Memory Management Viewed',
   'Keyboard Shortcut Used',
   // New event names (AnalyticsService refactor)
-  'Tab_Selected',
   'Note_Created',
   'Note_Viewed',
   'Note_Saved',

@@ -37,7 +37,7 @@ export default function BarChart({
   data,
   xKey,
   yKey,
-  color = '#8b5cf6',
+  color = '#10b981',
   colors,
   horizontal = false,
 }: BarChartProps) {
@@ -51,7 +51,7 @@ export default function BarChart({
           layout="vertical"
           margin={{ top: 5, right: 20, left: 80, bottom: 5 }}
         >
-          <CartesianGrid strokeDasharray="3 3" stroke="#d4d4d8" horizontal={false} />
+          <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" horizontal={false} />
           <XAxis type="number" stroke="#71717a" fontSize={12} fontFamily="var(--font-mono)" tickLine={false} axisLine={false} />
           <YAxis
             type="category"
@@ -65,13 +65,14 @@ export default function BarChart({
           />
           <Tooltip
             contentStyle={{
-              backgroundColor: '#E8E4DD',
-              border: '1px solid #d4d4d8',
-              borderRadius: '0',
+              backgroundColor: 'rgba(24, 24, 27, 0.8)',
+              border: '1px solid rgba(255,255,255,0.1)',
+              borderRadius: '12px',
               fontFamily: 'var(--font-mono)',
+              backdropFilter: 'blur(8px)',
             }}
-            labelStyle={{ color: '#71717a', fontWeight: 'bold' }}
-            itemStyle={{ color: '#111111' }}
+            labelStyle={{ color: '#a1a1aa', fontWeight: 'bold' }}
+            itemStyle={{ color: '#fafafa' }}
           />
           <Bar dataKey={yKey} radius={[0, 4, 4, 0]}>
             {data.map((_, index) => (
@@ -89,7 +90,7 @@ export default function BarChart({
   return (
     <ResponsiveContainer width="100%" height="100%">
       <RechartsBarChart data={data} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke="#d4d4d8" vertical={false} />
+        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
         <XAxis
           dataKey={xKey}
           stroke="#71717a"
@@ -101,13 +102,14 @@ export default function BarChart({
         <YAxis stroke="#71717a" fontSize={12} fontFamily="var(--font-mono)" tickLine={false} axisLine={false} />
         <Tooltip
           contentStyle={{
-            backgroundColor: '#E8E4DD',
-            border: '1px solid #d4d4d8',
-            borderRadius: '0',
+            backgroundColor: 'rgba(24, 24, 27, 0.8)',
+            border: '1px solid rgba(255,255,255,0.1)',
+            borderRadius: '12px',
             fontFamily: 'var(--font-mono)',
+            backdropFilter: 'blur(8px)',
           }}
-          labelStyle={{ color: '#71717a', fontWeight: 'bold' }}
-          itemStyle={{ color: '#111111' }}
+          labelStyle={{ color: '#a1a1aa', fontWeight: 'bold' }}
+          itemStyle={{ color: '#fafafa' }}
         />
         <Bar dataKey={yKey} radius={[4, 4, 0, 0]}>
           {data.map((_, index) => (

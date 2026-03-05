@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import gsap from 'gsap';
 import DateRangePicker from '@/components/ui/DateRangePicker';
 import PlatformFilter from '@/components/ui/PlatformFilter';
@@ -32,8 +32,10 @@ export default function PageHeader({
   isRefreshing,
 }: PageHeaderProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
+    setMounted(true);
     const ctx = gsap.context(() => {
       gsap.fromTo('.header-animate',
         { y: 20, opacity: 0 },
@@ -47,9 +49,9 @@ export default function PageHeader({
     <div ref={containerRef} className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-8">
       <div>
         <h1 className="header-animate text-3xl md:text-4xl font-bold font-sans tracking-tight text-foreground">{title}</h1>
-        {subtitle && <p className="header-animate text-zinc-600 mt-2 font-medium">{subtitle}</p>}
+        {subtitle && <p className="header-animate text-zinc-400 mt-2 font-medium">{subtitle}</p>}
         <div className="flex items-center gap-2 mt-3 header-animate">
-          {lastUpdated && (
+          {mounted && lastUpdated && (
             <p className="text-xs font-mono text-zinc-500">
               Last updated: {new Date(lastUpdated).toLocaleString()}
             </p>

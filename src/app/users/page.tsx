@@ -16,8 +16,8 @@ interface ExtendedUserMetrics extends UserMetrics {
 
 export default function UsersPage() {
   const { dateRange, setDateRange, platform, setPlatform, userType, setUserType } = useDashboardFilters();
-  
-  
+
+
 
   const { data: metrics, isLoading, isRefreshing, lastUpdated } = useAnalytics<ExtendedUserMetrics>(
     '/api/metrics/users',
@@ -56,14 +56,14 @@ export default function UsersPage() {
           <LineChart
             data={metrics.dau}
             xKey="date"
-            lines={[{ key: 'users', color: '#8b5cf6', name: 'DAU' }]}
+            lines={[{ key: 'users', color: '#10b981', name: 'DAU' }]}
           />
         </ChartCard>
         <ChartCard title="Weekly Active Users (WAU)" subtitle="Unique users per week">
-          <BarChart data={metrics.wau} xKey="week" yKey="users" color="#6366f1" />
+          <BarChart data={metrics.wau} xKey="week" yKey="users" color="#34d399" />
         </ChartCard>
         <ChartCard title="Monthly Active Users (MAU)" subtitle="Unique users per month">
-          <BarChart data={metrics.mau} xKey="month" yKey="users" color="#3b82f6" />
+          <BarChart data={metrics.mau} xKey="month" yKey="users" color="#059669" />
         </ChartCard>
       </div>
 
@@ -72,7 +72,7 @@ export default function UsersPage() {
           <BarChart data={metrics.sessionDurations} xKey="range" yKey="count" />
         </ChartCard>
         <ChartCard title="Sessions per User" subtitle="Number of sessions each user has">
-          <BarChart data={metrics.sessionsPerUser} xKey="sessions" yKey="users" color="#14b8a6" />
+          <BarChart data={metrics.sessionsPerUser} xKey="sessions" yKey="users" color="#10b981" />
         </ChartCard>
       </div>
 

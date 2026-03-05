@@ -22,10 +22,10 @@ export default function FunnelChart({ data }: FunnelChartProps) {
         return (
           <div key={step.name} className="relative">
             <div className="flex items-center gap-4">
-              <div className="w-32 text-sm text-zinc-500 text-right">{step.name}</div>
+              <div className="w-32 text-sm text-zinc-400 text-right">{step.name}</div>
               <div className="flex-1">
                 <div
-                  className="h-10 rounded-lg bg-gradient-to-r from-violet-600 to-purple-500 flex items-center justify-end pr-3 transition-all"
+                  className="h-10 rounded-lg bg-gradient-to-r from-emerald-600/80 to-teal-400/80 flex items-center justify-end pr-3 transition-all backdrop-blur-sm border border-emerald-400/20 shadow-[0_0_15px_rgba(16,185,129,0.15)]"
                   style={{ width: `${Math.max(width, 10)}%` }}
                 >
                   <span className="text-sm font-medium text-foreground">{step.count.toLocaleString()}</span>

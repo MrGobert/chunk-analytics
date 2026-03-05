@@ -141,9 +141,9 @@ export default function RevenuePage() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 mb-8">
         <StatCard
           title="MRR"
-          value={`$${revenue.mrr.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+          value={revenue.mrr}
           trend={mrrGrowth}
-          format="text"
+          format="currency"
           icon={
             <svg className="w-5 h-5 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -152,8 +152,8 @@ export default function RevenuePage() {
         />
         <StatCard
           title="ARR"
-          value={`$${revenue.arr.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
-          format="text"
+          value={revenue.arr}
+          format="currency"
           icon={
             <svg className="w-5 h-5 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
@@ -162,8 +162,8 @@ export default function RevenuePage() {
         />
         <StatCard
           title="Today's Revenue"
-          value={`$${revenue.todayRevenue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
-          format="text"
+          value={revenue.todayRevenue}
+          format="currency"
           icon={
             <svg className="w-5 h-5 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
@@ -172,8 +172,8 @@ export default function RevenuePage() {
         />
         <StatCard
           title="Est. Net New MRR"
-          value={`$${netNewMrr.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
-          format="text"
+          value={netNewMrr}
+          format="currency"
           icon={
             <svg className="w-5 h-5 text-[#34D399]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
@@ -196,7 +196,7 @@ export default function RevenuePage() {
       <div className="grid grid-cols-1 gap-6 mb-8">
         <ChartCard title="MRR Trend" subtitle={`Monthly recurring revenue — last ${days} days`}>
           {mrrChartData.length > 0 ? (
-            <AreaChart data={mrrChartData} xKey="date" yKey="mrr" color="#E63B2E" />
+            <AreaChart data={mrrChartData} xKey="date" yKey="mrr" color="#10b981" />
           ) : (
             <div className="flex items-center justify-center h-full text-zinc-500 font-mono text-sm">
               No MRR trend data available yet
@@ -211,7 +211,7 @@ export default function RevenuePage() {
           {platformData.length > 0 ? (
             <PieChart
               data={platformData}
-              colors={['#E63B2E', '#3b82f6', '#22c55e', '#f59e0b', '#8b5cf6']}
+              colors={['#10b981', '#3b82f6', '#8b5cf6', '#f43f5e', '#f59e0b']}
             />
           ) : (
             <div className="flex items-center justify-center h-full text-zinc-500 font-mono text-sm">
@@ -226,7 +226,7 @@ export default function RevenuePage() {
               data={productData}
               xKey="product"
               yKey="revenue"
-              color="#8b5cf6"
+              color="#10b981"
             />
           ) : (
             <div className="flex items-center justify-center h-full text-zinc-500 font-mono text-sm">

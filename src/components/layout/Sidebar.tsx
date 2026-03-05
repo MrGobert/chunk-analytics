@@ -145,7 +145,7 @@ export default function Sidebar() {
   return (
     <>
       {/* Mobile header */}
-      <div className="lg:hidden fixed top-0 left-0 right-0 z-40 bg-surface-dark border-b border-zinc-900 px-4 py-3 flex items-center justify-between">
+      <div className="lg:hidden fixed top-0 left-0 right-0 z-40 bg-black/60 backdrop-blur-md border-b border-white/5 px-4 py-3 flex items-center justify-between">
         <div className="flex items-center justify-center">
           <Image src="/chunk-logo-white.png" alt="Chunk Logo" width={100} height={28} className="w-auto h-7 object-contain" />
         </div>
@@ -169,13 +169,13 @@ export default function Sidebar() {
       {/* Sidebar */}
       <aside
         className={`
-          fixed left-0 top-0 h-screen w-64 bg-surface-dark border-r border-zinc-900 flex flex-col z-50
+          fixed left-0 top-0 h-screen w-64 bg-black/40 backdrop-blur-2xl border-r border-white/5 flex flex-col z-50
           transition-transform duration-300 ease-in-out
           lg:translate-x-0
           ${isOpen ? 'translate-x-0' : '-translate-x-full'}
         `}
       >
-        <div className="p-6 border-b border-zinc-900">
+        <div className="p-6 border-b border-white/5">
           <div className="flex items-center justify-center py-2">
             <Image src="/chunk-logo-white.png" alt="Chunk Logo" width={120} height={36} className="w-auto h-9 object-contain" />
           </div>
@@ -198,9 +198,9 @@ export default function Sidebar() {
                     <li key={item.href}>
                       <Link
                         href={item.href}
-                        className={`flex items-center gap-3 px-4 py-2.5 rounded-[2rem] transition-all duration-300 hover-lift ${isActive
-                          ? 'bg-accent text-white font-medium'
-                          : 'text-zinc-500 hover:text-white hover:bg-primary font-medium'
+                        className={`flex items-center gap-3 px-4 py-2.5 rounded-[1rem] transition-all duration-300 btn-magnetic ${isActive
+                          ? 'bg-accent/10 border border-accent/30 text-accent font-medium shadow-[0_0_15px_var(--accent-glow)]'
+                          : 'text-zinc-500 hover:text-white hover:bg-white/5 font-medium border border-transparent'
                           }`}
                       >
                         <Icon className="w-4 h-4" strokeWidth={isActive ? 2.5 : 2} />
@@ -214,13 +214,13 @@ export default function Sidebar() {
           ))}
         </nav>
 
-        <div className="p-4 border-t border-zinc-900 space-y-3">
+        <div className="p-4 border-t border-white/5 space-y-3">
           <Link
             href="/emails/templates"
-            className={`flex items-center gap-3 px-4 py-3 rounded-[2rem] transition-all duration-300 hover-lift ${
+            className={`flex items-center gap-3 px-4 py-3 rounded-[1rem] transition-all duration-300 btn-magnetic ${
               pathname === '/emails/templates'
-                ? 'bg-accent text-white font-medium'
-                : 'text-zinc-600 hover:text-white hover:bg-primary font-medium'
+                ? 'bg-accent/10 border border-accent/30 text-accent font-medium shadow-[0_0_15px_var(--accent-glow)]'
+                : 'text-zinc-500 hover:text-white hover:bg-white/5 font-medium border border-transparent'
             }`}
           >
             <Eye className="w-4 h-4" strokeWidth={pathname === '/emails/templates' ? 2.5 : 2} />

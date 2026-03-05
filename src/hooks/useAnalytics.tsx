@@ -129,6 +129,8 @@ export function AnalyticsCacheProvider({ children }: { children: ReactNode }) {
   );
 }
 
+let globalIsHydrated = false;
+
 // ─── Hook ────────────────────────────────────────────────────────────────────
 
 export function useAnalytics<T>(
@@ -164,14 +166,14 @@ export function useAnalytics<T>(
     return null;
   })();
 
-  const [data, setData] = useState<T | null>(fallbackData);
-  // Only show full loading skeleton if we have NO data at all (not even stale/fallback)
-  const [isLoading, setIsLoading] = useState(!fallbackData);
+  const [data, setData] = useState<T | null>(globalIsHydrated ? fallbackData : null);
+  // Only show full loading skeleton if we have NO data at all (not even stale/fallback) or if we are hydrating
+  const [isLoading, setIsLoading] = useState(globalIsHydrated ? !fallbackData : true);
   // Show refreshing indicator when we have data but are fetching fresh data
-  const [isRefreshing, setIsRefreshing] = useState(fallbackData ? !isFresh : false);
+  const [isRefreshing, setIsRefreshing] = useState(globalIsHydrated ? (fallbackData ? !isFresh : false) : false);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<string>(
-    cached ? new Date(cached.timestamp).toISOString() : ''
+    globalIsHydrated && cached ? new Date(cached.timestamp).toISOString() : ''
   );
 
   // Track in-flight requests to avoid duplicates
@@ -186,9 +188,23 @@ export function useAnalytics<T>(
 
   useEffect(() => {
     mountedRef.current = true;
+
+    // If this is the initial hydration pass, we need to sync state with the cache
+    // now that we are safely on the client to avoid SSR mismatch.
+    if (!globalIsHydrated) {
+      globalIsHydrated = true;
+      setData(fallbackData);
+      setIsLoading(!fallbackData);
+      setIsRefreshing(fallbackData ? !isFresh : false);
+      setLastUpdated(cached ? new Date(cached.timestamp).toISOString() : '');
+    }
+
     return () => {
       mountedRef.current = false;
     };
+    // We intentionally don't put fallbackData in the dep array because we only want 
+    // this specific block to run once upon mount (hydration sync)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const fetchData = useCallback(async () => {

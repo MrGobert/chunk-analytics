@@ -55,8 +55,8 @@ export default function DataTable<T extends Record<string, unknown>>({
       )}
       <div className="flex-1 overflow-auto">
         <table className="w-full text-sm">
-          <thead className="sticky top-0 bg-primary">
-            <tr className="border-b border-zinc-800">
+          <thead className="sticky top-0 bg-transparent">
+            <tr className="border-b border-white/5">
               {columns.map((col) => (
                 <th
                   key={String(col.key)}
@@ -69,7 +69,7 @@ export default function DataTable<T extends Record<string, unknown>>({
           </thead>
           <tbody>
             {data.map((row, index) => (
-              <tr key={index} className="border-b border-zinc-800/50 hover:bg-primary/30">
+              <tr key={index} className="border-b border-white/5 hover:bg-white/5 transition-colors">
                 {columns.map((col) => (
                   <td key={String(col.key)} className="py-3 px-4 text-foreground">
                     {col.render ? col.render(row[col.key], row) : String(row[col.key] ?? '')}

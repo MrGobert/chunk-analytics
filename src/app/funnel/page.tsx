@@ -176,7 +176,7 @@ export default function SubscriberFunnelPage() {
               data={platformConversionData}
               xKey="platform"
               yKey="rate"
-              color="#22c55e"
+              color="#10b981"
             />
           ) : (
             <div className="flex items-center justify-center h-full text-zinc-500 font-mono text-sm">

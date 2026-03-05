@@ -1,20 +1,28 @@
 @import "tailwindcss";
 
 :root {
-  /* Preset C — "Brutalist Signal" */
-  --background: #F5F3EE; /* Off-white */
-  --foreground: #111111; /* Black text */
-  --primary: #E8E4DD; /* Paper surface */
-  --accent: #E63B2E; /* Signal Red */
-  --surface-dark: #111111; /* Control room dark */
+  /* Premium Dark Mode - Command Center */
+  --background: #09090b; /* Zinc 950 / Deep Obsidian */
+  --foreground: #fafafa; /* Zinc 50 / Off-white */
+  --primary: #18181b; /* Zinc 900 / Surface 1 */
+  --primary-hover: #27272a; /* Zinc 800 */
+  --accent: #10b981; /* Premium Emerald/Signal Green */
+  --accent-glow: rgba(16, 185, 129, 0.4);
+  --surface-dark: #000000;
+  --muted: #a1a1aa; /* Zinc 400 for secondary text */
+  --border-color: rgba(255, 255, 255, 0.08); /* Glass border */
+  --glass-bg: rgba(24, 24, 27, 0.6); /* Semi-transparent surface */
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
   --color-accent: var(--accent);
   --color-surface-dark: var(--surface-dark);
+  --color-muted: var(--muted);
+  --color-glass-border: var(--border-color);
 
   --font-sans: var(--font-space-grotesk);
   --font-mono: var(--font-space-mono);
@@ -25,25 +33,27 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-sans), Arial, Helvetica, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-/* Custom scrollbar */
+/* Custom scrollbar - Dark Mode */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
 }
 
 ::-webkit-scrollbar-track {
-  background: var(--primary);
+  background: var(--background);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #A09E99; /* Neutral gray matching paper */
+  background: #3f3f46; /* Zinc 700 */
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--foreground);
+  background: #52525b; /* Zinc 600 */
 }
 
 /* Add noise overlay */

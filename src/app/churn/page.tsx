@@ -268,7 +268,7 @@ export default function ChurnIntelligencePage() {
             <LineChart
               data={churnTrendData}
               xKey="date"
-              lines={[{ key: 'rate', color: '#E63B2E', name: 'Churn Rate %' }]}
+              lines={[{ key: 'rate', color: '#10b981', name: 'Churn Rate %' }]}
             />
           ) : (
             <div className="flex items-center justify-center h-full text-zinc-500 font-mono text-sm">
@@ -279,10 +279,10 @@ export default function ChurnIntelligencePage() {
       </div>
 
       {/* At-Risk Users Table */}
-      <div className="card-animate rounded-[2rem] bg-primary border border-zinc-300/50 p-6 sm:p-8 shadow-sm mb-8">
-        <div className="mb-6 border-b border-zinc-300/50 pb-4">
+      <div className="card-animate rounded-[1.5rem] bg-primary/60 backdrop-blur-xl border border-white/5 p-6 sm:p-8 shadow-lg mb-8">
+        <div className="mb-6 border-b border-white/5 pb-4">
           <h3 className="text-xl sm:text-2xl font-bold font-sans tracking-tight text-foreground">At-Risk Users</h3>
-          <p className="text-sm font-mono text-zinc-500 mt-2 uppercase tracking-wide">
+          <p className="text-sm font-mono text-zinc-400 mt-2 uppercase tracking-wide">
             Users with declining health scores — click column headers to sort
           </p>
           <div className="flex gap-2 mt-3">
@@ -290,11 +290,10 @@ export default function ChurnIntelligencePage() {
               <button
                 key={col}
                 onClick={() => handleAtRiskSortClick(col)}
-                className={`text-xs font-mono px-3 py-1 rounded-full transition-colors ${
-                  atRiskSort === col
-                    ? 'bg-accent text-white'
-                    : 'bg-zinc-800 text-zinc-400 hover:text-white'
-                }`}
+                className={`text-xs font-mono px-3 py-1 rounded-full border transition-colors ${atRiskSort === col
+                    ? 'bg-accent/10 border-accent/20 text-accent'
+                    : 'bg-white/5 border-transparent text-zinc-400 hover:text-white hover:bg-white/10'
+                  }`}
               >
                 {col === 'healthScore' ? 'Health' : col === 'daysSinceActive' ? 'Inactive' : 'Tenure'}
                 {atRiskSort === col && (atRiskSortDir === 'asc' ? ' ↑' : ' ↓')}
@@ -323,10 +322,10 @@ export default function ChurnIntelligencePage() {
       </div>
 
       {/* Churned Users Table (searchable) */}
-      <div className="card-animate rounded-[2rem] bg-primary border border-zinc-300/50 p-6 sm:p-8 shadow-sm mb-8">
-        <div className="mb-6 border-b border-zinc-300/50 pb-4">
+      <div className="card-animate rounded-[1.5rem] bg-primary/60 backdrop-blur-xl border border-white/5 p-6 sm:p-8 shadow-lg mb-8">
+        <div className="mb-6 border-b border-white/5 pb-4">
           <h3 className="text-xl sm:text-2xl font-bold font-sans tracking-tight text-foreground">Churned Users</h3>
-          <p className="text-sm font-mono text-zinc-500 mt-2 uppercase tracking-wide">
+          <p className="text-sm font-mono text-zinc-400 mt-2 uppercase tracking-wide">
             Users who have cancelled or expired
           </p>
           <div className="mt-3">
@@ -369,7 +368,7 @@ export default function ChurnIntelligencePage() {
               data={winbackData}
               xKey="type"
               yKey="rate"
-              color="#22c55e"
+              color="#10b981"
             />
           ) : (
             <div className="flex items-center justify-center h-full text-zinc-500 font-mono text-sm">
