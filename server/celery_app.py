@@ -9,11 +9,21 @@ from celery.schedules import crontab
 
 redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
 
+# Heroku Redis uses rediss:// (TLS) — Celery needs explicit SSL config
+broker_use_ssl = None
+if redis_url.startswith("rediss://"):
+    import ssl
+    broker_use_ssl = {
+        "ssl_cert_reqs": ssl.CERT_NONE,
+    }
+
 celery = Celery("cerebral-analytics")
 
 celery.conf.update(
     broker_url=redis_url,
     result_backend=redis_url,
+    broker_use_ssl=broker_use_ssl,
+    redis_backend_use_ssl=broker_use_ssl,
     task_ignore_result=True,
     timezone="UTC",
     imports=["email_tasks", "analytics_tasks"],
