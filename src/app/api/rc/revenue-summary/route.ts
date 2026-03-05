@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 export const maxDuration = 60;
 
-const CEREBRAL_API_URL = process.env.CEREBRAL_API_URL || 'https://cerebral-12658c15cdb1.herokuapp.com';
+const ANALYTICS_API_URL = process.env.ANALYTICS_API_URL || 'https://cerebral-analytics-eff2e86d22c4.herokuapp.com';
 const CEREBRAL_AUTH_TOKEN = process.env.CEREBRAL_AUTH_TOKEN || '';
 
 export async function GET(request: NextRequest) {
@@ -22,7 +22,7 @@ export async function GET(request: NextRequest) {
 
   try {
     const response = await fetch(
-      `${CEREBRAL_API_URL}/api/analytics/revenue-summary?days=${days}`,
+      `${ANALYTICS_API_URL}/api/analytics/revenue-summary?days=${days}`,
       {
         headers: {
           'Authorization': CEREBRAL_AUTH_TOKEN,

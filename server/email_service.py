@@ -1174,8 +1174,9 @@ async def send_email_async(to_email: str, subject: str, html: str, text: str, em
 
     # Generate unsubscribe token and URL
     secret = os.getenv("EMAIL_UNSUBSCRIBE_SECRET", "chunk-unsubscribe-default-secret")
+    unsubscribe_base = os.getenv("EMAIL_UNSUBSCRIBE_BASE_URL", "https://cerebral-12658c15cdb1.herokuapp.com")
     unsubscribe_token = hmac.new(secret.encode(), to_email.encode(), hashlib.sha256).hexdigest()
-    unsubscribe_url = f"https://cerebral-12658c15cdb1.herokuapp.com/email/unsubscribe?email={to_email}&token={unsubscribe_token}"
+    unsubscribe_url = f"{unsubscribe_base}/email/unsubscribe?email={to_email}&token={unsubscribe_token}"
 
     # Inject unsubscribe link into HTML body (white text — footer is dark bg)
     unsubscribe_link_html = f'<a href="{unsubscribe_url}" style="color:{BRAND["text_inverse"]};text-decoration:none">Unsubscribe</a><span style="color:{BRAND["text_inverse"]};opacity:0.3"> · </span>'
@@ -1231,8 +1232,9 @@ def send_email(to_email: str, subject: str, html: str, text: str, email_type: st
 
     # Generate unsubscribe token and URL
     secret = os.getenv("EMAIL_UNSUBSCRIBE_SECRET", "chunk-unsubscribe-default-secret")
+    unsubscribe_base = os.getenv("EMAIL_UNSUBSCRIBE_BASE_URL", "https://cerebral-12658c15cdb1.herokuapp.com")
     unsubscribe_token = hmac.new(secret.encode(), to_email.encode(), hashlib.sha256).hexdigest()
-    unsubscribe_url = f"https://cerebral-12658c15cdb1.herokuapp.com/email/unsubscribe?email={to_email}&token={unsubscribe_token}"
+    unsubscribe_url = f"{unsubscribe_base}/email/unsubscribe?email={to_email}&token={unsubscribe_token}"
 
     # Inject unsubscribe link into HTML body (white text — footer is dark bg)
     unsubscribe_link_html = f'<a href="{unsubscribe_url}" style="color:{BRAND["text_inverse"]};text-decoration:none">Unsubscribe</a><span style="color:{BRAND["text_inverse"]};opacity:0.3"> · </span>'

@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 // Allow up to 60s for cold Firestore queries after deploy
 export const maxDuration = 60;
 
-const CEREBRAL_API_URL = process.env.CEREBRAL_API_URL || 'https://cerebral-12658c15cdb1.herokuapp.com';
+const ANALYTICS_API_URL = process.env.ANALYTICS_API_URL || 'https://cerebral-analytics-eff2e86d22c4.herokuapp.com';
 const CEREBRAL_AUTH_TOKEN = process.env.CEREBRAL_AUTH_TOKEN || '';
 
 export async function GET(request: NextRequest) {
@@ -22,10 +22,10 @@ export async function GET(request: NextRequest) {
   const timeoutId = setTimeout(() => controller.abort(), 55000); // 55s timeout (Firestore cold query can be slow)
 
   try {
-    console.log(`Fetching email stats from ${CEREBRAL_API_URL}/webhooks/revenuecat/email-stats?days=${days}`);
+    console.log(`Fetching email stats from ${ANALYTICS_API_URL}/webhooks/revenuecat/email-stats?days=${days}`);
     
     const response = await fetch(
-      `${CEREBRAL_API_URL}/webhooks/revenuecat/email-stats?days=${days}`,
+      `${ANALYTICS_API_URL}/webhooks/revenuecat/email-stats?days=${days}`,
       {
         headers: {
           'Authorization': CEREBRAL_AUTH_TOKEN,

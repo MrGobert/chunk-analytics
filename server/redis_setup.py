@@ -3,7 +3,6 @@ import logging
 import os
 
 import redis
-from rq import Queue
 
 logging.basicConfig(level=logging.INFO)
 
@@ -27,11 +26,5 @@ def get_redis_connection(decode_responses=False):
         return None
 
 
-# Connection for RQ (binary mode - default)
-r = get_redis_connection(decode_responses=False)
-
 # Connection for caching (string mode for JSON)
 redis_client = get_redis_connection(decode_responses=True)
-
-# RQ Queue (only if Redis available)
-queue = Queue(connection=r) if r else None
