@@ -65,14 +65,13 @@ export interface DailyDataPoint {
 }
 
 export interface AcquisitionFunnelMetrics {
+  platform: 'web' | 'ios' | 'macOS';
+  subtitle: string;
   funnel: FunnelStep[];
-  dailyData: { date: string; marketing: number; guest: number; signup: number; subscriber: number }[];
-  conversionRates: {
-    marketingToGuest: number;
-    guestToSignup: number;
-    signupToSubscriber: number;
-    overallMarketingToSubscriber: number;
-  };
+  conversionRates: Record<string, number>;
+  statCards: { label: string; value: number }[];
+  dailyData: Record<string, string | number>[];
+  dailyLines: { key: string; color: string; name: string }[];
   lastUpdated: string;
 }
 
