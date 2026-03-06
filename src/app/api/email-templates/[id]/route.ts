@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-const CEREBRAL_API_URL = process.env.CEREBRAL_API_URL || 'https://cerebral-12658c15cdb1.herokuapp.com';
+const ANALYTICS_API_URL = process.env.ANALYTICS_API_URL || 'https://cerebral-analytics-eff2e86d22c4.herokuapp.com';
 const CEREBRAL_AUTH_TOKEN = process.env.CEREBRAL_AUTH_TOKEN || '';
 
 export async function GET(
@@ -20,7 +20,7 @@ export async function GET(
   try {
     if (format === 'html') {
       // Return raw HTML for iframe rendering
-      const response = await fetch(`${CEREBRAL_API_URL}/api/email-templates/preview/${id}`, {
+      const response = await fetch(`${ANALYTICS_API_URL}/api/analytics/email-templates/preview/${id}`, {
         headers: {
           'Authorization': CEREBRAL_AUTH_TOKEN,
         },
@@ -38,7 +38,7 @@ export async function GET(
     }
 
     // Return JSON metadata + HTML
-    const response = await fetch(`${CEREBRAL_API_URL}/api/email-templates/${id}`, {
+    const response = await fetch(`${ANALYTICS_API_URL}/api/analytics/email-templates/${id}`, {
       headers: {
         'Authorization': CEREBRAL_AUTH_TOKEN,
         'Content-Type': 'application/json',

@@ -997,6 +997,193 @@ def get_broadcasts():
 
 
 # ============================================================
+# Email Templates
+# ============================================================
+
+# Template metadata (no HTML — lightweight list)
+_EMAIL_TEMPLATES = {
+    "trial_started": {
+        "name": "Trial Started",
+        "category": "Trial & Subscription",
+        "description": "Sent immediately when a user starts their trial via RevenueCat webhook.",
+        "trigger": "webhook",
+        "schedule": "Immediate (TRIAL_STARTED event)",
+    },
+    "trial_ending": {
+        "name": "Trial Ending",
+        "category": "Trial & Subscription",
+        "description": "Sent 12 hours before trial expires to encourage conversion.",
+        "trigger": "beat",
+        "schedule": "Every 6 hours (check_trials_ending_soon)",
+    },
+    "subscription_expired": {
+        "name": "Subscription Expired",
+        "category": "Trial & Subscription",
+        "description": "Sent immediately when a subscription or trial expires.",
+        "trigger": "webhook",
+        "schedule": "Immediate (EXPIRATION event)",
+    },
+    "billing_issue": {
+        "name": "Billing Issue",
+        "category": "Trial & Subscription",
+        "description": "Sent when a payment fails to prompt the user to update billing.",
+        "trigger": "webhook",
+        "schedule": "Immediate (BILLING_ISSUE event)",
+    },
+    "renewal_reminder": {
+        "name": "Renewal Reminder",
+        "category": "Trial & Subscription",
+        "description": "Sent 7 days before subscription renewal date.",
+        "trigger": "beat",
+        "schedule": "Daily at 09:00 UTC (check_renewal_reminders)",
+    },
+    "day1_superpowers": {
+        "name": "Day 1 — AI Superpowers",
+        "category": "Welcome Sequence",
+        "description": "First onboarding email, sent 24 hours after signup.",
+        "trigger": "beat",
+        "schedule": "Every 6 hours (check_welcome_sequence_day1)",
+    },
+    "day3_collections": {
+        "name": "Day 3 — Collections",
+        "category": "Welcome Sequence",
+        "description": "Second onboarding email highlighting Collections feature.",
+        "trigger": "beat",
+        "schedule": "Daily at 11:00 UTC (check_welcome_sequence_day3)",
+    },
+    "day7_researcher_stories": {
+        "name": "Day 7 — Researcher Stories",
+        "category": "Welcome Sequence",
+        "description": "Third onboarding email with real user stories.",
+        "trigger": "beat",
+        "schedule": "Daily at 11:30 UTC (check_welcome_sequence_day7)",
+    },
+    "monthly_recap": {
+        "name": "Monthly Recap",
+        "category": "Engagement",
+        "description": "Monthly usage summary sent to active subscribers on the 1st.",
+        "trigger": "beat",
+        "schedule": "1st of month at 14:00 UTC (check_monthly_recap)",
+    },
+    "reengagement_14day": {
+        "name": "14-Day Re-engagement",
+        "category": "Engagement",
+        "description": "Sent to users inactive for 14+ days to bring them back.",
+        "trigger": "beat",
+        "schedule": "Daily at 12:00 UTC (check_reengagement_14day)",
+    },
+    "signup_no_trial_nudge": {
+        "name": "Signup No-Trial Nudge",
+        "category": "Engagement",
+        "description": "Sent 3-4 days after signup if user never started a trial.",
+        "trigger": "beat",
+        "schedule": "Daily at 12:30 UTC (check_signup_no_trial)",
+    },
+    "winback_7day": {
+        "name": "7-Day Win-back",
+        "category": "Win-back",
+        "description": "Sent 7 days after subscription expiration with a discount offer.",
+        "trigger": "beat",
+        "schedule": "Daily at 10:00 UTC (check_churned_users_7day)",
+    },
+    "winback_30day": {
+        "name": "30-Day Win-back",
+        "category": "Win-back",
+        "description": "Sent 30 days after expiration with 'what's new' messaging.",
+        "trigger": "beat",
+        "schedule": "Daily at 10:30 UTC (check_churned_users_30day)",
+    },
+    "feature_announcement": {
+        "name": "Feature Announcement",
+        "category": "Announcements",
+        "description": "Manually triggered to announce new features to all users.",
+        "trigger": "manual",
+        "schedule": "On demand",
+    },
+}
+
+
+def _render_email_template(key: str) -> dict | None:
+    """Render a template with sample data and return subject/html/text."""
+    import email_service
+
+    renderers = {
+        "trial_started": lambda: email_service.get_trial_started_email("James"),
+        "trial_ending": lambda: email_service.get_trial_ending_email("James", hours_remaining=12),
+        "subscription_expired": lambda: email_service.get_subscription_expired_email("James"),
+        "billing_issue": lambda: email_service.get_billing_issue_email("James"),
+        "renewal_reminder": lambda: email_service.get_renewal_reminder_email("James", days_until_renewal=7, amount="$9.99"),
+        "day1_superpowers": lambda: email_service.get_day1_superpowers_email("James"),
+        "day3_collections": lambda: email_service.get_day3_collections_email("James"),
+        "day7_researcher_stories": lambda: email_service.get_day7_researcher_stories_email("James"),
+        "monthly_recap": lambda: email_service.get_monthly_recap_email("James", searches=127, documents=23, images=8, notes=34, collections=6),
+        "reengagement_14day": lambda: email_service.get_reengagement_14day_email("James"),
+        "signup_no_trial_nudge": lambda: email_service.get_signup_no_trial_nudge_email("James"),
+        "winback_7day": lambda: email_service.get_winback_7day_email("James"),
+        "winback_30day": lambda: email_service.get_winback_30day_email("James"),
+        "feature_announcement": lambda: email_service.get_feature_announcement_email(
+            "James",
+            feature_name="Smart Search",
+            feature_description="Find anything across all your notes, documents, and conversations with AI-powered semantic search.",
+            feature_emoji="🔍",
+        ),
+    }
+
+    renderer = renderers.get(key)
+    if not renderer:
+        return None
+
+    subject, html, text = renderer()
+
+    # Replace unsubscribe placeholder with a safe preview link
+    html = html.replace(
+        "{UNSUBSCRIBE_LINK_PLACEHOLDER}",
+        '<a href="#" style="color:#D9D9D9;text-decoration:none">Unsubscribe</a>'
+        '<span style="color:#D9D9D9;opacity:0.3"> · </span>',
+    )
+
+    return {"subject": subject, "html": html, "text": text}
+
+
+@analytics_api_bp.route("/email-templates", methods=["GET"])
+@require_analytics_auth
+@safe_analytics({"templates": [], "count": 0})
+def list_email_templates():
+    """List all available email templates with metadata (no HTML)."""
+    templates = [{"id": key, **meta} for key, meta in _EMAIL_TEMPLATES.items()]
+    return jsonify({"templates": templates, "count": len(templates)}), 200
+
+
+@analytics_api_bp.route("/email-templates/<template_id>", methods=["GET"])
+@require_analytics_auth
+def get_email_template(template_id: str):
+    """Get a single email template rendered with sample data."""
+    meta = _EMAIL_TEMPLATES.get(template_id)
+    if not meta:
+        return jsonify({"error": f"Template '{template_id}' not found"}), 404
+
+    rendered = _render_email_template(template_id)
+    if not rendered:
+        return jsonify({"error": f"Failed to render template '{template_id}'"}), 500
+
+    return jsonify({"id": template_id, **meta, **rendered}), 200
+
+
+@analytics_api_bp.route("/email-templates/preview/<template_id>", methods=["GET"])
+@require_analytics_auth
+def preview_email_template(template_id: str):
+    """Get raw HTML preview of a template (for iframe rendering)."""
+    rendered = _render_email_template(template_id)
+    if not rendered:
+        return jsonify({"error": "Template not found"}), 404
+
+    from flask import make_response
+    response = make_response(rendered["html"])
+    response.headers["Content-Type"] = "text/html; charset=utf-8"
+    return response
+
+
+# ============================================================
 # Health Check
 # ============================================================
 
