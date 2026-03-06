@@ -25,6 +25,9 @@ import {
   DollarSign,
   RefreshCw,
   AlertTriangle,
+  KanbanSquare,
+  Tags,
+  Briefcase,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -90,6 +93,17 @@ const navSections: NavSection[] = [
   },
 ];
 
+const pmNavSections: NavSection[] = [
+  {
+    title: 'PRODUCT MANAGEMENT',
+    items: [
+      { href: '/pm', label: 'Kanban Board', icon: KanbanSquare },
+      { href: '/pm/projects', label: 'Projects', icon: Briefcase },
+      { href: '/pm/tags', label: 'Tags & Labels', icon: Tags },
+    ],
+  },
+];
+
 // Flat list for prefetching
 const allNavItems = navSections.flatMap((s) => s.items);
 
@@ -142,6 +156,9 @@ export default function Sidebar() {
     return () => clearTimeout(timer);
   }, [pathname, prefetch]);
 
+  const isPmMode = pathname.startsWith('/pm');
+  const activeSections = isPmMode ? pmNavSections : navSections;
+
   return (
     <>
       {/* Mobile header */}
@@ -182,7 +199,7 @@ export default function Sidebar() {
         </div>
 
         <nav className="flex-1 p-4 overflow-y-auto">
-          {navSections.map((section) => (
+          {activeSections.map((section) => (
             <div key={section.title} className="mb-6">
               <div className="px-4 mb-2">
                 <span className="text-[10px] font-mono font-bold text-zinc-600 uppercase tracking-[0.15em]">
@@ -215,19 +232,37 @@ export default function Sidebar() {
         </nav>
 
         <div className="p-4 border-t border-white/5 space-y-3">
-          <Link
-            href="/emails/templates"
-            className={`flex items-center gap-3 px-4 py-3 rounded-[1rem] transition-all duration-300 btn-magnetic ${
-              pathname === '/emails/templates'
-                ? 'bg-accent/10 border border-accent/30 text-accent font-medium shadow-[0_0_15px_var(--accent-glow)]'
-                : 'text-zinc-500 hover:text-white hover:bg-white/5 font-medium border border-transparent'
-            }`}
-          >
-            <Eye className="w-4 h-4" strokeWidth={pathname === '/emails/templates' ? 2.5 : 2} />
-            <span className="font-sans tracking-tight text-sm">Email Templates</span>
-          </Link>
-          <div className="text-xs font-mono text-zinc-600 text-center tracking-tight">
-            CHUNK COMMAND CENTER
+          {isPmMode ? (
+            <Link
+              href="/"
+              className="flex items-center justify-center gap-3 px-4 py-3 rounded-[1rem] transition-all duration-300 bg-zinc-900 border border-white/10 text-white hover:bg-zinc-800 font-medium w-full"
+            >
+              <BarChart2 className="w-4 h-4" />
+              <span className="font-sans tracking-tight text-sm">Exit PM Mode</span>
+            </Link>
+          ) : (
+            <>
+              <Link
+                href="/emails/templates"
+                className={`flex items-center gap-3 px-4 py-3 rounded-[1rem] transition-all duration-300 btn-magnetic ${pathname === '/emails/templates'
+                    ? 'bg-accent/10 border border-accent/30 text-accent font-medium shadow-[0_0_15px_var(--accent-glow)]'
+                    : 'text-zinc-500 hover:text-white hover:bg-white/5 font-medium border border-transparent'
+                  }`}
+              >
+                <Eye className="w-4 h-4" strokeWidth={pathname === '/emails/templates' ? 2.5 : 2} />
+                <span className="font-sans tracking-tight text-sm">Email Templates</span>
+              </Link>
+              <Link
+                href="/pm"
+                className="flex items-center justify-center gap-3 px-4 py-3 rounded-[1rem] transition-all duration-300 bg-accent/20 border border-accent/30 text-accent hover:bg-accent/30 font-medium w-full mt-2"
+              >
+                <KanbanSquare className="w-4 h-4" />
+                <span className="font-sans tracking-tight text-sm">Enter PM Mode</span>
+              </Link>
+            </>
+          )}
+          <div className="text-xs font-mono text-zinc-600 text-center tracking-tight mt-4">
+            {isPmMode ? 'PRODUCT MANAGEMENT' : 'CHUNK COMMAND CENTER'}
           </div>
         </div>
       </aside>
