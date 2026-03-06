@@ -68,7 +68,7 @@ export function PMProvider({ children }: { children: React.ReactNode }) {
     useEffect(() => {
         const fetchData = async () => {
             try {
-                const res = await fetch('/api/pm/sync');
+                const res = await fetch('/api/pm/sync', { cache: 'no-store' });
                 if (!res.ok) throw new Error('API Sync Failed');
 
                 const data = await res.json();

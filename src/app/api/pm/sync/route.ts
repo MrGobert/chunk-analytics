@@ -17,7 +17,10 @@ export async function GET() {
         const tags = tagsSnap.docs.map(d => d.data());
         const tickets = ticketsSnap.docs.map(d => d.data());
 
-        return NextResponse.json({ projects, tags, tickets });
+        return NextResponse.json(
+            { projects, tags, tickets },
+            { headers: { 'Cache-Control': 'no-store, max-age=0' } }
+        );
     } catch (e: any) {
         console.error("Error fetching PM data from Firestore:", e);
         return NextResponse.json({ error: e.message || 'Failed to fetch PM Data' }, { status: 500 });
