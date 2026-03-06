@@ -22,10 +22,10 @@ export async function GET(request: NextRequest) {
   const timeoutId = setTimeout(() => controller.abort(), 55000); // 55s timeout (Firestore cold query can be slow)
 
   try {
-    console.log(`Fetching email stats from ${ANALYTICS_API_URL}/webhooks/revenuecat/email-stats?days=${days}`);
+    console.log(`Fetching email stats from ${ANALYTICS_API_URL}/api/analytics/email-stats?days=${days}`);
     
     const response = await fetch(
-      `${ANALYTICS_API_URL}/webhooks/revenuecat/email-stats?days=${days}`,
+      `${ANALYTICS_API_URL}/api/analytics/email-stats?days=${days}`,
       {
         headers: {
           'Authorization': CEREBRAL_AUTH_TOKEN,

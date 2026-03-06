@@ -2,7 +2,7 @@
 
 import { useMemo } from 'react';
 import Link from 'next/link';
-import { Eye } from 'lucide-react';
+import { Eye, Radio, Send, FileEdit } from 'lucide-react';
 import { useDashboardFilters } from '@/hooks/useDashboardFilters';
 import PageHeader from '@/components/layout/PageHeader';
 import StatCard from '@/components/cards/StatCard';
@@ -48,6 +48,30 @@ interface EmailStats {
   note?: string;
 }
 
+interface Broadcast {
+  id: string;
+  name?: string;
+  subject?: string;
+  from?: string;
+  status: string;
+  created_at: string;
+  scheduled_at: string | null;
+  sent_at: string | null;
+  segment_id: string | null;
+  preview_text?: string;
+}
+
+interface BroadcastData {
+  broadcasts: Broadcast[];
+  totals: {
+    sent: number;
+    draft: number;
+    queued: number;
+  };
+  lastUpdated: string;
+  note?: string;
+}
+
 // Friendly names for email types
 const EMAIL_TYPE_LABELS: Record<string, string> = {
   winback_7day: '7-Day Win-back',
@@ -83,6 +107,11 @@ export default function EmailCampaignsPage() {
     { days }
   );
 
+  const { data: broadcastData, isLoading: broadcastsLoading } = useAnalytics<BroadcastData>(
+    '/api/metrics/broadcasts',
+    {}
+  );
+
   // ALL hooks must be called before any conditional returns (Rules of Hooks)
   const byEmailType = stats?.by_email_type ?? {};
 
@@ -116,6 +145,26 @@ export default function EmailCampaignsPage() {
       converted: day.converted,
     }));
   }, [stats?.by_day]);
+
+  const broadcastTableData = useMemo(() => {
+    const broadcasts = broadcastData?.broadcasts ?? [];
+    return broadcasts.map((b) => ({
+      name: b.name || b.id.slice(0, 8) + '…',
+      subject: b.subject || '—',
+      status: b.status,
+      sentAt: b.sent_at
+        ? new Date(b.sent_at).toLocaleDateString('en-US', {
+            month: 'short',
+            day: 'numeric',
+            year: 'numeric',
+            hour: 'numeric',
+            minute: '2-digit',
+          })
+        : b.scheduled_at
+          ? `Scheduled: ${new Date(b.scheduled_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`
+          : '—',
+    }));
+  }, [broadcastData?.broadcasts]);
 
   // Early returns AFTER all hooks
   if (isLoading) {
@@ -294,6 +343,80 @@ export default function EmailCampaignsPage() {
             </div>
           )}
         </ChartCard>
+      </div>
+
+      {/* Broadcasts Section */}
+      <div className="mb-8">
+        <div className="flex items-center gap-3 mb-4">
+          <Radio className="w-5 h-5 text-accent" />
+          <h2 className="text-lg font-semibold text-foreground">Broadcasts</h2>
+          {broadcastData?.totals && (
+            <div className="flex gap-2 ml-auto">
+              {broadcastData.totals.sent > 0 && (
+                <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-400 text-xs font-medium">
+                  <Send className="w-3 h-3" />
+                  {broadcastData.totals.sent} sent
+                </span>
+              )}
+              {broadcastData.totals.draft > 0 && (
+                <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-zinc-500/10 text-zinc-400 text-xs font-medium">
+                  <FileEdit className="w-3 h-3" />
+                  {broadcastData.totals.draft} draft
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+
+        {broadcastsLoading ? (
+          <div className="p-8 bg-primary rounded-lg border border-zinc-800 text-center text-zinc-500">
+            Loading broadcasts…
+          </div>
+        ) : broadcastTableData.length > 0 ? (
+          <ChartCard title="Broadcast Emails" subtitle="Emails sent via Resend Broadcasts (newsletters, product launches, promotions)">
+            <DataTable
+              data={broadcastTableData}
+              columns={[
+                { key: 'name', header: 'Name' },
+                { key: 'subject', header: 'Subject' },
+                {
+                  key: 'status',
+                  header: 'Status',
+                  render: (val) => {
+                    const s = String(val);
+                    return (
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+                        s === 'sent' ? 'bg-emerald-500/10 text-emerald-400' :
+                        s === 'queued' ? 'bg-amber-500/10 text-amber-400' :
+                        'bg-zinc-500/10 text-zinc-400'
+                      }`}>
+                        {s}
+                      </span>
+                    );
+                  },
+                },
+                { key: 'sentAt', header: 'Date' },
+              ]}
+            />
+          </ChartCard>
+        ) : (
+          <div className="p-6 bg-primary rounded-lg border border-zinc-800 text-center text-zinc-500 text-sm">
+            No broadcasts found. Create one in the{' '}
+            <a
+              href="https://resend.com/broadcasts"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-accent hover:underline"
+            >
+              Resend dashboard
+            </a>
+            .
+          </div>
+        )}
+
+        {broadcastData?.note && (
+          <div className="mt-2 text-xs text-zinc-600">{broadcastData.note}</div>
+        )}
       </div>
 
       {/* Conversions Pie & Table */}

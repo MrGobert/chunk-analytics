@@ -9,6 +9,7 @@ All endpoints wrap in try/except and return graceful empty data on error.
 
 import json
 import logging
+import os
 from datetime import datetime, timedelta, timezone
 from functools import wraps
 from statistics import median
@@ -858,6 +859,141 @@ def _get_customer_detail(uid: str) -> dict:
         "emailHistory": email_history,
         "subscriptionHistory": subscription_history,
     }
+
+
+# ============================================================
+# Email Stats
+# ============================================================
+
+
+@analytics_api_bp.route("/email-stats", methods=["GET"])
+@require_analytics_auth
+@safe_analytics({
+    "period_days": 30,
+    "generated_at": "",
+    "by_email_type": {},
+    "by_day": [],
+    "totals": {"sent": 0, "converted": 0, "overallConversionRate": 0},
+})
+def get_email_stats():
+    """
+    Email conversion statistics for the dashboard.
+
+    Query params:
+        days: Number of days to look back (default: 30, max: 365)
+    """
+    days = request.args.get("days", 30, type=int)
+    days = min(max(days, 1), 365)
+
+    from email_tracking import get_conversion_stats
+
+    stats = get_conversion_stats(days)
+    return jsonify(stats), 200
+
+
+# ============================================================
+# Broadcasts (Resend API)
+# ============================================================
+
+
+@analytics_api_bp.route("/broadcasts", methods=["GET"])
+@require_analytics_auth
+@safe_analytics({"broadcasts": [], "totals": {"sent": 0, "draft": 0, "queued": 0}})
+def get_broadcasts():
+    """
+    List broadcasts from Resend API with metadata.
+
+    Fetches all broadcasts, enriches them with name/subject
+    by calling the individual broadcast endpoint. Results cached 10 min.
+    """
+    import httpx
+
+    resend_api_key = os.environ.get("RESEND_API_KEY", "")
+    if not resend_api_key:
+        return jsonify({"broadcasts": [], "error": "RESEND_API_KEY not configured"}), 200
+
+    cache_key = "analytics_cache:broadcasts"
+
+    # Cap detail fetches to avoid rate limits / timeouts
+    MAX_DETAIL_FETCHES = 30
+
+    def _fetch_broadcasts():
+        headers = {"Authorization": f"Bearer {resend_api_key}"}
+
+        # Fetch broadcast list
+        resp = httpx.get(
+            "https://api.resend.com/broadcasts",
+            headers=headers,
+            timeout=15.0,
+        )
+        resp.raise_for_status()
+        body = resp.json()
+        raw_broadcasts = body.get("data", [])
+
+        # Enrich broadcasts with name/subject (requires individual GET).
+        # Prioritise sent, then queued, then draft for detail fetches.
+        status_priority = {"sent": 0, "queued": 1, "draft": 2}
+        sorted_raw = sorted(raw_broadcasts, key=lambda x: status_priority.get(x.get("status", ""), 3))
+
+        broadcasts = []
+        detail_fetches = 0
+        for b in sorted_raw:
+            bid = b.get("id")
+            status = b.get("status", "")
+            entry = {
+                "id": bid,
+                "status": status,
+                "created_at": b.get("created_at"),
+                "scheduled_at": b.get("scheduled_at"),
+                "sent_at": b.get("sent_at"),
+                "segment_id": b.get("segment_id") or b.get("audience_id"),
+            }
+
+            # Fetch details to get name + subject (capped)
+            if bid and detail_fetches < MAX_DETAIL_FETCHES:
+                try:
+                    detail_resp = httpx.get(
+                        f"https://api.resend.com/broadcasts/{bid}",
+                        headers=headers,
+                        timeout=10.0,
+                    )
+                    if detail_resp.status_code == 200:
+                        detail = detail_resp.json()
+                        entry["name"] = detail.get("name", "")
+                        entry["subject"] = detail.get("subject", "")
+                        entry["from"] = detail.get("from", "")
+                        entry["preview_text"] = detail.get("preview_text", "")
+                    detail_fetches += 1
+                except Exception as e:
+                    logging.warning(f"[BROADCASTS] Failed to fetch detail for {bid}: {e}")
+                    detail_fetches += 1
+
+            broadcasts.append(entry)
+
+        # Sort: sent first (newest), then queued, then draft
+        def _sort_key(x):
+            group = status_priority.get(x["status"], 3)
+            # Parse date for ordering within group (newest first)
+            date_str = x.get("sent_at") or x.get("created_at") or ""
+            try:
+                ts = datetime.fromisoformat(date_str.replace("Z", "+00:00")).timestamp() if date_str else 0
+            except (ValueError, AttributeError):
+                ts = 0
+            return (group, -ts)
+
+        broadcasts.sort(key=_sort_key)
+
+        sent_count = sum(1 for b in broadcasts if b["status"] == "sent")
+        draft_count = sum(1 for b in broadcasts if b["status"] == "draft")
+        queued_count = sum(1 for b in broadcasts if b["status"] == "queued")
+
+        return {
+            "broadcasts": broadcasts,
+            "totals": {"sent": sent_count, "draft": draft_count, "queued": queued_count},
+        }
+
+    result = _get_cached_or_compute(cache_key, _fetch_broadcasts, ttl=600)
+    return jsonify(result), 200
 
 
 # ============================================================
