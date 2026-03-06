@@ -1,35 +1,30 @@
 import * as admin from 'firebase-admin';
 
 if (!admin.apps.length) {
-    let credential;
+    const projectId = process.env.GCP_PROJECT_ID;
+    const credentialsJson = process.env.GOOGLE_APPLICATION_CREDENTIALS;
 
-    // First try explicit service account JSON
-    if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
-        try {
-            const serviceAccount = JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS);
-            credential = admin.credential.cert(serviceAccount);
-            console.log('[Firebase Admin] Initialized via GOOGLE_APPLICATION_CREDENTIALS');
-        } catch (e) {
-            console.error('[Firebase Admin] Failed to parse GOOGLE_APPLICATION_CREDENTIALS', e);
-        }
+    if (!projectId) {
+        console.error('[Firebase Admin] GCP_PROJECT_ID is not set — Firestore will not work');
     }
-    // Fallback to API keys (Since we just rely on default credentials for this project usually)
-    // Actually, Admin SDK requires a service account for firestore. Let's see if default Application Default Credentials work.
 
-    if (!credential) {
+    if (credentialsJson) {
         try {
+            const serviceAccount = JSON.parse(credentialsJson);
             admin.initializeApp({
-                projectId: process.env.GCP_PROJECT_ID,
+                credential: admin.credential.cert(serviceAccount),
+                projectId,
             });
-            console.log('[Firebase Admin] Initialized via Application Default Credentials');
+            console.log('[Firebase Admin] Initialized with service account');
         } catch (e) {
-            console.error('[Firebase Admin] Init failed', e);
+            console.error('[Firebase Admin] Failed to parse GOOGLE_APPLICATION_CREDENTIALS:', e);
+            // Initialize without explicit credentials as last resort (works in GCP-hosted envs)
+            admin.initializeApp({ projectId });
+            console.warn('[Firebase Admin] Falling back to Application Default Credentials');
         }
     } else {
-        admin.initializeApp({
-            credential,
-            projectId: process.env.GCP_PROJECT_ID,
-        });
+        console.warn('[Firebase Admin] No GOOGLE_APPLICATION_CREDENTIALS — using ADC fallback');
+        admin.initializeApp({ projectId });
     }
 }
 

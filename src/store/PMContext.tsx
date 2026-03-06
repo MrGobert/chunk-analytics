@@ -103,13 +103,17 @@ export function PMProvider({ children }: { children: React.ReactNode }) {
 
     const pushSync = async (action: string, data: any) => {
         try {
-            await fetch('/api/pm/sync', {
+            const res = await fetch('/api/pm/sync', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ action, data })
             });
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                console.error(`PM sync failed (${res.status}):`, err.error || res.statusText);
+            }
         } catch (e) {
-            console.error("Failed server sync:", e);
+            console.error("PM sync network error:", e);
         }
     };
 
