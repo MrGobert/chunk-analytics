@@ -27,8 +27,20 @@ export default function TicketModal({ ticketId, initialStatus, onClose }: Ticket
     const handleSave = () => {
         if (!title.trim() || !activeProjectId) return;
 
+        let finalAttachments = [...attachments];
+
+        // Auto-save the link if the user typed one but didn't click "Add" before saving the ticket
+        if (isAddingLink && linkUrl.trim()) {
+            finalAttachments.push({
+                id: crypto.randomUUID(),
+                name: linkName.trim() || linkUrl.trim(),
+                url: linkUrl.trim(),
+                type: 'link'
+            });
+        }
+
         if (existingTicket) {
-            updateTicket(existingTicket.id, { title, description, status, tagIds: selectedTags, attachments });
+            updateTicket(existingTicket.id, { title, description, status, tagIds: selectedTags, attachments: finalAttachments });
         } else {
             addTicket({
                 projectId: activeProjectId,
@@ -36,7 +48,7 @@ export default function TicketModal({ ticketId, initialStatus, onClose }: Ticket
                 description,
                 status,
                 tagIds: selectedTags,
-                attachments
+                attachments: finalAttachments
             });
         }
         onClose();
@@ -71,9 +83,9 @@ export default function TicketModal({ ticketId, initialStatus, onClose }: Ticket
         const file = e.target.files?.[0];
         if (!file) return;
 
-        // Limit to 2MB to prevent localstorage issues
-        if (file.size > 2 * 1024 * 1024) {
-            alert('File is too large. Please select a file under 2MB.');
+        // Limit to 500KB to ensure the base64 string safely fits inside the 1MB Firestore document limit
+        if (file.size > 500 * 1024) {
+            alert('File is too large for cloud sync. Please select a smaller document (under 500KB).');
             return;
         }
 
