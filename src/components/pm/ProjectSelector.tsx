@@ -36,7 +36,7 @@ export default function ProjectSelector() {
             </button>
 
             {isOpen && (
-                <div className="absolute top-full mt-2 left-0 w-64 bg-primary border border-white/10 rounded-xl shadow-2xl overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200">
+                <div className="absolute top-full mt-2 right-0 w-64 bg-primary border border-white/10 rounded-xl shadow-2xl overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200">
                     <div className="max-h-60 overflow-y-auto p-2 space-y-1">
                         {projects.length === 0 ? (
                             <div className="px-3 py-4 text-center text-zinc-500 text-sm">No projects yet</div>
