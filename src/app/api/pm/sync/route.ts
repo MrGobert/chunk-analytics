@@ -1,15 +1,14 @@
 import { NextResponse } from 'next/server';
-import { db } from '@/lib/firebase';
-import { collection, doc, getDocs, setDoc, deleteDoc, writeBatch } from 'firebase/firestore';
+import { adminDb } from '@/lib/firebase-admin';
 
 const MASTER_DOC_PATH = 'chunk_pm_data/master';
 
 export async function GET() {
     try {
         const [projectsSnap, tagsSnap, ticketsSnap] = await Promise.all([
-            getDocs(collection(db, `${MASTER_DOC_PATH}/projects`)),
-            getDocs(collection(db, `${MASTER_DOC_PATH}/tags`)),
-            getDocs(collection(db, `${MASTER_DOC_PATH}/tickets`))
+            adminDb.collection(`${MASTER_DOC_PATH}/projects`).get(),
+            adminDb.collection(`${MASTER_DOC_PATH}/tags`).get(),
+            adminDb.collection(`${MASTER_DOC_PATH}/tickets`).get()
         ]);
 
         const projects = projectsSnap.docs.map(d => d.data());
@@ -30,21 +29,21 @@ export async function POST(req: Request) {
 
         if (action === 'setDoc') {
             const { collection: colName, id, payload, merge } = data;
-            await setDoc(doc(db, `${MASTER_DOC_PATH}/${colName}`, id), payload, { merge: merge || false });
+            await adminDb.collection(`${MASTER_DOC_PATH}/${colName}`).doc(id).set(payload, { merge: merge || false });
             return NextResponse.json({ success: true });
         }
 
         if (action === 'deleteDoc') {
             const { collection: colName, id } = data;
-            await deleteDoc(doc(db, `${MASTER_DOC_PATH}/${colName}`, id));
+            await adminDb.collection(`${MASTER_DOC_PATH}/${colName}`).doc(id).delete();
             return NextResponse.json({ success: true });
         }
 
         if (action === 'writeBatch') {
             const { operations } = data; // Array of { type: 'set'|'update'|'delete', collection: string, id: string, payload?: any }
-            const batch = writeBatch(db);
+            const batch = adminDb.batch();
             for (const op of operations) {
-                const ref = doc(db, `${MASTER_DOC_PATH}/${op.collection}`, op.id);
+                const ref = adminDb.collection(`${MASTER_DOC_PATH}/${op.collection}`).doc(op.id);
                 if (op.type === 'set') batch.set(ref, op.payload);
                 if (op.type === 'update') batch.update(ref, op.payload);
                 if (op.type === 'delete') batch.delete(ref);
