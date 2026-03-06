@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { adminDb } from '@/lib/firebase-admin';
 
+export const dynamic = 'force-dynamic';
+
 const MASTER_DOC_PATH = 'chunk_pm_data/master';
 
 export async function GET() {
