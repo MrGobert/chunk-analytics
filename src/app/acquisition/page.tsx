@@ -18,7 +18,12 @@ const PLATFORM_TABS = [
     description: 'Marketing site',
     icon: (
       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" />
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth={2}
+          d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"
+        />
       </svg>
     ),
   },
@@ -38,7 +43,12 @@ const PLATFORM_TABS = [
     description: 'No onboarding',
     icon: (
       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth={2}
+          d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
+        />
       </svg>
     ),
   },
@@ -50,7 +60,7 @@ export default function AcquisitionPage() {
   const { dateRange, setDateRange, userType, setUserType } = useDashboardFilters();
   const [platformGroup, setPlatformGroup] = useState<PlatformKey>('web');
 
-  const { data: metrics, isLoading, isRefreshing, lastUpdated } =
+  const { data: metrics, isLoading, isRefreshing, error, lastUpdated } =
     useAnalytics<AcquisitionFunnelMetrics>('/api/metrics/acquisition', {
       range: dateRange,
       platform: platformGroup,
@@ -63,8 +73,11 @@ export default function AcquisitionPage() {
 
   if (!metrics) {
     return (
-      <div className="text-center text-zinc-500 py-20">
-        Failed to load acquisition metrics. Please try again.
+      <div className="text-center py-20">
+        <p className="text-zinc-500 mb-2">Failed to load acquisition metrics.</p>
+        {error && (
+          <p className="text-xs font-mono text-red-400/70">{error}</p>
+        )}
       </div>
     );
   }
@@ -109,10 +122,8 @@ export default function AcquisitionPage() {
         ))}
       </div>
 
-      {/* Conversion Rate Cards */}
-      <div
-        className={`grid grid-cols-1 md:grid-cols-2 lg:grid-cols-${metrics.statCards.length} gap-6 mb-8`}
-      >
+      {/* Conversion Rate Cards — fixed grid (always 4 cards) */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
         {metrics.statCards.map((card) => (
           <StatCard
             key={card.label}

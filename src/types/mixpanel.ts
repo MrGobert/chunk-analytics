@@ -68,7 +68,6 @@ export interface AcquisitionFunnelMetrics {
   platform: 'web' | 'ios' | 'macOS';
   subtitle: string;
   funnel: FunnelStep[];
-  conversionRates: Record<string, number>;
   statCards: { label: string; value: number }[];
   dailyData: Record<string, string | number>[];
   dailyLines: { key: string; color: string; name: string }[];
