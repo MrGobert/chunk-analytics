@@ -3,8 +3,10 @@
 import { useDashboardFilters } from '@/hooks/useDashboardFilters';
 import PageHeader from '@/components/layout/PageHeader';
 import ChartCard from '@/components/cards/ChartCard';
+import StatCard from '@/components/cards/StatCard';
 import LineChart from '@/components/charts/LineChart';
 import BarChart from '@/components/charts/BarChart';
+import PieChart from '@/components/charts/PieChart';
 import DataTable from '@/components/charts/DataTable';
 import { SkeletonPage } from '@/components/ui/Skeleton';
 import { useAnalytics } from '@/hooks/useAnalytics';
@@ -14,14 +16,45 @@ interface ExtendedUserMetrics extends UserMetrics {
   userBreakdown?: UserBreakdown;
 }
 
+interface OnboardingCategory {
+  key: string;
+  name: string;
+  count: number;
+  percentage: number;
+}
+
+interface OnboardingCategoriesData {
+  categories: OnboardingCategory[];
+  totalUsersWithCategories: number;
+  totalUsers: number;
+  adoptionRate: number;
+}
+
+const CATEGORY_COLORS = [
+  '#8b5cf6', // purple
+  '#6366f1', // indigo
+  '#3b82f6', // blue
+  '#0ea5e9', // sky
+  '#14b8a6', // teal
+  '#22c55e', // green
+  '#84cc16', // lime
+  '#eab308', // yellow
+  '#f97316', // orange
+  '#ef4444', // red
+  '#ec4899', // pink
+];
+
 export default function UsersPage() {
   const { dateRange, setDateRange, platform, setPlatform, userType, setUserType } = useDashboardFilters();
-
-
 
   const { data: metrics, isLoading, isRefreshing, lastUpdated } = useAnalytics<ExtendedUserMetrics>(
     '/api/metrics/users',
     { range: dateRange, platform, userType }
+  );
+
+  const { data: categoryData, isLoading: isCategoryLoading } = useAnalytics<OnboardingCategoriesData>(
+    '/api/rc/onboarding-categories',
+    {}
   );
 
   if (isLoading) {
@@ -35,6 +68,18 @@ export default function UsersPage() {
       </div>
     );
   }
+
+  // Prepare category data for charts
+  const pieData = categoryData?.categories?.map((c) => ({
+    name: c.name,
+    value: c.count,
+  })) ?? [];
+
+  const barData = categoryData?.categories?.map((c) => ({
+    name: c.name,
+    users: c.count,
+    percentage: c.percentage,
+  })) ?? [];
 
   return (
     <div className="animate-in fade-in duration-300">
@@ -66,6 +111,47 @@ export default function UsersPage() {
           <BarChart data={metrics.mau} xKey="month" yKey="users" color="#059669" />
         </ChartCard>
       </div>
+
+      {/* Onboarding Use Cases Section */}
+      {!isCategoryLoading && categoryData && categoryData.categories.length > 0 && (
+        <>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 mb-8">
+            <StatCard
+              title="Users with Use Case"
+              value={categoryData.totalUsersWithCategories}
+            />
+            <StatCard
+              title="Adoption Rate"
+              value={`${categoryData.adoptionRate}%`}
+            />
+            <StatCard
+              title="Total Users"
+              value={categoryData.totalUsers}
+            />
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+            <ChartCard
+              title="What Users Use Chunk For"
+              subtitle="Onboarding use case selections (all time)"
+            >
+              <PieChart data={pieData} colors={CATEGORY_COLORS} />
+            </ChartCard>
+            <ChartCard
+              title="Use Case Breakdown"
+              subtitle="Total selections per category"
+            >
+              <BarChart
+                data={barData}
+                xKey="name"
+                yKey="users"
+                colors={CATEGORY_COLORS}
+                horizontal
+              />
+            </ChartCard>
+          </div>
+        </>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
         <ChartCard title="Session Duration Distribution" subtitle="How long users stay in the app">

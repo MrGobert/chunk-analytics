@@ -1184,6 +1184,118 @@ def preview_email_template(template_id: str):
 
 
 # ============================================================
+# Onboarding Categories (Research Use Cases)
+# ============================================================
+
+
+# Display-friendly labels matching the iOS ResearchCategory enum
+_CATEGORY_LABELS = {
+    "academic": "Academic Research",
+    "work": "Work & Business",
+    "writing": "Writing & Content",
+    "software": "Software & Dev",
+    "market": "Market Research",
+    "creative": "Creative Projects",
+    "science": "Science & Data",
+    "personalLearning": "Personal Learning",
+    "legal": "Legal Research",
+    "product": "Product Research",
+    "other": "Other",
+}
+
+
+@analytics_api_bp.route("/onboarding-categories", methods=["GET"])
+@require_analytics_auth
+@safe_analytics({
+    "categories": [], "totalUsersWithCategories": 0,
+    "totalUsers": 0, "adoptionRate": 0,
+})
+def onboarding_categories():
+    """
+    Aggregate researchCategories from Firestore users.
+
+    Returns category counts + percentages for charting.
+    Cached 15 minutes in Redis.
+    """
+    cache_key = "analytics_cache:onboarding_categories"
+    result = _get_cached_or_compute(cache_key, _compute_onboarding_categories, ttl=900)
+    return jsonify(result), 200
+
+
+def _camel_to_title(s: str) -> str:
+    """Convert camelCase/snake_case to Title Case for unknown category keys."""
+    import re
+    # Insert space before uppercase letters (camelCase → camel Case)
+    spaced = re.sub(r'([a-z])([A-Z])', r'\1 \2', s)
+    # Replace underscores with spaces
+    spaced = spaced.replace("_", " ")
+    return spaced.title()
+
+
+def _compute_onboarding_categories() -> dict:
+    from firebase_setup import db
+
+    users_ref = db.collection("users")
+
+    # Paginate through ALL users (not just active subscribers)
+    batch_size = 500
+    last_doc = None
+    category_counts: dict[str, int] = {}
+    total_users = 0
+    users_with_categories = 0
+
+    while True:
+        query = users_ref.order_by("__name__").limit(batch_size)
+        if last_doc:
+            query = query.start_after(last_doc)
+
+        docs = list(query.stream())
+        if not docs:
+            break
+
+        for doc in docs:
+            data = doc.to_dict()
+            total_users += 1
+
+            categories = data.get("researchCategories")
+            if categories and isinstance(categories, list) and len(categories) > 0:
+                users_with_categories += 1
+                # Deduplicate within a single user (iOS uses Set but Firestore doesn't enforce)
+                seen = set()
+                for cat in categories:
+                    if isinstance(cat, str) and cat not in seen:
+                        seen.add(cat)
+                        category_counts[cat] = category_counts.get(cat, 0) + 1
+
+        last_doc = docs[-1]
+        if len(docs) < batch_size:
+            break
+
+    # Build sorted list with labels and percentages
+    categories = []
+    for raw_key, count in sorted(category_counts.items(), key=lambda x: -x[1]):
+        label = _CATEGORY_LABELS.get(raw_key, _camel_to_title(raw_key))
+        pct = round((count / users_with_categories * 100) if users_with_categories > 0 else 0, 1)
+        categories.append({
+            "key": raw_key,
+            "name": label,
+            "count": count,
+            "percentage": pct,
+        })
+
+    adoption_rate = round(
+        (users_with_categories / total_users * 100) if total_users > 0 else 0, 1
+    )
+
+    return {
+        "categories": categories,
+        "totalUsersWithCategories": users_with_categories,
+        "totalUsers": total_users,
+        "adoptionRate": adoption_rate,
+    }
+
+
+# ============================================================
 # Health Check
 # ============================================================
 
