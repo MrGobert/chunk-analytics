@@ -7,6 +7,7 @@ chunk-analytics dashboard. NO dependency on chat pipeline.
 All endpoints wrap in try/except and return graceful empty data on error.
 """
 
+import heapq
 import json
 import logging
 import os
@@ -127,10 +128,19 @@ def safe_analytics(empty_response):
 # ============================================================
 
 
+def _get_tenure_date(user_data: dict) -> datetime:
+    """Get subscription tenure date, preferring subscription dates over account creation."""
+    return (
+        _to_datetime(user_data.get("trialEndDate"))
+        or _to_datetime(user_data.get("renewalDate"))
+        or _to_datetime(user_data.get("createdAt"))
+    )
+
+
 def _compute_health_score(user_data: dict, now: datetime) -> dict:
     """Compute health score from 5 weighted factors."""
 
-    # Factor 1: Recency (30% weight) - How recently was user active?
+    # Factor 1: Recency (35% weight) - How recently was user active?
     last_active = _to_datetime(user_data.get("lastActiveAt"))
     if last_active:
         days_since = (now - last_active).days
@@ -138,20 +148,24 @@ def _compute_health_score(user_data: dict, now: datetime) -> dict:
     else:
         recency = 0
 
-    # Factor 2: Tenure (25% weight) - How long subscribed?
-    created = _to_datetime(user_data.get("createdAt"))
-    if created:
-        tenure_days = (now - created).days
+    # Factor 2: Tenure (10% weight) - How long subscribed?
+    tenure_date = _get_tenure_date(user_data)
+    if tenure_date:
+        tenure_days = (now - tenure_date).days
         tenure = min(100, tenure_days * 0.67)  # Maxes at ~150 days
     else:
         tenure = 50  # Unknown
 
-    # Factor 3: Usage Frequency (20% weight) - Monthly activity
+    # Recency gate: halve tenure when user is 30+ days inactive or never seen
+    if recency == 0:
+        tenure = tenure * 0.5
+
+    # Factor 3: Usage Frequency (25% weight) - Monthly activity
     usage = user_data.get("usageStats", {}) or {}
     searches = usage.get("monthlySearches", 0) or 0
     frequency = min(100, searches * 5)  # 20+ searches/month = 100
 
-    # Factor 4: Feature Depth (15% weight) - Uses multiple features?
+    # Factor 4: Feature Depth (20% weight) - Uses multiple features?
     features_used = sum(1 for k in ["monthlySearches", "monthlyDocuments",
                         "monthlyImages", "monthlyNotes", "monthlyCollections"]
                        if (usage.get(k, 0) or 0) > 0)
@@ -161,8 +175,8 @@ def _compute_health_score(user_data: dict, now: datetime) -> dict:
     emails_sent = user_data.get("emailsSent", {}) or {}
     email_engagement = min(100, len(emails_sent) * 15)
 
-    score = (recency * 0.30 + tenure * 0.25 + frequency * 0.20 +
-             feature_depth * 0.15 + email_engagement * 0.10)
+    score = (recency * 0.35 + tenure * 0.10 + frequency * 0.25 +
+             feature_depth * 0.20 + email_engagement * 0.10)
 
     status = "healthy" if score >= 60 else "atRisk" if score >= 30 else "churning"
 
@@ -499,6 +513,7 @@ def _compute_subscriber_funnel(days: int) -> dict:
     "churnRate": 0, "churnRateTrend": [], "atRiskUsers": [], "churnedUsers": [],
     "winbackEffectiveness": {}, "churnReasons": {},
     "avgTenureBeforeChurn": 0, "atRiskCount": 0, "winbackRate": 0,
+    "topEngagedUsers": [], "engagedCount": 0,
 })
 def churn_intelligence():
     days = request.args.get("days", 90, type=int)
@@ -537,28 +552,57 @@ def _compute_churn_intelligence(days: int) -> dict:
     start_active = len(active_docs) + total_churned
     churn_rate = round((total_churned / start_active * 100) if start_active > 0 else 0, 1)
 
-    # At-risk users: active but not seen in 7+ days
+    # Single pass: classify active users as at-risk or engaged
     at_risk_users = []
+    engaged_candidates = []
     for doc in active_docs:
         data = doc.to_dict()
         last_active = _to_datetime(data.get("lastActiveAt"))
-        if last_active is None or last_active < seven_days_ago:
-            days_since = (now - last_active).days if last_active else 999
-            health = _compute_health_score(data, now)
-            created = _to_datetime(data.get("createdAt"))
-            sub_age = (now - created).days if created else 0
+        health = _compute_health_score(data, now)
+        tenure_date = _get_tenure_date(data)
+        sub_age = (now - tenure_date).days if tenure_date else None
+        platform = data.get("platform", "unknown") or "unknown"
 
+        if last_active is None or last_active < seven_days_ago:
+            # At-risk: inactive 7+ days
             at_risk_users.append({
                 "uid": doc.id,
                 "email": data.get("email", ""),
                 "lastActive": _safe_isoformat(last_active),
-                "daysSinceActive": days_since,
+                "daysSinceActive": (now - last_active).days if last_active else None,
                 "healthScore": health["healthScore"],
                 "subscriptionAge": sub_age,
-                "platform": data.get("platform", "unknown") or "unknown",
+                "platform": platform,
+            })
+        elif health["healthScore"] >= 60:
+            # Engaged: active within 7 days with strong health
+            usage = data.get("usageStats", {}) or {}
+            engaged_candidates.append({
+                "uid": doc.id,
+                "email": data.get("email", ""),
+                "lastActive": _safe_isoformat(last_active),
+                "daysSinceActive": (now - last_active).days,
+                "healthScore": health["healthScore"],
+                "subscriptionAge": sub_age,
+                "platform": platform,
+                "usage": {
+                    "searches": usage.get("monthlySearches", 0) or 0,
+                    "documents": usage.get("monthlyDocuments", 0) or 0,
+                    "notes": usage.get("monthlyNotes", 0) or 0,
+                    "collections": usage.get("monthlyCollections", 0) or 0,
+                },
+                "factors": health["factors"],
             })
 
-    at_risk_users.sort(key=lambda x: x["healthScore"])
+    # Null health scores sort to top (most uncertain = most risky)
+    at_risk_users.sort(key=lambda x: (
+        x["healthScore"] if x["healthScore"] is not None else -1
+    ))
+
+    engaged_count = len(engaged_candidates)
+    top_engaged_users = heapq.nlargest(
+        50, engaged_candidates, key=lambda x: x["healthScore"]
+    )
 
     # Churned users detail with email history
     # Batch email history lookup to avoid N+1 queries
@@ -677,6 +721,8 @@ def _compute_churn_intelligence(days: int) -> dict:
         "avgTenureBeforeChurn": avg_tenure,
         "atRiskCount": len(at_risk_users),
         "winbackRate": winback_rate,
+        "topEngagedUsers": top_engaged_users,
+        "engagedCount": engaged_count,
     }
 
 

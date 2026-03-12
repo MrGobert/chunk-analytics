@@ -16,10 +16,22 @@ interface AtRiskUser {
   uid: string;
   email: string;
   lastActive: string;
+  daysSinceActive: number | null;
+  healthScore: number;
+  subscriptionAge: number | null;
+  platform: string;
+}
+
+interface EngagedUser {
+  uid: string;
+  email: string;
+  lastActive: string;
   daysSinceActive: number;
   healthScore: number;
-  subscriptionAge: number;
+  subscriptionAge: number | null;
   platform: string;
+  usage: { searches: number; documents: number; notes: number; collections: number };
+  factors: { recency: number; frequency: number; featureDepth: number; tenure: number; emailEngagement: number };
 }
 
 interface ChurnedUser {
@@ -49,6 +61,8 @@ interface ChurnIntelligence {
   avgTenureBeforeChurn: number;
   atRiskCount: number;
   winbackRate: number;
+  topEngagedUsers: EngagedUser[];
+  engagedCount: number;
   lastUpdated: string;
   note?: string;
   dataUnavailable?: boolean;
@@ -60,6 +74,8 @@ export default function ChurnIntelligencePage() {
   const [churnSearch, setChurnSearch] = useState('');
   const [atRiskSort, setAtRiskSort] = useState<'healthScore' | 'daysSinceActive' | 'subscriptionAge'>('healthScore');
   const [atRiskSortDir, setAtRiskSortDir] = useState<'asc' | 'desc'>('asc');
+  const [engagedSort, setEngagedSort] = useState<'healthScore' | 'daysSinceActive' | 'searches'>('healthScore');
+  const [engagedSortDir, setEngagedSortDir] = useState<'asc' | 'desc'>('desc');
 
   const daysMap: Record<string, string> = { '7d': '7', '30d': '30', '90d': '90' };
   const days = daysMap[dateRange] || '90';
@@ -73,27 +89,58 @@ export default function ChurnIntelligencePage() {
     [churn?.churnRateTrend]
   );
 
-  // At-risk users sorted
+  // At-risk users sorted (null values sort to top = most risky)
   const sortedAtRiskUsers = useMemo(() => {
     const users = [...(churn?.atRiskUsers || [])];
     users.sort((a, b) => {
-      const aVal = a[atRiskSort];
-      const bVal = b[atRiskSort];
+      const aVal = a[atRiskSort] ?? (atRiskSortDir === 'asc' ? -Infinity : Infinity);
+      const bVal = b[atRiskSort] ?? (atRiskSortDir === 'asc' ? -Infinity : Infinity);
       return atRiskSortDir === 'asc' ? (aVal as number) - (bVal as number) : (bVal as number) - (aVal as number);
     });
     return users;
   }, [churn?.atRiskUsers, atRiskSort, atRiskSortDir]);
 
-  // At-risk table data
+  // At-risk table data — show "N/A" for null values
   const atRiskTableData = useMemo(() =>
     sortedAtRiskUsers.map((u) => ({
       email: u.email || u.uid,
       healthScore: u.healthScore.toString(),
-      daysSinceActive: `${u.daysSinceActive}d`,
-      subscriptionAge: `${u.subscriptionAge}d`,
+      daysSinceActive: u.daysSinceActive != null ? `${u.daysSinceActive}d` : 'N/A',
+      subscriptionAge: u.subscriptionAge != null ? `${u.subscriptionAge}d` : 'N/A',
       platform: u.platform,
     })),
     [sortedAtRiskUsers]
+  );
+
+  // Engaged users sorted
+  const sortedEngagedUsers = useMemo(() => {
+    const users = [...(churn?.topEngagedUsers || [])];
+    users.sort((a, b) => {
+      let aVal: number, bVal: number;
+      if (engagedSort === 'searches') {
+        aVal = a.usage?.searches ?? 0;
+        bVal = b.usage?.searches ?? 0;
+      } else {
+        aVal = a[engagedSort] ?? 0;
+        bVal = b[engagedSort] ?? 0;
+      }
+      return engagedSortDir === 'asc' ? aVal - bVal : bVal - aVal;
+    });
+    return users;
+  }, [churn?.topEngagedUsers, engagedSort, engagedSortDir]);
+
+  // Engaged users table data
+  const engagedTableData = useMemo(() =>
+    sortedEngagedUsers.map((u) => ({
+      email: u.email || u.uid,
+      healthScore: u.healthScore.toString(),
+      searches: (u.usage?.searches ?? 0).toString(),
+      notes: (u.usage?.notes ?? 0).toString(),
+      collections: (u.usage?.collections ?? 0).toString(),
+      subscriptionAge: u.subscriptionAge != null ? `${u.subscriptionAge}d` : 'N/A',
+      platform: u.platform,
+    })),
+    [sortedEngagedUsers]
   );
 
   // Churned users filtered by search
@@ -143,7 +190,7 @@ export default function ChurnIntelligencePage() {
   }, [isLoading, churn]);
 
   if (isLoading) {
-    return <SkeletonPage statCards={4} statCardCols="grid-cols-1 md:grid-cols-2 lg:grid-cols-4" chartCards={3} />;
+    return <SkeletonPage statCards={5} statCardCols="grid-cols-1 md:grid-cols-3 lg:grid-cols-5" chartCards={3} />;
   }
 
   if (error) {
@@ -170,14 +217,22 @@ export default function ChurnIntelligencePage() {
     !!churn.note
   );
 
-  const handleAtRiskSortClick = (col: 'healthScore' | 'daysSinceActive' | 'subscriptionAge') => {
-    if (atRiskSort === col) {
-      setAtRiskSortDir((d) => d === 'asc' ? 'desc' : 'asc');
+  const makeSortHandler = <T extends string>(
+    currentSort: T,
+    setSort: (col: T) => void,
+    setSortDir: (fn: (d: 'asc' | 'desc') => 'asc' | 'desc') => void,
+    defaultDir: 'asc' | 'desc',
+  ) => (col: T) => {
+    if (currentSort === col) {
+      setSortDir((d) => d === 'asc' ? 'desc' : 'asc');
     } else {
-      setAtRiskSort(col);
-      setAtRiskSortDir('asc');
+      setSort(col);
+      setSortDir(() => defaultDir);
     }
   };
+
+  const handleAtRiskSortClick = makeSortHandler(atRiskSort, setAtRiskSort, setAtRiskSortDir, 'asc');
+  const handleEngagedSortClick = makeSortHandler(engagedSort, setEngagedSort, setEngagedSortDir, 'desc');
 
   return (
     <div ref={containerRef} className="animate-in fade-in duration-300">
@@ -218,7 +273,7 @@ export default function ChurnIntelligencePage() {
       )}
 
       {/* Stat Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+      <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-6 mb-8">
         <StatCard
           title="Monthly Churn Rate"
           value={dataUnavailable ? '—' : churn.churnRate / 100}
@@ -236,6 +291,16 @@ export default function ChurnIntelligencePage() {
           icon={
             <svg className="w-5 h-5 text-yellow-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+          }
+        />
+        <StatCard
+          title="Engaged Users"
+          value={dataUnavailable ? '—' : (churn.engagedCount ?? 0)}
+          format={dataUnavailable ? 'text' : undefined}
+          icon={
+            <svg className="w-5 h-5 text-[#34D399]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
           }
         />
@@ -316,6 +381,51 @@ export default function ChurnIntelligencePage() {
           ) : (
             <div className="flex items-center justify-center h-full text-zinc-500 font-mono text-sm">
               No at-risk users identified
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Most Engaged Users Table */}
+      <div className="card-animate rounded-[1.5rem] bg-primary/60 backdrop-blur-xl border border-white/5 p-6 sm:p-8 shadow-lg mb-8">
+        <div className="mb-6 border-b border-white/5 pb-4">
+          <h3 className="text-xl sm:text-2xl font-bold font-sans tracking-tight text-foreground">Most Engaged Users</h3>
+          <p className="text-sm font-mono text-zinc-400 mt-2 uppercase tracking-wide">
+            Active users with strong health scores — last 7 days
+          </p>
+          <div className="flex gap-2 mt-3">
+            {(['healthScore', 'daysSinceActive', 'searches'] as const).map((col) => (
+              <button
+                key={col}
+                onClick={() => handleEngagedSortClick(col)}
+                className={`text-xs font-mono px-3 py-1 rounded-full border transition-colors ${engagedSort === col
+                    ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
+                    : 'bg-white/5 border-transparent text-zinc-400 hover:text-white hover:bg-white/10'
+                  }`}
+              >
+                {col === 'healthScore' ? 'Health' : col === 'daysSinceActive' ? 'Last Active' : 'Searches'}
+                {engagedSort === col && (engagedSortDir === 'asc' ? ' ↑' : ' ↓')}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="h-[300px]">
+          {engagedTableData.length > 0 ? (
+            <DataTable
+              data={engagedTableData}
+              columns={[
+                { key: 'email', header: 'User' },
+                { key: 'healthScore', header: 'Health' },
+                { key: 'searches', header: 'Searches' },
+                { key: 'notes', header: 'Notes' },
+                { key: 'collections', header: 'Collections' },
+                { key: 'subscriptionAge', header: 'Tenure' },
+                { key: 'platform', header: 'Platform' },
+              ]}
+            />
+          ) : (
+            <div className="flex items-center justify-center h-full text-zinc-500 font-mono text-sm">
+              No engaged users in this period
             </div>
           )}
         </div>

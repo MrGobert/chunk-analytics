@@ -1086,9 +1086,11 @@ def check_welcome_sequence_day3_task(self):
         )
 
         now = datetime.now(timezone.utc)
-        # Window: users who signed up 68-76 hours ago (roughly 3 days)
-        window_start = now - timedelta(hours=76)
-        window_end = now - timedelta(hours=68)
+        # Window: 24-hour window centered on 72h (3 days) after signup
+        # Using timedelta(days=3, hours=12) to timedelta(days=2, hours=12)
+        # matches Day 7's approach and ensures all signups are caught
+        window_start = now - timedelta(days=3, hours=12)
+        window_end = now - timedelta(days=2, hours=12)
 
         users_ref = db.collection("users")
         query = (

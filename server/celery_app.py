@@ -50,9 +50,9 @@ celery.conf.update(
             "task": "check_welcome_sequence_day1",
             "schedule": crontab(minute=15, hour="*/6"),
         },
-        "check-welcome-day3-daily": {
+        "check-welcome-day3-twice-daily": {
             "task": "check_welcome_sequence_day3",
-            "schedule": crontab(minute=0, hour=11),
+            "schedule": crontab(minute=0, hour="5,17"),
         },
         "check-welcome-day7-daily": {
             "task": "check_welcome_sequence_day7",

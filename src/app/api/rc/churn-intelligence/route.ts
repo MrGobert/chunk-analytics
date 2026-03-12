@@ -5,6 +5,13 @@ export const maxDuration = 60;
 const ANALYTICS_API_URL = process.env.ANALYTICS_API_URL || 'https://cerebral-analytics-eff2e86d22c4.herokuapp.com';
 const CEREBRAL_AUTH_TOKEN = process.env.CEREBRAL_AUTH_TOKEN || '';
 
+const EMPTY_RESPONSE = {
+  churnRate: 0, churnRateTrend: [], atRiskUsers: [], churnedUsers: [],
+  winbackEffectiveness: {}, churnReasons: {},
+  avgTenureBeforeChurn: 0, atRiskCount: 0, winbackRate: 0,
+  topEngagedUsers: [], engagedCount: 0,
+};
+
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const days = searchParams.get('days') || '90';
@@ -56,6 +63,8 @@ export async function GET(request: NextRequest) {
       avgTenureBeforeChurn: data.avgTenureBeforeChurn ?? 0,
       atRiskCount: data.atRiskCount ?? 0,
       winbackRate: data.winbackRate ?? 0,
+      topEngagedUsers: data.topEngagedUsers ?? [],
+      engagedCount: data.engagedCount ?? 0,
       lastUpdated: new Date().toISOString(),
       ...(data.note ? { note: data.note } : {}),
     });
@@ -65,9 +74,7 @@ export async function GET(request: NextRequest) {
     if (error instanceof Error && error.name === 'AbortError') {
       console.error('Cerebral API timeout for churn-intelligence');
       return NextResponse.json({
-        churnRate: 0, churnRateTrend: [], atRiskUsers: [], churnedUsers: [],
-        winbackEffectiveness: {}, churnReasons: {},
-        avgTenureBeforeChurn: 0, atRiskCount: 0, winbackRate: 0,
+        ...EMPTY_RESPONSE,
         lastUpdated: new Date().toISOString(),
         dataUnavailable: true,
         note: 'Data unavailable - Cerebral server timeout. Try refreshing.',
@@ -76,9 +83,7 @@ export async function GET(request: NextRequest) {
 
     console.error('Failed to fetch churn intelligence:', error);
     return NextResponse.json({
-      churnRate: 0, churnRateTrend: [], atRiskUsers: [], churnedUsers: [],
-      winbackEffectiveness: {}, churnReasons: {},
-      avgTenureBeforeChurn: 0, atRiskCount: 0, winbackRate: 0,
+      ...EMPTY_RESPONSE,
       lastUpdated: new Date().toISOString(),
       dataUnavailable: true,
       note: `Data unavailable - ${error instanceof Error ? error.message : 'Unknown error'}`,
