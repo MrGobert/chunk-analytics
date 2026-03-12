@@ -75,8 +75,11 @@ def generate_email_html():
     
     {_feature_card("🌐", "Share with Others", "Publish your personal wiki with live, SEO-friendly web links. Use cascading permissions to share an entire Map of Content and set granular privacy instantly.", BRAND['accent_blue'], "SHARING")}
 
-    <p style="margin:20px 0 0 0;font-family:sans-serif;font-size:16px;color:{BRAND['text_primary']};line-height:1.6;text-align:center" class="text-dark">
-        Ready to turn your notes into a powerful knowledge graph? Try Chunk on the Web.
+    <p style="margin:20px 0 4px 0;font-family:sans-serif;font-size:16px;color:{BRAND['text_primary']};line-height:1.6;text-align:center" class="text-dark">
+        Ready to turn your notes into a powerful knowledge graph?
+    </p>
+    <p style="margin:0;font-family:sans-serif;font-size:22px;font-weight:800;color:{BRAND['primary']};text-align:center;letter-spacing:-0.02em">
+        Chunk is now on the Web.
     </p>
     """
 
