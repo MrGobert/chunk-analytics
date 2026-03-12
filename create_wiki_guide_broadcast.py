@@ -62,7 +62,7 @@ def generate_email_html():
         A personal wiki isn't just a place to store information—it's a living system that grows with your ideas. 
     </p>
     <p style="margin:0 0 20px 0;font-family:sans-serif;font-size:16px;color:{BRAND['text_primary']};line-height:1.6" class="text-dark">
-        By connecting notes with [[brackets]], you create an interconnected web of knowledge. Here's a quick guide on how to build yours:
+        By connecting notes with <span style="color:{BRAND['primary']};font-weight:700">[[brackets]]</span>, you create an interconnected web of knowledge. Here's a quick guide on how to build yours:
     </p>
 
     {_serif_statement("Building your wiki.")}
@@ -112,8 +112,8 @@ def list_broadcasts():
         print(f"Error fetching broadcasts: {e}")
         return []
 
-def update_broadcast(broadcast_id, html):
-    payload = json.dumps({"html": html}).encode('utf-8')
+def update_broadcast(broadcast_id, html, audience_id="bd174a71-cae1-4af4-8795-a3115d832819"):
+    payload = json.dumps({"html": html, "audience_id": audience_id}).encode('utf-8')
     req = urllib.request.Request(
         f"https://api.resend.com/broadcasts/{broadcast_id}",
         data=payload,
