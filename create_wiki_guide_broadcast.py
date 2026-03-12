@@ -56,7 +56,7 @@ def generate_email_html():
 
     body = f"""
     <div style="text-align: center; margin-bottom: 24px;">
-        <img src="https://chunk-analytics.vercel.app/notes_feature_lightmode.jpg" alt="Chunk App Interface" style="max-width: 500px; width: 100%; height: auto; border-radius: 8px; border: 1px solid {border_color}; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
+        <img src="https://chunk-analytics.vercel.app/notes_feature_lightmode.png" alt="Chunk App Interface" style="max-width: 500px; width: 100%; height: auto; border-radius: 8px; border: 1px solid {border_color}; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
     </div>
     <p style="margin:0 0 16px 0;font-family:sans-serif;font-size:16px;color:{BRAND['text_primary']};line-height:1.6" class="text-dark">
         A personal wiki isn't just a place to store information—it's a living system that grows with your ideas. 
@@ -75,8 +75,8 @@ def generate_email_html():
     
     {_feature_card("🌐", "Share with Others", "Publish your personal wiki with live, SEO-friendly web links. Use cascading permissions to share an entire Map of Content and set granular privacy instantly.", BRAND['accent_blue'], "SHARING")}
 
-    <p style="margin:20px 0 0 0;font-family:sans-serif;font-size:16px;color:{BRAND['text_primary']};line-height:1.6" class="text-dark">
-        Ready to turn your notes into a powerful knowledge graph? Try Chunk on the new web app and discover our new Notes features today.
+    <p style="margin:20px 0 0 0;font-family:sans-serif;font-size:16px;color:{BRAND['text_primary']};line-height:1.6;text-align:center" class="text-dark">
+        Ready to turn your notes into a powerful knowledge graph? Try Chunk on the Web.
     </p>
     """
 
@@ -85,8 +85,8 @@ def generate_email_html():
         hero_title="How To Turn your notes into a Wiki",
         hero_subtitle="A guide to building interconnected notes.",
         body_content=body,
-        cta_text="Try Chunk on www.ChunkApp.com",
-        cta_url="https://www.chunkapp.com",
+        cta_text="Try Chunk Now",
+        cta_url="https://www.chunkapp.com/chat?guest=true",
         hero_dark=True,
         hero_label="GUIDE",
         hero_serif_word="Wiki"
