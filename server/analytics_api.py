@@ -604,9 +604,25 @@ def _compute_churn_intelligence(days: int) -> dict:
         if exp_date and exp_date >= cutoff:
             churned_in_period.append(data)
 
-    total_churned = len(churned_in_period)
-    start_active = len(active_docs) + total_churned
-    churn_rate = round((total_churned / start_active * 100) if start_active > 0 else 0, 1)
+    # Separate trial expirations from subscriber churn for accurate churn rate
+    subscriber_churned = []
+    trial_churned = []
+    for data in churned_in_period:
+        trial_end = _to_datetime(data.get("trialEndDate"))
+        exp_date = _to_datetime(data.get("expirationDate"))
+        is_trial_expiry = (
+            trial_end and exp_date
+            and abs((trial_end - exp_date).total_seconds()) < 86400 * 2
+        )
+        if is_trial_expiry:
+            trial_churned.append(data)
+        else:
+            subscriber_churned.append(data)
+
+    # Churn rate: only paying subscribers who churned (not trial expirations)
+    total_subscriber_churned = len(subscriber_churned)
+    start_active = len(active_docs) + total_subscriber_churned
+    churn_rate = round((total_subscriber_churned / start_active * 100) if start_active > 0 else 0, 1)
 
     # Single pass: classify active + trial users as at-risk or engaged
     at_risk_users = []
@@ -642,10 +658,10 @@ def _compute_churn_intelligence(days: int) -> dict:
                 "subscriptionType": "trial" if is_trial else "active",
                 "trialEndsIn": trial_ends_in if is_trial else None,
             })
-            if is_trial:
+            if trial_expiring_soon:
                 trial_at_risk_count += 1
-        elif health["healthScore"] >= 60:
-            # Engaged: active within 7 days with strong health
+        elif not is_trial and health["healthScore"] >= 60:
+            # Engaged: active paying subscribers within 7 days with strong health
             usage = data.get("usageStats", {}) or {}
             engaged_candidates.append({
                 "uid": doc.id,
@@ -797,7 +813,7 @@ def _compute_churn_intelligence(days: int) -> dict:
             "date": now.strftime("%Y-%m-%d"),
             "rate": churn_rate,
             "atRiskCount": len(at_risk_users),
-            "churnedCount": total_churned,
+            "churnedCount": total_subscriber_churned,
         }]
 
     return {
