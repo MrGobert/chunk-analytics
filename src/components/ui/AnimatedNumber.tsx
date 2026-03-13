@@ -27,7 +27,7 @@ export default function AnimatedNumber({
         const counter = { val: 0 };
 
         const formatValue = (v: number) => {
-            if (format === 'percentage') return (v).toFixed(1) + '%';
+            if (format === 'percentage') return (v * 100).toFixed(1) + '%';
             if (format === 'ratio') return v.toFixed(2);
             if (format === 'decimal') return v.toFixed(1);
             if (format === 'currency') {
