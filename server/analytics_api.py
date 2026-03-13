@@ -118,7 +118,7 @@ def safe_analytics(empty_response):
                 return f(*args, **kwargs)
             except Exception as e:
                 logging.error(f"[ANALYTICS_API] {f.__name__} failed: {e}", exc_info=True)
-                return jsonify({**empty_response, "note": "Data temporarily unavailable"}), 200
+                return jsonify({**empty_response, "note": "Data temporarily unavailable", "dataUnavailable": True}), 200
         return decorated
     return decorator
 
@@ -512,7 +512,7 @@ def _compute_subscriber_funnel(days: int) -> dict:
 @safe_analytics({
     "churnRate": 0, "churnRateTrend": [], "atRiskUsers": [], "churnedUsers": [],
     "winbackEffectiveness": {}, "churnReasons": {},
-    "avgTenureBeforeChurn": 0, "atRiskCount": 0, "winbackRate": 0,
+    "avgTenureBeforeChurn": 0, "atRiskCount": 0, "trialAtRiskCount": 0, "winbackRate": 0,
     "topEngagedUsers": [], "engagedCount": 0,
 })
 def churn_intelligence():
@@ -524,6 +524,61 @@ def churn_intelligence():
     return jsonify(result), 200
 
 
+def _classify_churn_reason(data: dict, now: datetime) -> str:
+    """Classify churn reason from user data with enriched signal hierarchy."""
+    usage = data.get("usageStats", {}) or {}
+    emails_sent = data.get("emailsSent", {}) or {}
+    searches = usage.get("monthlySearches", 0) or 0
+    documents = usage.get("monthlyDocuments", 0) or 0
+    notes = usage.get("monthlyNotes", 0) or 0
+    total_usage = searches + documents + notes
+
+    # Check if this was a trial user
+    trial_end = _to_datetime(data.get("trialEndDate"))
+    exp_date = _to_datetime(data.get("expirationDate"))
+    created = _to_datetime(data.get("createdAt"))
+    is_trial_churn = (
+        trial_end and exp_date
+        and abs((trial_end - exp_date).total_seconds()) < 86400 * 2  # expiration ≈ trial end
+    )
+
+    # Priority 1: Billing issue
+    if emails_sent.get("billingIssue"):
+        return "Billing issue"
+
+    # Priority 2-4: Trial-specific reasons
+    if is_trial_churn:
+        if searches == 0:
+            return "Trial - no usage"
+        if searches < 5:
+            return "Trial - low engagement"
+        return "Trial - did not convert"
+
+    # Priority 5: No usage at all
+    if total_usage == 0:
+        return "No usage"
+
+    # Priority 6: Low usage
+    if searches < 5 and total_usage < 10:
+        return "Low usage"
+
+    # Priority 7: Went inactive before churning
+    last_active = _to_datetime(data.get("lastActiveAt"))
+    if last_active and exp_date and (exp_date - last_active).days >= 30:
+        return "Went inactive"
+
+    # Priority 8: Short tenure
+    if created and exp_date and (exp_date - created).days < 30:
+        return "Short tenure (<30d)"
+
+    # Priority 9: Active user with no clear reason
+    if searches >= 5:
+        return "Active user - unknown reason"
+
+    # Priority 10: Fallback
+    return "Unknown"
+
+
 def _compute_churn_intelligence(days: int) -> dict:
     from firebase_setup import db
 
@@ -533,8 +588,9 @@ def _compute_churn_intelligence(days: int) -> dict:
 
     users_ref = db.collection("users")
 
-    # Active subscribers
+    # Active subscribers + trial users
     active_docs = list(users_ref.where("subscriptionStatus", "==", "active").limit(5000).stream())
+    trial_docs = list(users_ref.where("subscriptionStatus", "==", "trial").limit(5000).stream())
 
     # Churned users in period
     expired_docs = list(users_ref.where("subscriptionStatus", "==", "expired").limit(5000).stream())
@@ -552,19 +608,29 @@ def _compute_churn_intelligence(days: int) -> dict:
     start_active = len(active_docs) + total_churned
     churn_rate = round((total_churned / start_active * 100) if start_active > 0 else 0, 1)
 
-    # Single pass: classify active users as at-risk or engaged
+    # Single pass: classify active + trial users as at-risk or engaged
     at_risk_users = []
+    trial_at_risk_count = 0
     engaged_candidates = []
-    for doc in active_docs:
+    for doc in active_docs + trial_docs:
         data = doc.to_dict()
         last_active = _to_datetime(data.get("lastActiveAt"))
         health = _compute_health_score(data, now)
         tenure_date = _get_tenure_date(data)
         sub_age = (now - tenure_date).days if tenure_date else None
         platform = data.get("platform", "unknown") or "unknown"
+        sub_status = data.get("subscriptionStatus", "active")
+        is_trial = sub_status == "trial"
 
-        if last_active is None or last_active < seven_days_ago:
-            # At-risk: inactive 7+ days
+        # Trial-specific: days until trial ends
+        trial_end = _to_datetime(data.get("trialEndDate"))
+        trial_ends_in = (trial_end - now).days if trial_end else None
+
+        # Trial users within 3 days of expiration are at-risk regardless of activity
+        trial_expiring_soon = is_trial and trial_ends_in is not None and trial_ends_in <= 3
+
+        if trial_expiring_soon or last_active is None or last_active < seven_days_ago:
+            # At-risk: inactive 7+ days OR trial expiring soon
             at_risk_users.append({
                 "uid": doc.id,
                 "email": data.get("email", ""),
@@ -573,7 +639,11 @@ def _compute_churn_intelligence(days: int) -> dict:
                 "healthScore": health["healthScore"],
                 "subscriptionAge": sub_age,
                 "platform": platform,
+                "subscriptionType": "trial" if is_trial else "active",
+                "trialEndsIn": trial_ends_in if is_trial else None,
             })
+            if is_trial:
+                trial_at_risk_count += 1
         elif health["healthScore"] >= 60:
             # Engaged: active within 7 days with strong health
             usage = data.get("usageStats", {}) or {}
@@ -632,6 +702,9 @@ def _compute_churn_intelligence(days: int) -> dict:
     except Exception:
         pass
 
+    # Pre-compute churn reasons for all churned users (avoids double classification)
+    reason_by_uid = {d["_uid"]: _classify_churn_reason(d, now) for d in churned_in_period}
+
     churned_users = []
     for data in churned_subset:
         uid = data["_uid"]
@@ -646,6 +719,7 @@ def _compute_churn_intelligence(days: int) -> dict:
             "email": data.get("email", ""),
             "churnDate": _safe_isoformat(exp_date),
             "tenure": tenure,
+            "reason": reason_by_uid[uid],
             "emailsReceived": user_emails["received"],
             "emailsOpened": user_emails["opened"],
             "platform": data.get("platform", "unknown") or "unknown",
@@ -694,32 +768,48 @@ def _compute_churn_intelligence(days: int) -> dict:
 
     avg_tenure = round(sum(tenures) / len(tenures), 1) if tenures else 0
 
-    # Churn reasons (inferred from data)
+    # Churn reasons (aggregated from pre-computed reasons)
     churn_reasons = {}
-    for data in churned_in_period:
-        usage = data.get("usageStats", {}) or {}
-        searches = usage.get("monthlySearches", 0) or 0
-        emails_sent = data.get("emailsSent", {}) or {}
-
-        if searches == 0:
-            reason = "No usage"
-        elif searches < 5:
-            reason = "Low usage"
-        elif emails_sent.get("billingIssue"):
-            reason = "Billing issue"
-        else:
-            reason = "Unknown"
+    for reason in reason_by_uid.values():
         churn_reasons[reason] = churn_reasons.get(reason, 0) + 1
+
+    # Churn rate trend: try Redis, then Firestore, then single-point fallback
+    churn_rate_trend = []
+    redis = _get_redis()
+    if redis:
+        try:
+            trend_data = redis.get("analytics_cache:churn_rate_history")
+            if trend_data:
+                churn_rate_trend = json.loads(trend_data)
+        except Exception:
+            pass
+
+    if not churn_rate_trend:
+        try:
+            fs_doc = db.collection("analytics_cache").document("churn_rate_history").get()
+            if fs_doc.exists:
+                churn_rate_trend = fs_doc.to_dict().get("history", [])
+        except Exception:
+            pass
+
+    if not churn_rate_trend:
+        churn_rate_trend = [{
+            "date": now.strftime("%Y-%m-%d"),
+            "rate": churn_rate,
+            "atRiskCount": len(at_risk_users),
+            "churnedCount": total_churned,
+        }]
 
     return {
         "churnRate": churn_rate,
-        "churnRateTrend": [],  # Requires historical snapshots (populated by daily task)
+        "churnRateTrend": churn_rate_trend,
         "atRiskUsers": at_risk_users,
         "churnedUsers": churned_users,
         "winbackEffectiveness": winback_effectiveness,
         "churnReasons": churn_reasons,
         "avgTenureBeforeChurn": avg_tenure,
         "atRiskCount": len(at_risk_users),
+        "trialAtRiskCount": trial_at_risk_count,
         "winbackRate": winback_rate,
         "topEngagedUsers": top_engaged_users,
         "engagedCount": engaged_count,

@@ -18,8 +18,8 @@ logging.basicConfig(level=logging.INFO)
 # Redis cache TTL (20 minutes - slightly longer than 15-min schedule)
 CACHE_TTL = 1200
 
-# MRR history TTL (25 hours - refreshed daily)
-MRR_HISTORY_TTL = 90000
+# History TTL (25 hours - refreshed daily, shared by MRR + churn snapshots)
+HISTORY_TTL = 90000
 
 
 def _get_redis():
@@ -154,7 +154,7 @@ def snapshot_daily_mrr_task(self):
             # Keep only last 90 days
             history = history[-90:]
 
-            _cache_result(redis, "analytics_cache:mrr_history", history, MRR_HISTORY_TTL)
+            _cache_result(redis, "analytics_cache:mrr_history", history, HISTORY_TTL)
             logging.info(f"[ANALYTICS_TASKS] MRR snapshot: ${mrr_point['mrr']:.2f} on {today} ({len(history)} days of history)")
         else:
             logging.warning("[ANALYTICS_TASKS] Redis unavailable, MRR snapshot not saved")
@@ -171,3 +171,68 @@ def snapshot_daily_mrr_task(self):
 
     except Exception as e:
         logging.error(f"[ANALYTICS_TASKS] Daily MRR snapshot failed: {e}", exc_info=True)
+
+
+@shared_task(
+    bind=True,
+    name="snapshot_daily_churn_rate",
+    ignore_result=True,
+    soft_time_limit=60,
+    time_limit=90,
+)
+def snapshot_daily_churn_rate_task(self):
+    """
+    Daily task: Snapshot today's churn rate into a Redis list for churnRateTrend chart.
+    Keeps 90 days of history. Also persists to Firestore as fallback.
+
+    Schedule: Daily at 23:50 UTC via Celery Beat
+    """
+    logging.info("[ANALYTICS_TASKS] Starting daily churn rate snapshot")
+
+    try:
+        from analytics_api import _compute_churn_intelligence
+
+        # Compute 30-day churn data
+        churn = _compute_churn_intelligence(30)
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        churn_point = {
+            "date": today,
+            "rate": churn.get("churnRate", 0),
+            "atRiskCount": churn.get("atRiskCount", 0),
+            "churnedCount": len(churn.get("churnedUsers", [])),
+        }
+
+        redis = _get_redis()
+        if redis:
+            # Load existing history
+            try:
+                existing = redis.get("analytics_cache:churn_rate_history")
+                history = json.loads(existing) if existing else []
+            except Exception:
+                history = []
+
+            # Append or update today's entry
+            history = [p for p in history if p.get("date") != today]
+            history.append(churn_point)
+
+            # Keep only last 90 days
+            history = history[-90:]
+
+            _cache_result(redis, "analytics_cache:churn_rate_history", history, HISTORY_TTL)
+            logging.info(f"[ANALYTICS_TASKS] Churn rate snapshot: {churn_point['rate']}% on {today} ({len(history)} days of history)")
+        else:
+            history = [churn_point]
+            logging.warning("[ANALYTICS_TASKS] Redis unavailable, churn snapshot only persisted to Firestore")
+
+        # Persist to Firestore as fallback
+        try:
+            from firebase_setup import db
+            db.collection("analytics_cache").document("churn_rate_history").set({
+                "history": history,
+                "_updated_at": datetime.now(timezone.utc),
+            })
+        except Exception as e:
+            logging.warning(f"[ANALYTICS_TASKS] Failed to persist churn rate to Firestore: {e}")
+
+    except Exception as e:
+        logging.error(f"[ANALYTICS_TASKS] Daily churn rate snapshot failed: {e}", exc_info=True)

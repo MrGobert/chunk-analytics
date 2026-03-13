@@ -8,7 +8,7 @@ const CEREBRAL_AUTH_TOKEN = process.env.CEREBRAL_AUTH_TOKEN || '';
 const EMPTY_RESPONSE = {
   churnRate: 0, churnRateTrend: [], atRiskUsers: [], churnedUsers: [],
   winbackEffectiveness: {}, churnReasons: {},
-  avgTenureBeforeChurn: 0, atRiskCount: 0, winbackRate: 0,
+  avgTenureBeforeChurn: 0, atRiskCount: 0, trialAtRiskCount: 0, winbackRate: 0,
   topEngagedUsers: [], engagedCount: 0,
 };
 
@@ -62,11 +62,13 @@ export async function GET(request: NextRequest) {
       churnReasons: data.churnReasons ?? {},
       avgTenureBeforeChurn: data.avgTenureBeforeChurn ?? 0,
       atRiskCount: data.atRiskCount ?? 0,
+      trialAtRiskCount: data.trialAtRiskCount ?? 0,
       winbackRate: data.winbackRate ?? 0,
       topEngagedUsers: data.topEngagedUsers ?? [],
       engagedCount: data.engagedCount ?? 0,
       lastUpdated: new Date().toISOString(),
       ...(data.note ? { note: data.note } : {}),
+      ...(data.dataUnavailable ? { dataUnavailable: true } : {}),
     });
   } catch (error) {
     clearTimeout(timeoutId);

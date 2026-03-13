@@ -8,6 +8,7 @@ import StatCard from '@/components/cards/StatCard';
 import ChartCard from '@/components/cards/ChartCard';
 import LineChart from '@/components/charts/LineChart';
 import BarChart from '@/components/charts/BarChart';
+import PieChart from '@/components/charts/PieChart';
 import DataTable from '@/components/charts/DataTable';
 import { SkeletonPage } from '@/components/ui/Skeleton';
 import { useAnalytics } from '@/hooks/useAnalytics';
@@ -20,6 +21,8 @@ interface AtRiskUser {
   healthScore: number;
   subscriptionAge: number | null;
   platform: string;
+  subscriptionType: 'active' | 'trial';
+  trialEndsIn?: number | null;
 }
 
 interface EngagedUser {
@@ -39,6 +42,7 @@ interface ChurnedUser {
   email: string;
   churnDate: string;
   tenure: number;
+  reason: string;
   emailsReceived: string[];
   emailsOpened: string[];
   platform: string;
@@ -60,6 +64,7 @@ interface ChurnIntelligence {
   churnReasons: Record<string, number>;
   avgTenureBeforeChurn: number;
   atRiskCount: number;
+  trialAtRiskCount: number;
   winbackRate: number;
   topEngagedUsers: EngagedUser[];
   engagedCount: number;
@@ -89,6 +94,19 @@ export default function ChurnIntelligencePage() {
     [churn?.churnRateTrend]
   );
 
+  // Churn reasons data for PieChart and BarChart
+  const churnReasonsData = useMemo(() => {
+    const reasons = churn?.churnReasons || {};
+    return Object.entries(reasons)
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value);
+  }, [churn?.churnReasons]);
+
+  const churnReasonsBarData = useMemo(() =>
+    churnReasonsData.map((d) => ({ reason: d.name, count: d.value })),
+    [churnReasonsData]
+  );
+
   // At-risk users sorted (null values sort to top = most risky)
   const sortedAtRiskUsers = useMemo(() => {
     const users = [...(churn?.atRiskUsers || [])];
@@ -100,10 +118,13 @@ export default function ChurnIntelligencePage() {
     return users;
   }, [churn?.atRiskUsers, atRiskSort, atRiskSortDir]);
 
-  // At-risk table data — show "N/A" for null values
+  // At-risk table data — show "N/A" for null values, include Type column
   const atRiskTableData = useMemo(() =>
     sortedAtRiskUsers.map((u) => ({
       email: u.email || u.uid,
+      type: u.subscriptionType === 'trial'
+        ? `Trial${u.trialEndsIn != null ? ` (${u.trialEndsIn}d left)` : ''}`
+        : 'Active',
       healthScore: u.healthScore.toString(),
       daysSinceActive: u.daysSinceActive != null ? `${u.daysSinceActive}d` : 'N/A',
       subscriptionAge: u.subscriptionAge != null ? `${u.subscriptionAge}d` : 'N/A',
@@ -154,12 +175,13 @@ export default function ChurnIntelligencePage() {
     );
   }, [churn?.churnedUsers, churnSearch]);
 
-  // Churned users table data
+  // Churned users table data — includes reason column
   const churnedTableData = useMemo(() =>
     filteredChurnedUsers.map((u) => ({
       email: u.email || u.uid,
       churnDate: u.churnDate,
       tenure: `${u.tenure}d`,
+      reason: u.reason || 'Unknown',
       searches: u.usage?.searches?.toString() || '0',
       notes: u.usage?.notes?.toString() || '0',
       platform: u.platform,
@@ -190,7 +212,7 @@ export default function ChurnIntelligencePage() {
   }, [isLoading, churn]);
 
   if (isLoading) {
-    return <SkeletonPage statCards={5} statCardCols="grid-cols-1 md:grid-cols-3 lg:grid-cols-5" chartCards={3} />;
+    return <SkeletonPage statCards={6} statCardCols="grid-cols-1 md:grid-cols-3 lg:grid-cols-6" chartCards={3} />;
   }
 
   if (error) {
@@ -210,12 +232,7 @@ export default function ChurnIntelligencePage() {
     );
   }
 
-  const dataUnavailable = churn.dataUnavailable || (
-    churn.churnRate === 0 &&
-    churn.atRiskCount === 0 &&
-    churn.winbackRate === 0 &&
-    !!churn.note
-  );
+  const dataUnavailable = churn.dataUnavailable === true;
 
   const makeSortHandler = <T extends string>(
     currentSort: T,
@@ -273,7 +290,7 @@ export default function ChurnIntelligencePage() {
       )}
 
       {/* Stat Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-6 mb-8">
+      <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-6 mb-8">
         <StatCard
           title="Monthly Churn Rate"
           value={dataUnavailable ? '—' : churn.churnRate / 100}
@@ -291,6 +308,16 @@ export default function ChurnIntelligencePage() {
           icon={
             <svg className="w-5 h-5 text-yellow-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+          }
+        />
+        <StatCard
+          title="Trials Expiring Soon"
+          value={dataUnavailable ? '—' : (churn.trialAtRiskCount ?? 0)}
+          format={dataUnavailable ? 'text' : undefined}
+          icon={
+            <svg className="w-5 h-5 text-orange-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
           }
         />
@@ -343,6 +370,27 @@ export default function ChurnIntelligencePage() {
         </ChartCard>
       </div>
 
+      {/* Churn Reasons Breakdown */}
+      {churnReasonsData.length > 0 && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+          <ChartCard title="Churn Reasons" subtitle="Distribution of churn causes">
+            <PieChart
+              data={churnReasonsData}
+              innerRadius={50}
+              outerRadius={90}
+            />
+          </ChartCard>
+          <ChartCard title="Churn Reasons by Count" subtitle="Sorted by frequency">
+            <BarChart
+              data={churnReasonsBarData}
+              xKey="reason"
+              yKey="count"
+              color="#8b5cf6"
+            />
+          </ChartCard>
+        </div>
+      )}
+
       {/* At-Risk Users Table */}
       <div className="card-animate rounded-[1.5rem] bg-primary/60 backdrop-blur-xl border border-white/5 p-6 sm:p-8 shadow-lg mb-8">
         <div className="mb-6 border-b border-white/5 pb-4">
@@ -372,6 +420,7 @@ export default function ChurnIntelligencePage() {
               data={atRiskTableData}
               columns={[
                 { key: 'email', header: 'User' },
+                { key: 'type', header: 'Type' },
                 { key: 'healthScore', header: 'Health' },
                 { key: 'daysSinceActive', header: 'Inactive' },
                 { key: 'subscriptionAge', header: 'Tenure' },
@@ -456,6 +505,7 @@ export default function ChurnIntelligencePage() {
                 { key: 'email', header: 'User' },
                 { key: 'churnDate', header: 'Churn Date' },
                 { key: 'tenure', header: 'Tenure' },
+                { key: 'reason', header: 'Reason' },
                 { key: 'searches', header: 'Searches' },
                 { key: 'notes', header: 'Notes' },
                 { key: 'platform', header: 'Platform' },

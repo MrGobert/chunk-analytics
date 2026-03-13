@@ -94,6 +94,10 @@ celery.conf.update(
             "task": "compute_analytics_snapshot",
             "schedule": crontab(minute="*/15"),
         },
+        "snapshot-daily-churn-rate": {
+            "task": "snapshot_daily_churn_rate",
+            "schedule": crontab(minute=50, hour=23),
+        },
         "snapshot-daily-mrr": {
             "task": "snapshot_daily_mrr",
             "schedule": crontab(minute=55, hour=23),
