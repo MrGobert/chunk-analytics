@@ -8,7 +8,7 @@ import ChartCard from '@/components/cards/ChartCard';
 import AreaChart from '@/components/charts/AreaChart';
 import { SkeletonPage } from '@/components/ui/Skeleton';
 import { useAnalytics } from '@/hooks/useAnalytics';
-import { Bug, AlertTriangle, Shield, Globe, Server, Clock, ExternalLink } from 'lucide-react';
+import { Bug, AlertTriangle, Shield, Globe, Server, Smartphone, Clock, ExternalLink } from 'lucide-react';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -95,6 +95,7 @@ function getLevelColor(level: string): string {
 function getPlatformIcon(platform: string) {
   if (platform === 'web' || platform === 'javascript') return <Globe className="w-3.5 h-3.5" />;
   if (platform === 'backend' || platform === 'python') return <Server className="w-3.5 h-3.5" />;
+  if (platform === 'ios' || platform === 'apple-ios' || platform === 'cocoa') return <Smartphone className="w-3.5 h-3.5" />;
   return <Bug className="w-3.5 h-3.5" />;
 }
 
@@ -171,11 +172,12 @@ export default function SentryPage() {
         <div className="header-animate flex flex-wrap items-center gap-3">
           {/* Project Filter */}
           <div className="flex items-center bg-primary/60 backdrop-blur-xl border border-white/5 rounded-[1rem] p-1">
-            {['all', 'javascript-nextjs', 'cerebral-python-flask'].map((key) => {
+            {['all', 'javascript-nextjs', 'cerebral-python-flask', 'apple-ios'].map((key) => {
               const labels: Record<string, string> = {
                 all: 'All',
                 'javascript-nextjs': 'Web',
                 'cerebral-python-flask': 'API',
+                'apple-ios': 'iOS',
               };
               return (
                 <button

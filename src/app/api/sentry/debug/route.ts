@@ -56,6 +56,11 @@ export async function GET() {
       scope: 'project:read',
       url: `${SENTRY_API_URL}/projects/${SENTRY_ORG}/cerebral-python-flask/stats/?stat=received&resolution=1d&statsPeriod=24h`,
     },
+    {
+      name: 'Project stats (apple-ios)',
+      scope: 'project:read',
+      url: `${SENTRY_API_URL}/projects/${SENTRY_ORG}/apple-ios/stats/?stat=received&resolution=1d&statsPeriod=24h`,
+    },
   ];
 
   const results = await Promise.all(

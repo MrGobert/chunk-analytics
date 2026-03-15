@@ -10,6 +10,7 @@ const SENTRY_ORG = process.env.SENTRY_ORG || 'curious-minds-software';
 const PROJECTS = [
   { slug: 'javascript-nextjs', label: 'Chunk Web', platform: 'web' },
   { slug: 'cerebral-python-flask', label: 'Cerebral API', platform: 'backend' },
+  { slug: 'apple-ios', label: 'Chunk iOS', platform: 'ios' },
 ];
 
 interface StatsPoint {
