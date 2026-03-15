@@ -37,8 +37,8 @@ interface SentryIssue {
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
-  const project = searchParams.get('project'); // optional: filter by project slug
-  const query = searchParams.get('query') || 'is:unresolved';
+  const projectSlug = searchParams.get('project'); // optional: filter by project slug
+  const baseQuery = searchParams.get('query') || 'is:unresolved';
   const sort = searchParams.get('sort') || 'freq';
   const limit = searchParams.get('limit') || '25';
   const statsPeriod = searchParams.get('statsPeriod') || '24h';
@@ -48,16 +48,18 @@ export async function GET(request: NextRequest) {
   }
 
   try {
+    // The Sentry issues API `project` param requires numeric IDs, not slugs.
+    // Use the `query` param with `project:slug` syntax for filtering instead.
+    const query = projectSlug
+      ? `${baseQuery} project:${projectSlug}`
+      : baseQuery;
+
     const params = new URLSearchParams({
       query,
       sort,
       limit,
       statsPeriod,
     });
-
-    if (project) {
-      params.set('project', project);
-    }
 
     const response = await fetch(
       `${SENTRY_API_URL}/organizations/${SENTRY_ORG}/issues/?${params.toString()}`,

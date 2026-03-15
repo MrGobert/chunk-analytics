@@ -51,7 +51,7 @@ async function fetchProjectStats(
   );
 
   if (!response.ok) {
-    console.error(`Sentry stats error for ${projectSlug}:`, response.status);
+    console.error(`Sentry project stats error for ${projectSlug} (stat=${stat}):`, response.status, await response.text().catch(() => ''));
     return [];
   }
 
@@ -89,7 +89,7 @@ async function fetchOrgStats(
   );
 
   if (!response.ok) {
-    console.error('Sentry org stats error:', response.status);
+    console.error('Sentry org stats_v2 error:', response.status, await response.text().catch(() => ''));
     return { groups: [], intervals: [] };
   }
 
