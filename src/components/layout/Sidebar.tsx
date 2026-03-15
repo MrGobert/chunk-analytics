@@ -28,6 +28,7 @@ import {
   KanbanSquare,
   Tags,
   Briefcase,
+  Bug,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -48,6 +49,7 @@ const ROUTE_TO_ENDPOINT: Record<string, string> = {
   '/notes': '/api/metrics/notes',
   '/collections': '/api/metrics/collections',
   '/sharing': '/api/metrics/sharing',
+  '/sentry': '/api/sentry/stats',
 };
 
 interface NavItem {
@@ -89,6 +91,7 @@ const navSections: NavSection[] = [
       { href: '/users', label: 'Users', icon: Users },
       { href: '/push', label: 'Push Notifications', icon: Bell },
       { href: '/sharing', label: 'Sharing', icon: Share2 },
+      { href: '/sentry', label: 'Error Tracking', icon: Bug },
     ],
   },
 ];
