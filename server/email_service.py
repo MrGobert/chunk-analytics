@@ -53,6 +53,7 @@ BRAND = {
     "logo_light_url": "https://chunkapp.com/chunk-logo-white.png",    # White text logo — for dark backgrounds
     "logo_url": "https://chunkapp.com/chunk_gradient_logo.png",       # Legacy fallback
     "app_store_url": "https://apps.apple.com/us/app/chunk-ai-research-assistant/id6472682763",
+    "login_url": "https://www.chunkapp.com/login",
     "privacy_url": "https://www.chunkapp.com/privacy",
     "terms_url": "https://www.chunkapp.com/tos",
     "web_url": "https://chunkapp.com",
@@ -262,11 +263,18 @@ def _base_email_template(
 
                     {cta_section}
 
-                    <!-- Platform Badge -->
+                    <!-- Platform Badge + Website Link -->
                     <tr>
-                        <td align="center" style="padding:16px 40px 32px 40px;background-color:#FFFFFF" class="platform-badge">
+                        <td align="center" style="padding:16px 40px 8px 40px;background-color:#FFFFFF" class="platform-badge">
                             <p style="margin:0;font-family:{FONT_MONO};font-size:11px;letter-spacing:0.1em;text-transform:uppercase;color:{BRAND['text_muted']}">
                                 iOS · macOS · visionOS · Web
+                            </p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td align="center" style="padding:0 40px 32px 40px;background-color:#FFFFFF" class="platform-badge">
+                            <p style="margin:0;font-family:{FONT_SANS};font-size:14px;color:{BRAND['text_muted']}">
+                                Visit: <a href="https://www.chunkapp.com" style="color:{BRAND['primary']};text-decoration:none;font-weight:700">chunkapp.com</a>
                             </p>
                         </td>
                     </tr>
@@ -853,7 +861,7 @@ def get_day1_superpowers_email(user_name: str = "there") -> tuple[str, str, str]
         hero_subtitle="Welcome to Chunk — let's get you started.",
         body_content=body,
         cta_text="Open Chunk",
-        cta_url=BRAND["app_store_url"],
+        cta_url=BRAND["login_url"],
         footer_tip="Every AI response has a Save to Notes button at the bottom — tap it to instantly turn any chat response into a note in your library.",
         hero_dark=True,
         hero_label="WELCOME · DAY 1",
@@ -863,7 +871,7 @@ def get_day1_superpowers_email(user_name: str = "there") -> tuple[str, str, str]
     return (
         subject,
         html,
-        f"Welcome to Chunk! 4 AI superpowers: Research in Collections, Connected Notes + Knowledge Graph, Deep Research, and every AI model in one app. {BRAND['app_store_url']}",
+        f"Welcome to Chunk! 4 AI superpowers: Research in Collections, Connected Notes + Knowledge Graph, Deep Research, and every AI model in one app. {BRAND['login_url']}",
     )
 
 
@@ -1063,7 +1071,7 @@ def get_reengagement_14day_email(user_name: str = "there") -> tuple[str, str, st
         hero_subtitle="Features you might not have discovered yet.",
         body_content=body,
         cta_text="Open Chunk",
-        cta_url=BRAND["app_store_url"],
+        cta_url=BRAND["login_url"],
         footer_tip="Try Research in Collections — create a Collection, add a few sources, and ask Chunk to synthesize across everything.",
         hero_dark=True,
     )
@@ -1071,7 +1079,7 @@ def get_reengagement_14day_email(user_name: str = "there") -> tuple[str, str, st
     return (
         subject,
         html,
-        f"Your Chunk research workspace is waiting. Collections, Connected Notes, Deep Research, and more: {BRAND['app_store_url']}",
+        f"Your Chunk research workspace is waiting. Collections, Connected Notes, Deep Research, and more: {BRAND['login_url']}",
     )
 
 
@@ -1103,7 +1111,7 @@ def get_feature_announcement_email(
         hero_subtitle="A new feature just shipped.",
         body_content=body,
         cta_text="Try It Now",
-        cta_url=BRAND["app_store_url"],
+        cta_url=BRAND["login_url"],
         hero_dark=True,
         hero_label="NEW FEATURE",
     )
@@ -1111,7 +1119,7 @@ def get_feature_announcement_email(
     return (
         subject,
         html,
-        f"New in Chunk: {feature_name} — {feature_description}. Update and try it now: {BRAND['app_store_url']}",
+        f"New in Chunk: {feature_name} — {feature_description}. Try it now: {BRAND['login_url']}",
     )
 
 
@@ -1149,7 +1157,7 @@ def get_signup_no_trial_nudge_email(user_name: str = "there") -> tuple[str, str,
         hero_subtitle="Your free Pro trial is waiting for you.",
         body_content=body,
         cta_text="Start Free Trial",
-        cta_url=BRAND["app_store_url"],
+        cta_url=BRAND["login_url"],
         footer_tip="The trial is completely free — no credit card needed. Full access to every AI model and feature for 3 days.",
         hero_dark=False,
         hero_label="DON'T MISS OUT",
@@ -1158,7 +1166,7 @@ def get_signup_no_trial_nudge_email(user_name: str = "there") -> tuple[str, str,
     return (
         subject,
         html,
-        f"You signed up for Chunk but haven't started your free Pro trial yet. 3 days of full access, no credit card required: {BRAND['app_store_url']}",
+        f"You signed up for Chunk but haven't started your free Pro trial yet. 3 days of full access, no credit card required: {BRAND['login_url']}",
     )
 
 
