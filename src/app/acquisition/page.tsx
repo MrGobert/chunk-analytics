@@ -60,9 +60,12 @@ export default function AcquisitionPage() {
   const { dateRange, setDateRange, userType, setUserType } = useDashboardFilters();
   const [platformGroup, setPlatformGroup] = useState<PlatformKey>('web');
 
+  // Cap at 7d — Mixpanel export API is too slow for larger ranges on cold cache
+  const effectiveRange = ['30d', '90d', '365d'].includes(dateRange) ? '7d' : dateRange;
+
   const { data: metrics, isLoading, isRefreshing, error, lastUpdated } =
     useAnalytics<AcquisitionFunnelMetrics>('/api/metrics/acquisition', {
-      range: dateRange,
+      range: effectiveRange,
       platform: platformGroup,
       userType,
     });
