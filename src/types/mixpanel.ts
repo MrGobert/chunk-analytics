@@ -72,8 +72,6 @@ export interface AcquisitionFunnelMetrics {
   dailyData: Record<string, string | number>[];
   dailyLines: { key: string; color: string; name: string }[];
   lastUpdated: string;
-  partial?: boolean;
-  partialRange?: string;
 }
 
 export interface UserMetrics {

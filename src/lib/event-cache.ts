@@ -28,7 +28,7 @@ function sleep(ms: number) {
 export async function getCachedEventsAsync(fromDate: string, toDate: string): Promise<MixpanelEvent[] | null> {
   const key = buildKey(fromDate, toDate);
 
-  // 1. Check Memory Cache (skip empty arrays — they indicate a prior failed/timed-out fetch)
+  // 1. Check Memory Cache (skip empty arrays from failed fetches)
   const memoryCached = eventCache.get(key);
   if (memoryCached && memoryCached.events.length > 0 && Date.now() - memoryCached.timestamp <= TTL) {
     return memoryCached.events;
@@ -50,8 +50,6 @@ export async function getCachedEventsAsync(fromDate: string, toDate: string): Pr
       if (Date.now() - stat.mtimeMs <= TTL) {
         const data = fs.readFileSync(diskFile, 'utf8');
         const parsed = JSON.parse(data) as MixpanelEvent[];
-        // Skip empty arrays — they indicate a prior failed/timed-out fetch
-        if (parsed.length === 0) return null;
         // Populate memory cache for this worker
         eventCache.set(key, { events: parsed, timestamp: Date.now() });
         return parsed;
@@ -73,8 +71,6 @@ export async function getStaleCachedEvents(fromDate: string, toDate: string): Pr
     try {
       const data = fs.readFileSync(diskFile, 'utf8');
       const parsed = JSON.parse(data) as MixpanelEvent[];
-      // Skip empty arrays — stale empty data is worse than no data
-      if (parsed.length === 0) return null;
       return parsed;
     } catch (e) {
       console.error('Error reading STALE disk cache', e);
@@ -107,9 +103,9 @@ export function releaseLock(fromDate: string, toDate: string): void {
 }
 
 export async function setCachedEventsAsync(fromDate: string, toDate: string, events: MixpanelEvent[]): Promise<void> {
-  // Don't cache empty results — they poison the cache when Mixpanel times out or rate-limits
+  // Don't cache empty results — prevents poisoning cache on rate-limit or timeout
   if (events.length === 0) {
-    console.warn(`Skipping cache write for ${fromDate}:${toDate} — empty events array`);
+    console.warn(`Skipping cache write for ${fromDate}:${toDate} — empty events`);
     return;
   }
 

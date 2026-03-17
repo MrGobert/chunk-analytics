@@ -37,7 +37,7 @@ export interface UseAnalyticsResult<T> {
 const STALE_TIME = 5 * 60 * 1000; // 5 minutes
 const SESSION_STORAGE_KEY = 'chunk-analytics-cache';
 const MAX_CACHE_AGE = 30 * 60 * 1000; // 30 minutes max — discard anything older
-const FETCH_TIMEOUT = 45_000; // 45s client-side fetch timeout — allows time for progressive loading fallback
+const FETCH_TIMEOUT = 45_000; // 45s client-side fetch timeout
 
 // ─── Context ─────────────────────────────────────────────────────────────────
 
@@ -239,14 +239,14 @@ export function useAnalytics<T>(
       setIsRefreshing(true);
       setLastUpdated(new Date(existing.timestamp).toISOString());
     } else {
-      // No exact cache match — clear stale data and show loading skeleton.
+      // No exact cache match — clear stale data and show skeleton.
       // Prevents showing wrong data (e.g. Web metrics on iOS tab).
       setData(null);
       setIsLoading(true);
       setIsRefreshing(false);
     }
 
-    // Auto-abort after FETCH_TIMEOUT to prevent indefinite skeleton loading
+    // Auto-abort after FETCH_TIMEOUT to prevent indefinite skeleton
     const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT);
 
     try {
@@ -261,51 +261,29 @@ export function useAnalytics<T>(
 
       if (!mountedRef.current) return;
 
-      // Check if the server returned partial data (e.g., 7d fallback for a 30d request)
-      // Show the partial data immediately, then auto-retry for the full range
-      const isPartial = (json as Record<string, unknown>)?.partial === true;
+      const entry: CacheEntry<T> = {
+        data: json,
+        timestamp: Date.now(),
+        params: paramsKey,
+      };
 
-      if (!isPartial) {
-        // Full data — cache it normally
-        const entry: CacheEntry<T> = {
-          data: json,
-          timestamp: Date.now(),
-          params: paramsKey,
-        };
-        cache.set(cacheKey, entry);
-      }
-
+      cache.set(cacheKey, entry);
       setData(json);
       setError(null);
-      setLastUpdated(new Date().toISOString());
-
-      // If partial, schedule a retry after a delay to get the full data
-      // The server-side cache should be warm by then
-      if (isPartial && mountedRef.current) {
-        setIsRefreshing(true);
-        setTimeout(() => {
-          if (mountedRef.current && abortRef.current === controller) {
-            fetchData();
-          }
-        }, 15_000); // Retry after 15s — gives server cache time to warm
-        return; // Don't clear isRefreshing yet
-      }
+      setLastUpdated(new Date(entry.timestamp).toISOString());
     } catch (err: unknown) {
       if (!mountedRef.current) return;
 
-      // Distinguish between user-initiated aborts (param change / unmount) and timeouts
       if (err instanceof DOMException && err.name === 'AbortError') {
-        // If this controller is still the current one, it was a timeout (not a param change)
+        // If this controller is still current, it was our timeout (not a param change)
         if (abortRef.current === controller) {
           setError('Request timed out. Try a shorter date range.');
-          // Keep showing stale data on timeout — don't clear it
         }
         return;
       }
 
       const message = err instanceof Error ? err.message : 'Failed to fetch';
       setError(message);
-      // Keep showing stale data on error — don't clear it
     } finally {
       clearTimeout(timeoutId);
       if (mountedRef.current) {

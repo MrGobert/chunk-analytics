@@ -172,11 +172,9 @@ export function getUniqueUsersByType(
   return filteredUsers;
 }
 
-/** Fetch a single date range from Mixpanel export API with retry on 429. */
-async function fetchMixpanelEventsFromAPISingle(
+async function fetchMixpanelEventsFromAPI(
   fromDate: string,
-  toDate: string,
-  retries = 2
+  toDate: string
 ): Promise<MixpanelEvent[]> {
   const MIXPANEL_API_SECRET = process.env.MIXPANEL_API_SECRET;
 
@@ -189,110 +187,26 @@ async function fetchMixpanelEventsFromAPISingle(
 
   const url = `https://data.mixpanel.com/api/2.0/export?from_date=${fromDate}&to_date=${toDate}`;
 
-  for (let attempt = 0; attempt <= retries; attempt++) {
-    const response = await fetch(url, {
-      headers: {
-        Authorization: `Basic ${auth}`,
-      },
-      cache: 'no-store',
-    });
+  const response = await fetch(url, {
+    headers: {
+      Authorization: `Basic ${auth}`,
+    },
+    cache: 'no-store', // Manually handle caching to avoid 2MB limit restrictions
+  });
 
-    if (response.status === 429) {
-      if (attempt < retries) {
-        // Exponential backoff: 2s, 4s
-        const backoffMs = 2000 * Math.pow(2, attempt);
-        console.warn(`Mixpanel 429 for ${fromDate}→${toDate}, retrying in ${backoffMs}ms (attempt ${attempt + 1}/${retries})`);
-        await new Promise(r => setTimeout(r, backoffMs));
-        continue;
-      }
-      throw new Error(`Mixpanel API error: 429 - rate limit reached after ${retries} retries`);
-    }
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Mixpanel API error: ${response.status} - ${errorText}`);
-    }
-
-    const text = await response.text();
-    const lines = text.trim().split('\n').filter(Boolean);
-    const events: MixpanelEvent[] = lines.map((line) => JSON.parse(line));
-
-    // Filter out the test account UID to prevent skewing analytics data
-    const filteredEvents = events.filter((e) => e.properties.distinct_id !== 'I3JdK0ufgyN9So4rSOf4yxK1Drl1');
-
-    return filteredEvents;
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Mixpanel API error: ${response.status} - ${errorText}`);
   }
 
-  return []; // Should never reach here due to throw above, but TypeScript needs it
-}
+  const text = await response.text();
+  const lines = text.trim().split('\n').filter(Boolean);
+  const events: MixpanelEvent[] = lines.map((line) => JSON.parse(line));
 
-/**
- * Split a date range into weekly chunks for parallel fetching.
- * Mixpanel export API is slow for large ranges (30d+ takes 60s+).
- * Splitting into 7-day chunks and fetching in parallel keeps each
- * request under 15s and completes the full range in ~12-15s total.
- */
-function splitDateRange(fromDate: string, toDate: string, chunkDays = 7): { from: string; to: string }[] {
-  const chunks: { from: string; to: string }[] = [];
-  let current = new Date(`${fromDate}T12:00:00Z`);
-  const end = new Date(`${toDate}T12:00:00Z`);
+  // Filter out the test account UID to prevent skewing analytics data
+  const filteredEvents = events.filter((e) => e.properties.distinct_id !== 'I3JdK0ufgyN9So4rSOf4yxK1Drl1');
 
-  while (current <= end) {
-    const chunkEnd = new Date(current.getTime() + (chunkDays - 1) * 86400000);
-    const actualEnd = chunkEnd > end ? end : chunkEnd;
-    chunks.push({
-      from: formatDate(current),
-      to: formatDate(actualEnd),
-    });
-    current = new Date(actualEnd.getTime() + 86400000);
-  }
-
-  return chunks;
-}
-
-/** Number of days between two YYYY-MM-DD dates (inclusive). */
-function daysBetween(fromDate: string, toDate: string): number {
-  const from = new Date(`${fromDate}T12:00:00Z`);
-  const to = new Date(`${toDate}T12:00:00Z`);
-  return Math.round((to.getTime() - from.getTime()) / 86400000) + 1;
-}
-
-/**
- * Fetch events from Mixpanel, splitting large ranges into sequential
- * weekly chunks to avoid serverless timeouts.
- *
- * Sequential (not parallel) because Mixpanel's export API rate-limits
- * concurrent requests aggressively. 2 concurrent requests is safe;
- * 5 triggers rate limiting and returns empty data.
- */
-async function fetchMixpanelEventsFromAPI(
-  fromDate: string,
-  toDate: string
-): Promise<MixpanelEvent[]> {
-  const totalDays = daysBetween(fromDate, toDate);
-
-  // For ranges ≤10 days, fetch directly (fast enough in a single request)
-  if (totalDays <= 10) {
-    return fetchMixpanelEventsFromAPISingle(fromDate, toDate);
-  }
-
-  // For larger ranges, split into 10-day chunks and fetch with limited concurrency
-  // 10-day chunks = 3 chunks for 30 days, fetched 2 at a time
-  const chunks = splitDateRange(fromDate, toDate, 10);
-  console.log(`Mixpanel: splitting ${totalDays}-day range into ${chunks.length} chunks (concurrency=2)`);
-
-  const allEvents: MixpanelEvent[] = [];
-  const CONCURRENCY = 2;
-
-  for (let i = 0; i < chunks.length; i += CONCURRENCY) {
-    const batch = chunks.slice(i, i + CONCURRENCY);
-    const results = await Promise.all(
-      batch.map((chunk) => fetchMixpanelEventsFromAPISingle(chunk.from, chunk.to))
-    );
-    allEvents.push(...results.flat());
-  }
-
-  return allEvents;
+  return filteredEvents;
 }
 
 export async function fetchMixpanelEvents(

@@ -138,7 +138,7 @@ export async function GET(request: NextRequest) {
       lastUpdated: getLastUpdated(),
     }, {
       headers: {
-        'Cache-Control': allEvents.length > 0 ? 'public, s-maxage=300, stale-while-revalidate=600' : 'no-store',
+        'Cache-Control': 'public, s-maxage=300, stale-while-revalidate=600',
       },
     });
   } catch (error) {
