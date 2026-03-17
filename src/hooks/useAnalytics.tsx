@@ -239,14 +239,11 @@ export function useAnalytics<T>(
       setIsRefreshing(true);
       setLastUpdated(new Date(existing.timestamp).toISOString());
     } else {
-      // No exact cache match — but we might have fallback data from different params
-      // Keep whatever data we have, just mark as refreshing (not full loading)
-      setIsRefreshing(true);
-      if (!dataRef.current) {
-        // Truly no data at all — first ever load
-        setIsLoading(true);
-        setIsRefreshing(false);
-      }
+      // No exact cache match — clear stale data from different params (e.g. different
+      // platform tab) to avoid showing misleading data while the new fetch is pending.
+      setData(null);
+      setIsLoading(true);
+      setIsRefreshing(false);
     }
 
     // Auto-abort after FETCH_TIMEOUT to prevent indefinite skeleton loading
