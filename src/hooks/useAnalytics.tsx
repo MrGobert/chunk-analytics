@@ -239,8 +239,8 @@ export function useAnalytics<T>(
       setIsRefreshing(true);
       setLastUpdated(new Date(existing.timestamp).toISOString());
     } else {
-      // No exact cache match — clear stale data from different params (e.g. different
-      // platform tab) to avoid showing misleading data while the new fetch is pending.
+      // No exact cache match — clear stale data and show loading skeleton.
+      // Prevents showing wrong data (e.g. Web metrics on iOS tab).
       setData(null);
       setIsLoading(true);
       setIsRefreshing(false);
