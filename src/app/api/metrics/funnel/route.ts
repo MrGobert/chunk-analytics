@@ -1,3 +1,6 @@
+// Required for Vercel — Mixpanel export API can take 15-30s on cache miss
+export const maxDuration = 60;
+
 import { NextRequest, NextResponse } from 'next/server';
 import {
   fetchMixpanelEvents,

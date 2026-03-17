@@ -37,6 +37,7 @@ export interface UseAnalyticsResult<T> {
 const STALE_TIME = 5 * 60 * 1000; // 5 minutes
 const SESSION_STORAGE_KEY = 'chunk-analytics-cache';
 const MAX_CACHE_AGE = 30 * 60 * 1000; // 30 minutes max — discard anything older
+const FETCH_TIMEOUT = 30_000; // 30s client-side fetch timeout — prevents indefinite skeleton on Vercel 504s
 
 // ─── Context ─────────────────────────────────────────────────────────────────
 
@@ -248,6 +249,9 @@ export function useAnalytics<T>(
       }
     }
 
+    // Auto-abort after FETCH_TIMEOUT to prevent indefinite skeleton loading
+    const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT);
+
     try {
       const url = buildUrl(endpoint, paramsRef.current);
       const res = await fetch(url, { signal: controller.signal });
@@ -271,13 +275,23 @@ export function useAnalytics<T>(
       setError(null);
       setLastUpdated(new Date(entry.timestamp).toISOString());
     } catch (err: unknown) {
-      if (err instanceof DOMException && err.name === 'AbortError') return;
       if (!mountedRef.current) return;
+
+      // Distinguish between user-initiated aborts (param change / unmount) and timeouts
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        // If this controller is still the current one, it was a timeout (not a param change)
+        if (abortRef.current === controller) {
+          setError('Request timed out. Try a shorter date range.');
+          // Keep showing stale data on timeout — don't clear it
+        }
+        return;
+      }
 
       const message = err instanceof Error ? err.message : 'Failed to fetch';
       setError(message);
       // Keep showing stale data on error — don't clear it
     } finally {
+      clearTimeout(timeoutId);
       if (mountedRef.current) {
         setIsLoading(false);
         setIsRefreshing(false);
