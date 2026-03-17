@@ -172,10 +172,11 @@ export function getUniqueUsersByType(
   return filteredUsers;
 }
 
-/** Fetch a single date range from Mixpanel export API (no chunking). */
+/** Fetch a single date range from Mixpanel export API with retry on 429. */
 async function fetchMixpanelEventsFromAPISingle(
   fromDate: string,
-  toDate: string
+  toDate: string,
+  retries = 2
 ): Promise<MixpanelEvent[]> {
   const MIXPANEL_API_SECRET = process.env.MIXPANEL_API_SECRET;
 
@@ -188,26 +189,41 @@ async function fetchMixpanelEventsFromAPISingle(
 
   const url = `https://data.mixpanel.com/api/2.0/export?from_date=${fromDate}&to_date=${toDate}`;
 
-  const response = await fetch(url, {
-    headers: {
-      Authorization: `Basic ${auth}`,
-    },
-    cache: 'no-store', // Manually handle caching to avoid 2MB limit restrictions
-  });
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const response = await fetch(url, {
+      headers: {
+        Authorization: `Basic ${auth}`,
+      },
+      cache: 'no-store',
+    });
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Mixpanel API error: ${response.status} - ${errorText}`);
+    if (response.status === 429) {
+      if (attempt < retries) {
+        // Exponential backoff: 2s, 4s
+        const backoffMs = 2000 * Math.pow(2, attempt);
+        console.warn(`Mixpanel 429 for ${fromDate}→${toDate}, retrying in ${backoffMs}ms (attempt ${attempt + 1}/${retries})`);
+        await new Promise(r => setTimeout(r, backoffMs));
+        continue;
+      }
+      throw new Error(`Mixpanel API error: 429 - rate limit reached after ${retries} retries`);
+    }
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Mixpanel API error: ${response.status} - ${errorText}`);
+    }
+
+    const text = await response.text();
+    const lines = text.trim().split('\n').filter(Boolean);
+    const events: MixpanelEvent[] = lines.map((line) => JSON.parse(line));
+
+    // Filter out the test account UID to prevent skewing analytics data
+    const filteredEvents = events.filter((e) => e.properties.distinct_id !== 'I3JdK0ufgyN9So4rSOf4yxK1Drl1');
+
+    return filteredEvents;
   }
 
-  const text = await response.text();
-  const lines = text.trim().split('\n').filter(Boolean);
-  const events: MixpanelEvent[] = lines.map((line) => JSON.parse(line));
-
-  // Filter out the test account UID to prevent skewing analytics data
-  const filteredEvents = events.filter((e) => e.properties.distinct_id !== 'I3JdK0ufgyN9So4rSOf4yxK1Drl1');
-
-  return filteredEvents;
+  return []; // Should never reach here due to throw above, but TypeScript needs it
 }
 
 /**
