@@ -242,8 +242,12 @@ function daysBetween(fromDate: string, toDate: string): number {
 }
 
 /**
- * Fetch events from Mixpanel, automatically splitting large ranges
- * into weekly chunks fetched in parallel to avoid serverless timeouts.
+ * Fetch events from Mixpanel, splitting large ranges into sequential
+ * weekly chunks to avoid serverless timeouts.
+ *
+ * Sequential (not parallel) because Mixpanel's export API rate-limits
+ * concurrent requests aggressively. 2 concurrent requests is safe;
+ * 5 triggers rate limiting and returns empty data.
  */
 async function fetchMixpanelEventsFromAPI(
   fromDate: string,
@@ -256,16 +260,23 @@ async function fetchMixpanelEventsFromAPI(
     return fetchMixpanelEventsFromAPISingle(fromDate, toDate);
   }
 
-  // For larger ranges, split into weekly chunks and fetch in parallel
-  const chunks = splitDateRange(fromDate, toDate, 7);
-  console.log(`Mixpanel: splitting ${totalDays}-day range into ${chunks.length} chunks for parallel fetch`);
+  // For larger ranges, split into 10-day chunks and fetch with limited concurrency
+  // 10-day chunks = 3 chunks for 30 days, fetched 2 at a time
+  const chunks = splitDateRange(fromDate, toDate, 10);
+  console.log(`Mixpanel: splitting ${totalDays}-day range into ${chunks.length} chunks (concurrency=2)`);
 
-  const results = await Promise.all(
-    chunks.map((chunk) => fetchMixpanelEventsFromAPISingle(chunk.from, chunk.to))
-  );
+  const allEvents: MixpanelEvent[] = [];
+  const CONCURRENCY = 2;
 
-  // Flatten all chunks into a single array
-  return results.flat();
+  for (let i = 0; i < chunks.length; i += CONCURRENCY) {
+    const batch = chunks.slice(i, i + CONCURRENCY);
+    const results = await Promise.all(
+      batch.map((chunk) => fetchMixpanelEventsFromAPISingle(chunk.from, chunk.to))
+    );
+    allEvents.push(...results.flat());
+  }
+
+  return allEvents;
 }
 
 export async function fetchMixpanelEvents(
