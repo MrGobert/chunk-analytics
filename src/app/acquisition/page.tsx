@@ -57,15 +57,13 @@ const PLATFORM_TABS = [
 type PlatformKey = (typeof PLATFORM_TABS)[number]['key'];
 
 export default function AcquisitionPage() {
-  const { dateRange, setDateRange, userType, setUserType } = useDashboardFilters();
+  const { userType, setUserType } = useDashboardFilters();
+  const [dateRange, setDateRange] = useState('7d');
   const [platformGroup, setPlatformGroup] = useState<PlatformKey>('web');
-
-  // Cap at 7d — Mixpanel export API is too slow for larger ranges on cold cache
-  const effectiveRange = ['30d', '90d', '365d'].includes(dateRange) ? '7d' : dateRange;
 
   const { data: metrics, isLoading, isRefreshing, error, lastUpdated } =
     useAnalytics<AcquisitionFunnelMetrics>('/api/metrics/acquisition', {
-      range: effectiveRange,
+      range: dateRange,
       platform: platformGroup,
       userType,
     });
