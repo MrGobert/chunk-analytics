@@ -281,7 +281,7 @@ export async function GET(request: NextRequest) {
     // For large ranges, race the full fetch against a timeout.
     // If it doesn't complete in time, fall back to a shorter range (7d)
     // and signal the client to retry for the full data.
-    const FETCH_TIMEOUT_MS = 25_000; // 25s — leaves headroom before Vercel's 60s limit
+    const FETCH_TIMEOUT_MS = 15_000; // 15s — if full range isn't cached, fall back to 7d quickly
     let allEvents: MixpanelEvent[];
     let isPartial = false;
     let actualRange = dateRange;

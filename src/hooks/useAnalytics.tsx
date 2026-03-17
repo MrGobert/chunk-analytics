@@ -37,7 +37,7 @@ export interface UseAnalyticsResult<T> {
 const STALE_TIME = 5 * 60 * 1000; // 5 minutes
 const SESSION_STORAGE_KEY = 'chunk-analytics-cache';
 const MAX_CACHE_AGE = 30 * 60 * 1000; // 30 minutes max — discard anything older
-const FETCH_TIMEOUT = 30_000; // 30s client-side fetch timeout — prevents indefinite skeleton on Vercel 504s
+const FETCH_TIMEOUT = 45_000; // 45s client-side fetch timeout — allows time for progressive loading fallback
 
 // ─── Context ─────────────────────────────────────────────────────────────────
 
