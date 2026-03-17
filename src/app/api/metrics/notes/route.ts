@@ -184,7 +184,7 @@ export async function GET(request: NextRequest) {
       userType,
       lastUpdated: getLastUpdated(),
     });
-    response.headers.set('Cache-Control', 'public, s-maxage=300, stale-while-revalidate=600');
+    response.headers.set('Cache-Control', allEvents.length > 0 ? 'public, s-maxage=300, stale-while-revalidate=600' : 'no-store');
     return response;
   } catch (error) {
     console.error('Error fetching notes metrics:', error);

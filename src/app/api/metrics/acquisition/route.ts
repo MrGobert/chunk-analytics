@@ -419,6 +419,9 @@ export async function GET(request: NextRequest) {
       ];
     }
 
+    // Only allow CDN caching when we have real data — don't cache empty/zero results
+    const hasData = allEvents.length > 0;
+
     return NextResponse.json(
       {
         platform: platformParam,
@@ -431,8 +434,9 @@ export async function GET(request: NextRequest) {
       },
       {
         headers: {
-          'Cache-Control':
-            'public, s-maxage=300, stale-while-revalidate=600',
+          'Cache-Control': hasData
+            ? 'public, s-maxage=300, stale-while-revalidate=600'
+            : 'no-store',
         },
       },
     );

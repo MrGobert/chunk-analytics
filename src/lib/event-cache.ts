@@ -103,6 +103,12 @@ export function releaseLock(fromDate: string, toDate: string): void {
 }
 
 export async function setCachedEventsAsync(fromDate: string, toDate: string, events: MixpanelEvent[]): Promise<void> {
+  // Don't cache empty results — they poison the cache when Mixpanel times out or rate-limits
+  if (events.length === 0) {
+    console.warn(`Skipping cache write for ${fromDate}:${toDate} — empty events array`);
+    return;
+  }
+
   const key = buildKey(fromDate, toDate);
   const diskFile = getCacheFilePath(key);
 
