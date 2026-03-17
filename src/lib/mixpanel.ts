@@ -172,7 +172,8 @@ export function getUniqueUsersByType(
   return filteredUsers;
 }
 
-async function fetchMixpanelEventsFromAPI(
+/** Fetch a single date range from Mixpanel export API (no chunking). */
+async function fetchMixpanelEventsFromAPISingle(
   fromDate: string,
   toDate: string
 ): Promise<MixpanelEvent[]> {
@@ -207,6 +208,64 @@ async function fetchMixpanelEventsFromAPI(
   const filteredEvents = events.filter((e) => e.properties.distinct_id !== 'I3JdK0ufgyN9So4rSOf4yxK1Drl1');
 
   return filteredEvents;
+}
+
+/**
+ * Split a date range into weekly chunks for parallel fetching.
+ * Mixpanel export API is slow for large ranges (30d+ takes 60s+).
+ * Splitting into 7-day chunks and fetching in parallel keeps each
+ * request under 15s and completes the full range in ~12-15s total.
+ */
+function splitDateRange(fromDate: string, toDate: string, chunkDays = 7): { from: string; to: string }[] {
+  const chunks: { from: string; to: string }[] = [];
+  let current = new Date(`${fromDate}T12:00:00Z`);
+  const end = new Date(`${toDate}T12:00:00Z`);
+
+  while (current <= end) {
+    const chunkEnd = new Date(current.getTime() + (chunkDays - 1) * 86400000);
+    const actualEnd = chunkEnd > end ? end : chunkEnd;
+    chunks.push({
+      from: formatDate(current),
+      to: formatDate(actualEnd),
+    });
+    current = new Date(actualEnd.getTime() + 86400000);
+  }
+
+  return chunks;
+}
+
+/** Number of days between two YYYY-MM-DD dates (inclusive). */
+function daysBetween(fromDate: string, toDate: string): number {
+  const from = new Date(`${fromDate}T12:00:00Z`);
+  const to = new Date(`${toDate}T12:00:00Z`);
+  return Math.round((to.getTime() - from.getTime()) / 86400000) + 1;
+}
+
+/**
+ * Fetch events from Mixpanel, automatically splitting large ranges
+ * into weekly chunks fetched in parallel to avoid serverless timeouts.
+ */
+async function fetchMixpanelEventsFromAPI(
+  fromDate: string,
+  toDate: string
+): Promise<MixpanelEvent[]> {
+  const totalDays = daysBetween(fromDate, toDate);
+
+  // For ranges ≤10 days, fetch directly (fast enough in a single request)
+  if (totalDays <= 10) {
+    return fetchMixpanelEventsFromAPISingle(fromDate, toDate);
+  }
+
+  // For larger ranges, split into weekly chunks and fetch in parallel
+  const chunks = splitDateRange(fromDate, toDate, 7);
+  console.log(`Mixpanel: splitting ${totalDays}-day range into ${chunks.length} chunks for parallel fetch`);
+
+  const results = await Promise.all(
+    chunks.map((chunk) => fetchMixpanelEventsFromAPISingle(chunk.from, chunk.to))
+  );
+
+  // Flatten all chunks into a single array
+  return results.flat();
 }
 
 export async function fetchMixpanelEvents(
