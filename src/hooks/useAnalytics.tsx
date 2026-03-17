@@ -264,16 +264,35 @@ export function useAnalytics<T>(
 
       if (!mountedRef.current) return;
 
-      const entry: CacheEntry<T> = {
-        data: json,
-        timestamp: Date.now(),
-        params: paramsKey,
-      };
+      // Check if the server returned partial data (e.g., 7d fallback for a 30d request)
+      // Show the partial data immediately, then auto-retry for the full range
+      const isPartial = (json as Record<string, unknown>)?.partial === true;
 
-      cache.set(cacheKey, entry);
+      if (!isPartial) {
+        // Full data — cache it normally
+        const entry: CacheEntry<T> = {
+          data: json,
+          timestamp: Date.now(),
+          params: paramsKey,
+        };
+        cache.set(cacheKey, entry);
+      }
+
       setData(json);
       setError(null);
-      setLastUpdated(new Date(entry.timestamp).toISOString());
+      setLastUpdated(new Date().toISOString());
+
+      // If partial, schedule a retry after a delay to get the full data
+      // The server-side cache should be warm by then
+      if (isPartial && mountedRef.current) {
+        setIsRefreshing(true);
+        setTimeout(() => {
+          if (mountedRef.current && abortRef.current === controller) {
+            fetchData();
+          }
+        }, 15_000); // Retry after 15s — gives server cache time to warm
+        return; // Don't clear isRefreshing yet
+      }
     } catch (err: unknown) {
       if (!mountedRef.current) return;
 

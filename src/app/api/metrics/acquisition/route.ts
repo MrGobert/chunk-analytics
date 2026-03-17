@@ -277,17 +277,46 @@ export async function GET(request: NextRequest) {
 
     const dateRange =
       from && to ? { from, to } : getDateRange(range);
-    const allEvents = await fetchMixpanelEvents(
-      dateRange.from,
-      dateRange.to,
-    );
+
+    // For large ranges, race the full fetch against a timeout.
+    // If it doesn't complete in time, fall back to a shorter range (7d)
+    // and signal the client to retry for the full data.
+    const FETCH_TIMEOUT_MS = 25_000; // 25s — leaves headroom before Vercel's 60s limit
+    let allEvents: MixpanelEvent[];
+    let isPartial = false;
+    let actualRange = dateRange;
+
+    const totalDays = Math.round(
+      (new Date(dateRange.to).getTime() - new Date(dateRange.from).getTime()) / 86400000
+    ) + 1;
+
+    if (totalDays > 10) {
+      // Try full range with timeout
+      const fullFetch = fetchMixpanelEvents(dateRange.from, dateRange.to);
+      const timeout = new Promise<null>((resolve) =>
+        setTimeout(() => resolve(null), FETCH_TIMEOUT_MS)
+      );
+      const result = await Promise.race([fullFetch, timeout]);
+
+      if (result !== null) {
+        allEvents = result;
+      } else {
+        // Full range too slow — fall back to 7d for instant display
+        console.warn(`Mixpanel fetch for ${dateRange.from}→${dateRange.to} timed out after ${FETCH_TIMEOUT_MS}ms, falling back to 7d`);
+        actualRange = getDateRange('7d');
+        allEvents = await fetchMixpanelEvents(actualRange.from, actualRange.to);
+        isPartial = true;
+      }
+    } else {
+      allEvents = await fetchMixpanelEvents(dateRange.from, dateRange.to);
+    }
     const userFiltered = filterByUserType(allEvents, userType);
 
     // Filter to selected platform
     const events = userFiltered.filter(
       (e) => getPlatformGroup(e) === platformParam,
     );
-    const days = getDaysInRange(dateRange.from, dateRange.to);
+    const days = getDaysInRange(actualRange.from, actualRange.to);
 
     let funnel: ReturnType<typeof buildFunnel>;
     let statCards: { label: string; value: number }[];
@@ -419,18 +448,21 @@ export async function GET(request: NextRequest) {
       ];
     }
 
-    // Only allow CDN caching when we have real data — don't cache empty/zero results
-    const hasData = allEvents.length > 0;
+    // Only allow CDN caching when we have real data — don't cache empty/zero or partial results
+    const hasData = allEvents.length > 0 && !isPartial;
 
     return NextResponse.json(
       {
         platform: platformParam,
-        subtitle,
+        subtitle: isPartial
+          ? `${subtitle} (showing last 7 days — full range loading...)`
+          : subtitle,
         funnel,
         statCards,
         dailyData,
         dailyLines,
         lastUpdated: getLastUpdated(),
+        ...(isPartial && { partial: true, partialRange: '7d' }),
       },
       {
         headers: {
