@@ -29,6 +29,7 @@ import {
   Tags,
   Briefcase,
   Bug,
+  Sparkles,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -48,6 +49,7 @@ const ROUTE_TO_ENDPOINT: Record<string, string> = {
   '/research': '/api/metrics/research',
   '/notes': '/api/metrics/notes',
   '/collections': '/api/metrics/collections',
+  '/artifacts': '/api/metrics/artifacts',
   '/sharing': '/api/metrics/sharing',
   '/sentry': '/api/sentry/stats',
 };
@@ -80,6 +82,7 @@ const navSections: NavSection[] = [
       { href: '/research', label: 'Research', icon: FileText },
       { href: '/notes', label: 'Notes', icon: StickyNote },
       { href: '/collections', label: 'Collections', icon: FolderOpen },
+      { href: '/artifacts', label: 'Artifacts', icon: Sparkles },
       { href: '/features', label: 'Features', icon: LayoutGrid },
       { href: '/acquisition', label: 'Acquisition', icon: Rocket },
     ],

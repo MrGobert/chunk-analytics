@@ -289,6 +289,34 @@ export interface CollectionsMetrics {
   lastUpdated: string;
 }
 
+export interface ArtifactsMetrics {
+  totalCreated: number;
+  totalCompleted: number;
+  totalFailed: number;
+  totalViewed: number;
+  totalDeleted: number;
+  totalSavedToNotes: number;
+  totalVisualsGenerated: number;
+  totalBatchStarted: number;
+  totalFileUploads: number;
+  uniqueArtifactUsers: number;
+  completionRate: number;
+  createdTrend: number | null;
+  completedTrend: number | null;
+  viewedTrend: number | null;
+  savedToNotesTrend: number | null;
+  fileUploadsTrend: number | null;
+  artifactsFunnel: FunnelStep[];
+  dailyData: { date: string; created: number; completed: number; viewed: number }[];
+  sourceTypeDistribution: { name: string; value: number }[];
+  outputTypeDistribution: { name: string; value: number }[];
+  tabSwitchDistribution: { name: string; value: number }[];
+  savedContentTypeDistribution: { name: string; value: number }[];
+  fileTypeDistribution: { name: string; value: number }[];
+  onboardingFunnel: FunnelStep[];
+  lastUpdated: string;
+}
+
 export interface MarketingMetrics {
   totalCTAClicks: number;
   tryForFreeClicks: number;
