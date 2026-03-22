@@ -55,6 +55,13 @@ celery.conf.update(
             "schedule": crontab(minute=30, hour=10),
         },
         # ============================================================
+        # Instant Welcome Email
+        # ============================================================
+        "check-welcome-instant-hourly": {
+            "task": "check_welcome_instant",
+            "schedule": crontab(minute=5, hour="*"),
+        },
+        # ============================================================
         # Welcome Sequence (Onboarding Drip)
         # ============================================================
         "check-welcome-day1-every-6-hours": {
