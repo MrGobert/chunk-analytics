@@ -545,7 +545,7 @@ def get_welcome_email(user_name: str = "there") -> tuple[str, str, str]:
         hero_subtitle="Your AI research workspace is ready.",
         body_content=body,
         cta_text="Start Exploring",
-        cta_url=BRAND["login_url"],
+        cta_url=BRAND["web_url"] + "/chat?source=welcome_email",
         footer_tip="Try this: type [[ in any note to create a wiki link. Your ideas start connecting themselves.",
         hero_dark=True,
         hero_label="WELCOME",
