@@ -489,11 +489,11 @@ def get_welcome_email(user_name: str = "there") -> tuple[str, str, str]:
     # Each feature as a compact, elegant row with accent dot + one-liner
     feature_items = [
         (BRAND["purple"], "MODELS", "🧠", "Every Top AI Model",
-         "GPT-5, Claude, Gemini, Llama — switch per conversation. One app, every model."),
+         "GPT-5, Claude, Gemini — switch per conversation. One app, every model."),
         (BRAND["color_documents"], "COLLECTIONS", "📚", "Collections",
          "Gather notes, docs, and URLs into one workspace. Ask AI across all of it."),
         (BRAND["color_reports"], "ARTIFACTS", "🧪", "Artifacts",
-         "AI-generated reports, study guides, timelines — polished documents from any conversation."),
+         "Turn audio lectures, podcasts, YouTube videos, and PDFs into searchable transcripts, study guides, and more."),
         (BRAND["color_notes"], "NOTES", "📝", "Connected Notes",
          "Wiki-link your ideas with [[brackets]]. Backlinks and AI writing tools built in."),
         (BRAND["accent_blue"], "GRAPH", "🔗", "Knowledge Graph",
