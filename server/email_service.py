@@ -1168,6 +1168,157 @@ def get_reengagement_14day_email(user_name: str = "there") -> tuple[str, str, st
     )
 
 
+def get_memory_2_announcement_email(
+    user_name: str = "there",
+) -> tuple[str, str, str]:
+    """Generate Memory 2.0 announcement broadcast email — rich custom layout."""
+    subject = "🧠 Introducing Memory 2.0 — Chunk now remembers you"
+
+    # Screenshot image — hosted on cerebral-analytics static assets
+    screenshot_url = "https://cerebral-analytics-eff2e86d22c4.herokuapp.com/static/email-assets/memory-insights-screenshot.png"
+
+    body = f"""
+    <!-- Serif statement -->
+    <table width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation" style="margin-bottom:28px">
+        <tr>
+            <td align="center" style="padding:8px 0">
+                <p style="margin:0;font-family:{FONT_SERIF};font-style:italic;font-size:26px;color:{BRAND['text_primary']};line-height:1.3;text-align:center" class="text-dark">
+                    The AI that actually <span style="color:{BRAND['primary']}">knows</span> you.
+                </p>
+            </td>
+        </tr>
+    </table>
+
+    <p style="margin:0 0 20px 0;font-family:{FONT_SANS};font-size:16px;color:{BRAND['text_primary']};line-height:1.7" class="text-dark">
+        Hey {user_name},
+    </p>
+    <p style="margin:0 0 24px 0;font-family:{FONT_SANS};font-size:16px;color:{BRAND['text_primary']};line-height:1.7" class="text-dark">
+        Most AI tools forget you the moment the conversation ends. Starting today, <strong>Chunk doesn't.</strong>
+    </p>
+    <p style="margin:0 0 28px 0;font-family:{FONT_SANS};font-size:16px;color:{BRAND['text_primary']};line-height:1.7" class="text-dark">
+        With <strong>Memory 2.0</strong>, Chunk quietly learns who you are &mdash; your work, your preferences, your goals &mdash; and uses that understanding to give you <em>better answers, every time.</em>
+    </p>
+
+    <!-- How It Works — 3 Steps -->
+    <table width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation" style="margin-bottom:8px">
+        <tr>
+            <td>
+                <p style="margin:0 0 16px 0;font-family:{FONT_MONO};font-size:10px;letter-spacing:0.15em;text-transform:uppercase;color:{BRAND['purple']};font-weight:700">HOW IT WORKS</p>
+            </td>
+        </tr>
+    </table>
+
+    {_protocol_step("01", "You talk. Chunk listens.", 'As you chat, Chunk automatically picks up the things that matter — your name, your job, the tools you use, your preferences. No setup needed.')}
+    {_protocol_step("02", "Chunk builds a picture of you.", 'Behind the scenes, two layers of understanding form: quick facts (name, role, stack) and deeper context (projects, decisions, how you think).')}
+    {_protocol_step("03", "Every conversation starts smarter.", 'When you open a new chat, Chunk already has context. No re-explaining. No generic answers. Just an AI that gets you from message one.')}
+
+    <!-- Screenshot -->
+    <table width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation" style="margin:28px 0 32px 0">
+        <tr>
+            <td align="center">
+                <table border="0" cellpadding="0" cellspacing="0" role="presentation" style="border-radius:16px;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,0.12);border:1px solid {BRAND['surface']}">
+                    <tr>
+                        <td>
+                            <img
+                                src="{screenshot_url}"
+                                alt="Memory Insights tab in Chunk — showing patterns, decisions, and project context"
+                                width="520"
+                                style="display:block;border:none;width:520px;max-width:100%;height:auto;border-radius:16px"
+                            >
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+        <tr>
+            <td align="center" style="padding-top:10px">
+                <p style="margin:0;font-family:{FONT_MONO};font-size:11px;letter-spacing:0.08em;color:{BRAND['text_muted']}">THE NEW INSIGHTS TAB — PATTERNS, DECISIONS, AND CONTEXT</p>
+            </td>
+        </tr>
+    </table>
+
+    <!-- Two Layers Section -->
+    <table width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation" style="margin-bottom:8px">
+        <tr>
+            <td>
+                <p style="margin:0 0 16px 0;font-family:{FONT_MONO};font-size:10px;letter-spacing:0.15em;text-transform:uppercase;color:{BRAND['gold']};font-weight:700">TWO LAYERS OF UNDERSTANDING</p>
+            </td>
+        </tr>
+    </table>
+
+    {_feature_card("⚡", "Layer 1 — Facts", "Quick, atomic facts about you: your name, your job, your location, your tech stack. Always available, always accurate.", BRAND['accent_blue'], "AUTOMATIC")}
+    {_feature_card("🧠", "Layer 2 — Journal", "Rich contextual insights from full conversations. Your working style, evolving preferences, ongoing projects, and the decisions you've made and why.", BRAND['purple'], "PRO")}
+
+    <!-- Privacy Card -->
+    <table width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation" style="margin:24px 0 28px 0;background-color:{BRAND['bg_dark']};border-radius:16px;border:1px solid {BRAND['surface_dark']};overflow:hidden" class="dark-card">
+        <tr>
+            <td style="padding:24px">
+                <table width="100%" border="0" cellpadding="0" cellspacing="0">
+                    <tr>
+                        <td style="width:36px;vertical-align:top;padding-right:14px;font-size:22px" width="36">🔒</td>
+                        <td style="vertical-align:top">
+                            <p style="margin:0 0 6px 0;font-family:{FONT_SANS};font-weight:700;color:{BRAND['text_inverse']};font-size:16px;letter-spacing:-0.01em">Privacy first. Always.</p>
+                            <p style="margin:0;font-family:{FONT_SANS};color:{BRAND['text_inverse']};font-size:14px;line-height:1.6;opacity:0.7">
+                                Encrypted at rest with per-user keys. Passwords and sensitive PII are automatically blocked.
+                                View, edit, or delete any memory at any time. Full control is yours.
+                            </p>
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+
+    <!-- Availability -->
+    <table width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation" style="margin-bottom:28px;background-color:{BRAND['surface_elevated']};border-radius:16px;overflow:hidden" class="surface-card">
+        <tr>
+            <td style="padding:20px 24px;text-align:center">
+                <p style="margin:0 0 8px 0;font-family:{FONT_MONO};font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:{BRAND['signal_green']};font-weight:700">AVAILABILITY</p>
+                <p style="margin:0 0 4px 0;font-family:{FONT_SANS};font-size:16px;font-weight:700;color:{BRAND['text_primary']}" class="text-dark">
+                    ✅ <span style="color:{BRAND['signal_green']}">Live now</span> on the web
+                </p>
+                <p style="margin:0;font-family:{FONT_SANS};font-size:14px;color:{BRAND['text_muted']}" class="text-muted-dm">
+                    Coming soon to Mac, iPhone, and iPad
+                </p>
+            </td>
+        </tr>
+    </table>
+
+    <p style="margin:0 0 8px 0;font-family:{FONT_SANS};font-size:16px;color:{BRAND['text_primary']};line-height:1.7" class="text-dark">
+        Just use Chunk normally. Memory does the rest.
+    </p>
+    """
+
+    html = _base_email_template(
+        preheader="Chunk now remembers who you are — your work, your preferences, your goals. Every conversation starts smarter.",
+        hero_title="Memory 2.0",
+        hero_subtitle="Every conversation is smarter than the last.",
+        body_content=body,
+        cta_text="Try Memory Now",
+        cta_url="https://www.chunkapp.com/login",
+        footer_tip="Memory is enabled by default for all users. Head to Settings → Memory to view what Chunk knows about you, or toggle it off at any time.",
+        hero_dark=True,
+        hero_label="NOW AVAILABLE",
+        hero_serif_word="Memory",
+    )
+
+    text = (
+        "Introducing Memory 2.0 — Chunk now remembers you.\n\n"
+        "Most AI tools forget you the moment the conversation ends. Chunk doesn't.\n\n"
+        "With Memory 2.0, Chunk quietly learns who you are — your work, your preferences, "
+        "your goals — and uses that understanding to give you better answers, every time.\n\n"
+        "HOW IT WORKS:\n"
+        "1. You talk. Chunk listens. — As you chat, Chunk picks up facts automatically.\n"
+        "2. Chunk builds a picture of you. — Two layers: quick facts + deep context.\n"
+        "3. Every conversation starts smarter. — No re-explaining yourself.\n\n"
+        "PRIVACY: Encrypted at rest. Sensitive PII blocked. Full control to view, edit, delete.\n\n"
+        "Available now on the web. Coming soon to Mac, iPhone, and iPad.\n\n"
+        "Try it now: https://www.chunkapp.com/login"
+    )
+
+    return subject, html, text
+
+
 def get_feature_announcement_email(
     user_name: str = "there",
     feature_name: str = "",
@@ -1499,3 +1650,9 @@ def send_signup_no_trial_nudge(to_email: str, user_name: str = "there", user_id:
     """Send signup no-trial nudge email."""
     subject, html, text = get_signup_no_trial_nudge_email(user_name)
     return send_email(to_email, subject, html, text, email_type="signup_no_trial_nudge", user_id=user_id)
+
+
+def send_memory_2_announcement(to_email: str, user_name: str = "there", user_id: str = None) -> dict:
+    """Send Memory 2.0 announcement broadcast email."""
+    subject, html, text = get_memory_2_announcement_email(user_name)
+    return send_email(to_email, subject, html, text, email_type="memory_2_announcement", user_id=user_id)
