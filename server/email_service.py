@@ -297,7 +297,7 @@ def _base_email_template(
                                 </tr>
                                 <tr>
                                     <td align="center">
-                                        <p style="margin:0;font-family:{FONT_SANS};font-size:13px">
+                                        <p style="margin:0;font-family:{FONT_SANS};font-size:13px;color:{BRAND['text_inverse']}">
                                             {{UNSUBSCRIBE_LINK_PLACEHOLDER}}
                                             <a href="{BRAND['privacy_url']}" style="color:{BRAND['primary']};text-decoration:none">Privacy</a>
                                             <span style="color:{BRAND['text_inverse']};opacity:0.3"> · </span>
@@ -1246,8 +1246,8 @@ def get_memory_2_announcement_email(
         </tr>
     </table>
 
-    {_feature_card("⚡", "Layer 1 — Facts", "Quick, atomic facts about you: your name, your job, your location, your tech stack. Always available, always accurate.", BRAND['accent_blue'], "AUTOMATIC")}
-    {_feature_card("🧠", "Layer 2 — Journal", "Rich contextual insights from full conversations. Your working style, evolving preferences, ongoing projects, and the decisions you've made and why.", BRAND['purple'], "PRO")}
+    {_feature_card("⚡", "Layer 1 — Facts", "Quick, atomic facts about you: your name, your job, your location, your tech stack. Always available, always accurate.", BRAND['accent_blue'], "ALL USERS")}
+    {_feature_card("🧠", "Layer 2 — Journal", "Rich contextual insights from full conversations. Your working style, evolving preferences, ongoing projects, and the decisions you've made and why.", BRAND['purple'], "CHUNK PRO")}
 
     <!-- Privacy Card -->
     <table width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation" style="margin:24px 0 28px 0;background-color:{BRAND['bg_dark']};border-radius:16px;border:1px solid {BRAND['surface_dark']};overflow:hidden" class="dark-card">
@@ -1277,15 +1277,20 @@ def get_memory_2_announcement_email(
                 <p style="margin:0 0 4px 0;font-family:{FONT_SANS};font-size:16px;font-weight:700;color:{BRAND['text_primary']}" class="text-dark">
                     ✅ <span style="color:{BRAND['signal_green']}">Live now</span> on the web
                 </p>
-                <p style="margin:0;font-family:{FONT_SANS};font-size:14px;color:{BRAND['text_muted']}" class="text-muted-dm">
+                <p style="margin:0 0 8px 0;font-family:{FONT_SANS};font-size:14px;color:{BRAND['text_muted']}" class="text-muted-dm">
                     Coming soon to Mac, iPhone, and iPad
+                </p>
+                <p style="margin:0;font-family:{FONT_SANS};font-size:13px;color:{BRAND['text_muted']};line-height:1.5" class="text-muted-dm">
+                    Layer 1 (Facts) is available to all users.<br>
+                    Layer 2 (Journal) is exclusive to <strong style="color:{BRAND['primary']}">Chunk Pro</strong> subscribers.
                 </p>
             </td>
         </tr>
     </table>
 
+    <!-- Enable CTA -->
     <p style="margin:0 0 8px 0;font-family:{FONT_SANS};font-size:16px;color:{BRAND['text_primary']};line-height:1.7" class="text-dark">
-        Just use Chunk normally. Memory does the rest.
+        To get started, head to <strong>Settings → Memory</strong> and flip the switch. Then just use Chunk normally — Memory does the rest.
     </p>
     """
 
@@ -1296,7 +1301,7 @@ def get_memory_2_announcement_email(
         body_content=body,
         cta_text="Try Memory Now",
         cta_url="https://www.chunkapp.com/login",
-        footer_tip="Memory is enabled by default for all users. Head to Settings → Memory to view what Chunk knows about you, or toggle it off at any time.",
+        footer_tip="Memory is opt-in. Head to Settings → Memory to turn it on and see what Chunk knows about you.",
         hero_dark=True,
         hero_label="NOW AVAILABLE",
         hero_serif_word="Memory",
@@ -1312,7 +1317,9 @@ def get_memory_2_announcement_email(
         "2. Chunk builds a picture of you. — Two layers: quick facts + deep context.\n"
         "3. Every conversation starts smarter. — No re-explaining yourself.\n\n"
         "PRIVACY: Encrypted at rest. Sensitive PII blocked. Full control to view, edit, delete.\n\n"
+        "Layer 1 (Facts) is available to all users. Layer 2 (Journal) is exclusive to Chunk Pro.\n\n"
         "Available now on the web. Coming soon to Mac, iPhone, and iPad.\n\n"
+        "To get started, head to Settings → Memory and flip the switch.\n\n"
         "Try it now: https://www.chunkapp.com/login"
     )
 
