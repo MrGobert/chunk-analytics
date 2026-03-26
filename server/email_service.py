@@ -1307,6 +1307,16 @@ def get_memory_2_announcement_email(
         hero_serif_word="Memory",
     )
 
+    # Replace the custom unsubscribe placeholder with Resend's native broadcast
+    # unsubscribe URL. Broadcasts don't go through send_email() so our custom
+    # replacement never fires — Resend handles unsubscribe natively for broadcasts.
+    resend_unsubscribe_link = (
+        f'<a href="{{{{{{RESEND_UNSUBSCRIBE_URL}}}}}}" '
+        f'style="color:{BRAND["text_inverse"]};text-decoration:none">Unsubscribe</a>'
+        f'<span style="color:{BRAND["text_inverse"]};opacity:0.3"> · </span>'
+    )
+    html = html.replace("{UNSUBSCRIBE_LINK_PLACEHOLDER}", resend_unsubscribe_link)
+
     text = (
         "Introducing Memory 2.0 — Chunk now remembers you.\n\n"
         "Most AI tools forget you the moment the conversation ends. Chunk doesn't.\n\n"
