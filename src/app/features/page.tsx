@@ -408,6 +408,23 @@ export default function FeaturesPage() {
   const { data: overview, isLoading: isOverviewLoading, isRefreshing, lastUpdated } =
     useAnalytics<FeatureOverviewMetrics>('/api/metrics/feature-overview', { range: dateRange, platform, userType });
 
+  // Prepare bar chart data from overview (must be before conditional return to keep hook order stable)
+  const eventsData = useMemo(() =>
+    (overview?.features ?? []).map((f) => ({
+      feature: f.name,
+      count: f.totalEvents,
+    })),
+    [overview?.features]
+  );
+
+  const usersData = useMemo(() =>
+    (overview?.features ?? []).map((f) => ({
+      feature: f.name,
+      count: f.uniqueUsers,
+    })),
+    [overview?.features]
+  );
+
   // GSAP animation on mount / when overview loads
   useEffect(() => {
     if (!isOverviewLoading && overview && !hasAnimated.current) {
@@ -426,23 +443,6 @@ export default function FeaturesPage() {
   if (isOverviewLoading) {
     return <SkeletonPage statCards={0} chartCards={2} chartCardLayout="grid-cols-1 lg:grid-cols-2" />;
   }
-
-  // Prepare bar chart data from overview
-  const eventsData = useMemo(() =>
-    (overview?.features ?? []).map((f) => ({
-      feature: f.name,
-      count: f.totalEvents,
-    })),
-    [overview?.features]
-  );
-
-  const usersData = useMemo(() =>
-    (overview?.features ?? []).map((f) => ({
-      feature: f.name,
-      count: f.uniqueUsers,
-    })),
-    [overview?.features]
-  );
 
   return (
     <div ref={containerRef}>
