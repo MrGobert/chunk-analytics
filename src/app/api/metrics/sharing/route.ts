@@ -7,7 +7,6 @@ import {
   filterByPlatform,
   filterByUserType,
   filterEventsByType,
-  getUniqueUsers,
   countEvents,
   calculateTrend,
   getLastUpdated,
@@ -40,7 +39,6 @@ const SAVE_CLICK_EVENTS = [
   'Save_To_Chunk_Clicked',
 ];
 
-const ALL_SHARING_EVENTS = [...SHARE_CREATION_EVENTS, ...SHARED_VIEW_EVENTS, ...SAVE_CLICK_EVENTS];
 
 export async function GET(request: NextRequest) {
   try {
@@ -52,11 +50,20 @@ export async function GET(request: NextRequest) {
     const userType = (searchParams.get('userType') || 'all') as UserType;
 
     const dateRange = from && to ? { from, to } : getDateRange(range);
-    const allEvents = await fetchMixpanelEvents(dateRange.from, dateRange.to);
+
+    // Fetch current and previous periods concurrently
+    const rangeDays = range === '1d' ? 1 : range === '7d' ? 7 : range === '90d' ? 90 : range === '365d' ? 365 : 30;
+    const previousFrom = formatDate(subDays(new Date(dateRange.from), rangeDays));
+    const previousTo = formatDate(subDays(new Date(dateRange.to), rangeDays));
+
+    const [allEvents, allPreviousEvents] = await Promise.all([
+      fetchMixpanelEvents(dateRange.from, dateRange.to),
+      fetchMixpanelEvents(previousFrom, previousTo).catch(() => []),
+    ]);
+
     const platformFilteredEvents = filterByPlatform(allEvents, platform);
     const events = filterByUserType(platformFilteredEvents, userType);
 
-    const sharingEvents = filterEventsByType(events, ALL_SHARING_EVENTS);
     const shareCreationEvents = filterEventsByType(events, SHARE_CREATION_EVENTS);
     const sharedViewEvents = filterEventsByType(events, SHARED_VIEW_EVENTS);
     const saveClickEvents = filterEventsByType(events, SAVE_CLICK_EVENTS);
@@ -74,36 +81,23 @@ export async function GET(request: NextRequest) {
 
     const totalSaveToChunkClicks = countEvents(saveClickEvents, 'Save_To_Chunk_Clicked');
 
-    // Previous period for trends
-    const rangeDays = range === '1d' ? 1 : range === '7d' ? 7 : range === '90d' ? 90 : range === '365d' ? 365 : 30;
-    const previousFrom = formatDate(subDays(new Date(dateRange.from), rangeDays));
-    const previousTo = formatDate(subDays(new Date(dateRange.to), rangeDays));
-
-    let previousEvents: Awaited<ReturnType<typeof fetchMixpanelEvents>> = [];
-    try {
-      const allPreviousEvents = await fetchMixpanelEvents(previousFrom, previousTo);
-      const prevPlatformFiltered = filterByPlatform(allPreviousEvents, platform);
-      previousEvents = filterByUserType(prevPlatformFiltered, userType);
-    } catch {
-      // Use empty array if previous period data unavailable
-    }
+    // Previous period trends — extract per-type counts to avoid redundant scans
+    const prevPlatformFiltered = filterByPlatform(allPreviousEvents, platform);
+    const previousEvents = filterByUserType(prevPlatformFiltered, userType);
 
     const prevShareCreation = filterEventsByType(previousEvents, SHARE_CREATION_EVENTS);
     const prevSharedViews = filterEventsByType(previousEvents, SHARED_VIEW_EVENTS);
     const prevSaveClicks = filterEventsByType(previousEvents, SAVE_CLICK_EVENTS);
 
-    const noteSharedTrend = calculateTrend(
-      totalNotesShared,
-      countEvents(prevShareCreation, 'Note_Shared') + countEvents(prevShareCreation, 'Note_Published')
-    );
-    const conversationSharedTrend = calculateTrend(
-      totalConversationsShared,
-      countEvents(prevShareCreation, 'Conversation_Shared') + countEvents(prevShareCreation, 'Conversation_Published')
-    );
-    const researchSharedTrend = calculateTrend(
-      totalResearchShared,
-      countEvents(prevShareCreation, 'Research_Report_Shared') + countEvents(prevShareCreation, 'Research_Published')
-    );
+    const prevNotesShared = countEvents(prevShareCreation, 'Note_Shared') + countEvents(prevShareCreation, 'Note_Published');
+    const prevConversationsShared = countEvents(prevShareCreation, 'Conversation_Shared') + countEvents(prevShareCreation, 'Conversation_Published');
+    const prevResearchShared = countEvents(prevShareCreation, 'Research_Report_Shared') + countEvents(prevShareCreation, 'Research_Published');
+    const prevCollectionsShared = countEvents(prevShareCreation, 'Collection_Shared');
+    const prevTotalShares = prevNotesShared + prevConversationsShared + prevResearchShared + prevCollectionsShared;
+
+    const noteSharedTrend = calculateTrend(totalNotesShared, prevNotesShared);
+    const conversationSharedTrend = calculateTrend(totalConversationsShared, prevConversationsShared);
+    const researchSharedTrend = calculateTrend(totalResearchShared, prevResearchShared);
 
     const prevTotalViews = countEvents(prevSharedViews, 'Shared_Note_Viewed') +
       countEvents(prevSharedViews, 'Shared_Conversation_Viewed') +
@@ -230,6 +224,7 @@ export async function GET(request: NextRequest) {
       noteSharedTrend,
       conversationSharedTrend,
       researchSharedTrend,
+      totalSharesTrend: calculateTrend(totalShares, prevTotalShares),
       sharedViewsTrend,
       saveClickTrend,
       viewToShareRatio,

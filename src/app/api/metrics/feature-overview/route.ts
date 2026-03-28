@@ -16,10 +16,10 @@ import { subDays } from 'date-fns';
 // Map events to feature categories for cross-feature comparison
 const FEATURE_CATEGORIES: Record<string, string[]> = {
   Search: ['Search_Performed', 'Search Performed', 'Search'],
-  Research: ['Research_Report_Initiated', 'Research_Report_Completed', 'Research_Report_Viewed', 'Research_Report_Exported', 'Research_Report_Shared'],
-  Notes: ['Note_Created', 'Note_Viewed', 'Note_Saved', 'Note_Shared', 'Note_Published', 'Note_Writing_Tool_Used', 'Note_Uploaded_To_Documents'],
-  Collections: ['Collection_Created', 'Collection_Viewed', 'Collection_Chat_Started', 'Collection_Exported', 'Collection_Shared', 'Collection_URL_Added'],
-  Artifacts: ['Artifact_Created', 'Artifact_Completed', 'Artifact_Viewed', 'Artifact_Saved_To_Notes', 'Artifact_File_Uploaded'],
+  Research: ['Research_Report_Initiated', 'Research_Report_Completed', 'Research_Report_Viewed', 'Research_Report_Exported', 'Research_Report_Shared', 'Research_Report_Deleted', 'Research_History_Viewed', 'Research_Settings_Changed', 'Research_Report_Added_To_Collection', 'Research_Report_Filtered', 'Research_Published'],
+  Notes: ['Note_Created', 'Note_Viewed', 'Note_Saved', 'Note_Shared', 'Note_Published', 'Note_Writing_Tool_Used', 'Note_Uploaded_To_Documents', 'Note_Deleted'],
+  Collections: ['Collection_Created', 'Collection_Viewed', 'Collection_Chat_Started', 'Collection_Exported', 'Collection_Shared', 'Collection_URL_Added', 'Collection_Updated', 'Collection_Deleted', 'Collection_URL_Removed'],
+  Artifacts: ['Artifact_Created', 'Artifact_Completed', 'Artifact_Viewed', 'Artifact_Saved_To_Notes', 'Artifact_File_Uploaded', 'Artifact_Failed', 'Artifact_Deleted', 'Artifact_Tab_Switched', 'Artifact_Visual_Generated', 'Artifact_Filtered', 'Artifact_Searched', 'Artifact_Onboarding_Viewed', 'Artifact_Onboarding_Completed', 'Artifact_Onboarding_Skipped', 'Artifact_Batch_Started', 'Artifact_Batch_Completed'],
   Documents: ['Document_Uploaded', 'Document_Viewed', 'Document_Deleted', 'Document_Attached', 'Documents'],
   'Image Gen': ['Image_Generation_Started', 'Image_Generation_Completed', 'Image Generation', 'Images'],
   Memory: ['Memory_Viewed', 'Memory_Toggled', 'Memory_Added', 'Memory_Deleted', 'AI Memory', 'Memory Management Viewed', 'Memory_Management_Viewed'],

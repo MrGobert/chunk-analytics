@@ -255,6 +255,7 @@ export interface SharingMetrics {
   noteSharedTrend: number | null;
   conversationSharedTrend: number | null;
   researchSharedTrend: number | null;
+  totalSharesTrend: number | null;
   sharedViewsTrend: number | null;
   saveClickTrend: number | null;
   viewToShareRatio: number;

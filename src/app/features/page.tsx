@@ -94,7 +94,11 @@ function SearchSection({ dateRange, platform, userType }: FilterProps) {
 
       <div className="grid grid-cols-1 gap-6 mb-8">
         <ChartCard title="Searches Over Time" subtitle="Daily search volume">
-          <AreaChart data={metrics.searchesOverTime} xKey="date" yKey="searches" color="#8b5cf6" />
+          {metrics.searchesOverTime.length > 0 ? (
+            <AreaChart data={metrics.searchesOverTime} xKey="date" yKey="searches" color="#8b5cf6" />
+          ) : (
+            <div className="flex items-center justify-center h-64 text-zinc-500">No search data yet</div>
+          )}
         </ChartCard>
       </div>
 
@@ -131,7 +135,11 @@ function ResearchSection({ dateRange, platform, userType }: FilterProps) {
 
       <div className="grid grid-cols-1 gap-6 mb-8">
         <ChartCard title="Research Funnel" subtitle="From initiation to export/share">
-          <FunnelChart data={metrics.researchFunnel} />
+          {metrics.researchFunnel.length > 0 ? (
+            <FunnelChart data={metrics.researchFunnel} />
+          ) : (
+            <div className="flex items-center justify-center h-64 text-zinc-500">No funnel data yet</div>
+          )}
         </ChartCard>
       </div>
 
@@ -181,11 +189,15 @@ function NotesSection({ dateRange, platform, userType }: FilterProps) {
 
       <div className="grid grid-cols-1 gap-6 mb-8">
         <ChartCard title="Notes Lifecycle Funnel" subtitle="Created → Saved → Published → Shared">
-          <FunnelChart data={metrics.notesFunnel} />
+          {metrics.notesFunnel.length > 0 ? (
+            <FunnelChart data={metrics.notesFunnel} />
+          ) : (
+            <div className="flex items-center justify-center h-64 text-zinc-500">No funnel data yet</div>
+          )}
         </ChartCard>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 gap-6">
         <ChartCard title="Writing Tool Distribution" subtitle="Which AI writing tools are most used">
           {metrics.writingToolDistribution.length > 0 ? (
             <BarChart
@@ -197,13 +209,6 @@ function NotesSection({ dateRange, platform, userType }: FilterProps) {
             />
           ) : (
             <div className="flex items-center justify-center h-64 text-zinc-500">No writing tool data yet</div>
-          )}
-        </ChartCard>
-        <ChartCard title="Save Trigger Distribution" subtitle="Auto-save vs manual save">
-          {metrics.saveTriggerDistribution.length > 0 ? (
-            <PieChart data={metrics.saveTriggerDistribution} />
-          ) : (
-            <div className="flex items-center justify-center h-64 text-zinc-500">No save data yet</div>
           )}
         </ChartCard>
       </div>
@@ -232,7 +237,11 @@ function CollectionsSection({ dateRange, platform, userType }: FilterProps) {
 
       <div className="grid grid-cols-1 gap-6 mb-8">
         <ChartCard title="Collections Funnel" subtitle="Created → Viewed → Chat Started → Exported/Shared">
-          <FunnelChart data={metrics.collectionsFunnel} />
+          {metrics.collectionsFunnel.length > 0 ? (
+            <FunnelChart data={metrics.collectionsFunnel} />
+          ) : (
+            <div className="flex items-center justify-center h-64 text-zinc-500">No funnel data yet</div>
+          )}
         </ChartCard>
       </div>
 
@@ -278,7 +287,11 @@ function ArtifactsSection({ dateRange, platform, userType }: FilterProps) {
 
       <div className="grid grid-cols-1 gap-6 mb-8">
         <ChartCard title="Artifacts Lifecycle Funnel" subtitle="Created → Completed → Viewed → Saved to Notes">
-          <FunnelChart data={metrics.artifactsFunnel} />
+          {metrics.artifactsFunnel.length > 0 ? (
+            <FunnelChart data={metrics.artifactsFunnel} />
+          ) : (
+            <div className="flex items-center justify-center h-64 text-zinc-500">No funnel data yet</div>
+          )}
         </ChartCard>
       </div>
 
@@ -331,7 +344,7 @@ function SharingSection({ dateRange, platform, userType }: FilterProps) {
   return (
     <div className="mt-8">
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-        <StatCard title="Total Shares" value={totalSharesCreated} trend={metrics.noteSharedTrend} />
+        <StatCard title="Total Shares" value={totalSharesCreated} trend={metrics.totalSharesTrend} />
         <StatCard title="Total Views" value={totalSharedViews} trend={metrics.sharedViewsTrend} />
         <StatCard title="View-to-Share Ratio" value={metrics.viewToShareRatio} format="decimal" />
         <StatCard title="Save-to-Chunk Rate" value={metrics.saveToChunkClickRate} format="percentage" />
@@ -339,7 +352,11 @@ function SharingSection({ dateRange, platform, userType }: FilterProps) {
 
       <div className="grid grid-cols-1 gap-6 mb-8">
         <ChartCard title="Sharing Funnel" subtitle="Content creation to save clicks">
-          <FunnelChart data={metrics.sharingFunnel} />
+          {metrics.sharingFunnel.length > 0 ? (
+            <FunnelChart data={metrics.sharingFunnel} />
+          ) : (
+            <div className="flex items-center justify-center h-64 text-zinc-500">No funnel data yet</div>
+          )}
         </ChartCard>
       </div>
 
