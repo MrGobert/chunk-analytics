@@ -7,9 +7,13 @@ import StatCard from '@/components/cards/StatCard';
 import ChartCard from '@/components/cards/ChartCard';
 import LineChart from '@/components/charts/LineChart';
 import FunnelChart from '@/components/charts/FunnelChart';
-import { SkeletonPage } from '@/components/ui/Skeleton';
+import BarChart from '@/components/charts/BarChart';
+import DataTable from '@/components/charts/DataTable';
+import { SkeletonPage, SkeletonChartCard } from '@/components/ui/Skeleton';
 import { useAnalytics } from '@/hooks/useAnalytics';
-import { AcquisitionFunnelMetrics } from '@/types/mixpanel';
+import type { AcquisitionFunnelMetrics, MarketingMetrics, AdvancedMetrics } from '@/types/mixpanel';
+
+// ─── Platform tabs ──────────────────────────────────────────────────────────
 
 const PLATFORM_TABS = [
   {
@@ -66,6 +70,20 @@ export default function AcquisitionPage() {
       range: dateRange,
       platform: platformGroup,
       userType,
+    });
+
+  const { data: marketing, isLoading: marketingLoading } =
+    useAnalytics<MarketingMetrics>('/api/metrics/marketing', {
+      range: dateRange,
+      platform: 'all',
+      userType: 'all',
+    });
+
+  const { data: advanced, isLoading: advancedLoading } =
+    useAnalytics<AdvancedMetrics>('/api/metrics/advanced', {
+      range: dateRange,
+      platform: 'all',
+      userType: 'all',
     });
 
   if (isLoading) {
@@ -181,6 +199,178 @@ export default function AcquisitionPage() {
           )}
         </ChartCard>
       </div>
+
+      {/* ─── Marketing & Conversion ──────────────────────────────────────── */}
+      {marketing && (
+        <>
+          <div className="mt-12 mb-8 border-t border-zinc-800 pt-8">
+            <h2 className="text-xl font-bold text-foreground tracking-tight">Marketing & Conversion</h2>
+            <p className="text-sm text-zinc-500 mt-1">CTA performance and conversion triggers</p>
+          </div>
+
+          {/* Marketing Stat Cards */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+            <StatCard
+              title="CTA Clicks"
+              value={marketing.totalCTAClicks}
+              trend={marketing.ctaClicksTrend}
+              format="number"
+              icon={
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122" />
+                </svg>
+              }
+            />
+            <StatCard
+              title="Feature Page Visits"
+              value={marketing.featurePagesVisited}
+              trend={marketing.featurePagesTrend}
+              format="number"
+              icon={
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                </svg>
+              }
+            />
+            <StatCard
+              title="Guest Prompts"
+              value={marketing.guestSignupPrompts}
+              trend={marketing.guestPromptsTrend}
+              format="number"
+              icon={
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
+                </svg>
+              }
+            />
+            <StatCard
+              title="Feature Limits Hit"
+              value={marketing.featureLimitReached}
+              format="number"
+              icon={
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                </svg>
+              }
+            />
+          </div>
+
+          {/* Marketing Charts — CTA Source + Feature Limit Distribution */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <ChartCard
+              title="CTA Source Distribution"
+              subtitle="Where CTA clicks originate"
+            >
+              {marketing.ctaSourceDistribution.length > 0 ? (
+                <BarChart
+                  data={marketing.ctaSourceDistribution}
+                  xKey="source"
+                  yKey="count"
+                  horizontal
+                />
+              ) : (
+                <div className="flex items-center justify-center h-64 text-zinc-500 font-mono text-sm">
+                  No CTA source data available
+                </div>
+              )}
+            </ChartCard>
+            <ChartCard
+              title="Feature Limit Distribution"
+              subtitle="Which features trigger limit prompts"
+            >
+              {marketing.featureLimitDistribution.length > 0 ? (
+                <BarChart
+                  data={marketing.featureLimitDistribution}
+                  xKey="feature"
+                  yKey="count"
+                  horizontal
+                />
+              ) : (
+                <div className="flex items-center justify-center h-64 text-zinc-500 font-mono text-sm">
+                  No feature limit data available
+                </div>
+              )}
+            </ChartCard>
+          </div>
+        </>
+      )}
+
+      {/* Marketing loading skeleton */}
+      {!marketing && marketingLoading && (
+        <>
+          <div className="mt-12 mb-8 border-t border-zinc-800 pt-8">
+            <h2 className="text-xl font-bold text-foreground tracking-tight">Marketing & Conversion</h2>
+            <p className="text-sm text-zinc-500 mt-1">CTA performance and conversion triggers</p>
+          </div>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <SkeletonChartCard />
+            <SkeletonChartCard />
+          </div>
+        </>
+      )}
+
+      {/* ─── Traffic Sources ─────────────────────────────────────────────── */}
+      {advanced && (
+        <>
+          <div className="mt-12 mb-8 border-t border-zinc-800 pt-8">
+            <h2 className="text-xl font-bold text-foreground tracking-tight">Traffic Sources</h2>
+            <p className="text-sm text-zinc-500 mt-1">Where users come from</p>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <ChartCard
+              title="Referrer Domains"
+              subtitle="Top traffic sources by session count"
+            >
+              {advanced.trafficSources.length > 0 ? (
+                <DataTable
+                  data={advanced.trafficSources as { source: string; sessions: number }[]}
+                  columns={[
+                    { key: 'source', header: 'Source' },
+                    { key: 'sessions', header: 'Sessions' },
+                  ]}
+                />
+              ) : (
+                <div className="flex items-center justify-center h-64 text-zinc-500 font-mono text-sm">
+                  No referrer data available
+                </div>
+              )}
+            </ChartCard>
+            <ChartCard
+              title="UTM Campaigns"
+              subtitle="Campaign performance by sessions"
+            >
+              {advanced.utmSources.length > 0 ? (
+                <DataTable
+                  data={advanced.utmSources as { campaign: string; sessions: number }[]}
+                  columns={[
+                    { key: 'campaign', header: 'Campaign' },
+                    { key: 'sessions', header: 'Sessions' },
+                  ]}
+                />
+              ) : (
+                <div className="flex items-center justify-center h-64 text-zinc-500 font-mono text-sm">
+                  No UTM campaign data available
+                </div>
+              )}
+            </ChartCard>
+          </div>
+        </>
+      )}
+
+      {/* Traffic sources loading skeleton */}
+      {!advanced && advancedLoading && (
+        <>
+          <div className="mt-12 mb-8 border-t border-zinc-800 pt-8">
+            <h2 className="text-xl font-bold text-foreground tracking-tight">Traffic Sources</h2>
+            <p className="text-sm text-zinc-500 mt-1">Where users come from</p>
+          </div>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <SkeletonChartCard />
+            <SkeletonChartCard />
+          </div>
+        </>
+      )}
     </div>
   );
 }

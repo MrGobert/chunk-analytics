@@ -5,6 +5,50 @@ import { formatDate } from '@/lib/utils';
 const CACHE_REVALIDATE_SECONDS = 300; // 5 minutes
 
 // ============================================
+// Event Name Normalization
+// ============================================
+
+/**
+ * Maps duplicate/legacy event names to canonical names.
+ * Mixpanel has accumulated multiple naming conventions over time —
+ * this ensures consistent counting regardless of which name was used.
+ */
+const EVENT_NAME_MAP: Record<string, string> = {
+  // Search variants → canonical
+  'Search Performed': 'Search_Performed',
+  'Search': 'Search_Performed',
+  // Purchase variants → canonical
+  'Purchase Completed': 'Purchase_Completed',
+  // Signup variants → canonical
+  'SignUp': 'Signup_Completed',
+  'Account Created': 'Signup_Completed',
+};
+
+/**
+ * Normalize a single event name to its canonical form.
+ */
+export function normalizeEventName(eventName: string): string {
+  return EVENT_NAME_MAP[eventName] || eventName;
+}
+
+/**
+ * Count events by canonical name, automatically normalizing duplicates.
+ */
+export function countEventsNormalized(events: MixpanelEvent[], canonicalName: string): number {
+  return events.filter((e) => normalizeEventName(e.event) === canonicalName).length;
+}
+
+/**
+ * Filter events by canonical name(s), automatically normalizing.
+ */
+export function filterEventsByTypeNormalized(
+  events: MixpanelEvent[],
+  canonicalNames: string[]
+): MixpanelEvent[] {
+  return events.filter((e) => canonicalNames.includes(normalizeEventName(e.event)));
+}
+
+// ============================================
 // User Type Detection
 // ============================================
 

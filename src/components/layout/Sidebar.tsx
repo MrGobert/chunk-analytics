@@ -7,51 +7,33 @@ import { useState, useEffect } from 'react';
 import { useAnalyticsPrefetch } from '@/hooks/useAnalytics';
 import {
   Home,
-  Filter,
   BarChart2,
-  Users,
-  Search,
-  Bell,
   Mail,
   LayoutGrid,
-  FileText,
-  StickyNote,
-  FolderOpen,
-  Share2,
   Rocket,
   Menu,
   X,
   Eye,
   DollarSign,
-  RefreshCw,
   AlertTriangle,
   KanbanSquare,
   Tags,
   Briefcase,
   Bug,
-  Sparkles,
+  Activity,
   type LucideIcon,
 } from 'lucide-react';
 
-// Map sidebar href to the API endpoint each page fetches
+// Map sidebar href to the API endpoint each page fetches (for prefetching)
 const ROUTE_TO_ENDPOINT: Record<string, string> = {
-  '/': '/api/metrics/overview',
+  '/': '/api/metrics/pulse',
   '/revenue': '/api/rc/revenue-summary',
-  '/funnel': '/api/rc/subscriber-funnel',
   '/churn': '/api/rc/churn-intelligence',
   '/acquisition': '/api/metrics/acquisition',
-  '/insights': '/api/metrics/advanced',
-  '/users': '/api/metrics/users',
-  '/searches': '/api/metrics/searches',
-  '/push': '/api/metrics/push',
-  '/emails': '/api/metrics/emails',
-  '/features': '/api/metrics/features',
-  '/research': '/api/metrics/research',
-  '/notes': '/api/metrics/notes',
-  '/collections': '/api/metrics/collections',
-  '/artifacts': '/api/metrics/artifacts',
-  '/sharing': '/api/metrics/sharing',
-  '/sentry': '/api/sentry/stats',
+  '/engagement': '/api/metrics/users',
+  '/features': '/api/metrics/feature-overview',
+  '/outreach': '/api/metrics/emails',
+  '/health': '/api/sentry/stats',
 };
 
 interface NavItem {
@@ -69,32 +51,24 @@ const navSections: NavSection[] = [
   {
     title: 'COMMAND CENTER',
     items: [
-      { href: '/', label: 'Overview', icon: Home },
+      { href: '/', label: 'Pulse', icon: Home },
       { href: '/revenue', label: 'Revenue', icon: DollarSign },
-      { href: '/funnel', label: 'Subscriber Funnel', icon: RefreshCw },
-      { href: '/churn', label: 'Churn Intelligence', icon: AlertTriangle },
+      { href: '/churn', label: 'Churn & Retention', icon: AlertTriangle },
     ],
   },
   {
-    title: 'PRODUCT ANALYTICS',
+    title: 'PRODUCT',
     items: [
-      { href: '/searches', label: 'Searches', icon: Search },
-      { href: '/research', label: 'Research', icon: FileText },
-      { href: '/notes', label: 'Notes', icon: StickyNote },
-      { href: '/collections', label: 'Collections', icon: FolderOpen },
-      { href: '/artifacts', label: 'Artifacts', icon: Sparkles },
-      { href: '/features', label: 'Features', icon: LayoutGrid },
       { href: '/acquisition', label: 'Acquisition', icon: Rocket },
+      { href: '/engagement', label: 'Engagement', icon: Activity },
+      { href: '/features', label: 'Features', icon: LayoutGrid },
     ],
   },
   {
     title: 'OPERATIONS',
     items: [
-      { href: '/emails', label: 'Email Campaigns', icon: Mail },
-      { href: '/users', label: 'Users', icon: Users },
-      { href: '/push', label: 'Push Notifications', icon: Bell },
-      { href: '/sharing', label: 'Sharing', icon: Share2 },
-      { href: '/sentry', label: 'Error Tracking', icon: Bug },
+      { href: '/outreach', label: 'Outreach', icon: Mail },
+      { href: '/health', label: 'System Health', icon: Bug },
     ],
   },
 ];
@@ -149,7 +123,7 @@ export default function Sidebar() {
         const endpoint = ROUTE_TO_ENDPOINT[route];
         if (!endpoint) continue;
 
-        if (route === '/emails') {
+        if (route === '/outreach') {
           prefetch(endpoint, { days: '30' });
         } else if (endpoint.startsWith('/api/rc/')) {
           prefetch(endpoint, { days: '30' });

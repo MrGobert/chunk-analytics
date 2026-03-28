@@ -12,81 +12,26 @@ import PieChart from '@/components/charts/PieChart';
 import DataTable from '@/components/charts/DataTable';
 import { SkeletonPage } from '@/components/ui/Skeleton';
 import { useAnalytics } from '@/hooks/useAnalytics';
-
-interface AtRiskUser {
-  uid: string;
-  email: string;
-  lastActive: string;
-  daysSinceActive: number | null;
-  healthScore: number;
-  subscriptionAge: number | null;
-  platform: string;
-  subscriptionType: 'active' | 'trial';
-  trialEndsIn?: number | null;
-}
-
-interface EngagedUser {
-  uid: string;
-  email: string;
-  lastActive: string;
-  daysSinceActive: number;
-  healthScore: number;
-  subscriptionAge: number | null;
-  platform: string;
-  usage: { searches: number; documents: number; notes: number; collections: number };
-  factors: { recency: number; frequency: number; featureDepth: number; tenure: number; emailEngagement: number };
-}
-
-interface ChurnedUser {
-  uid: string;
-  email: string;
-  churnDate: string;
-  tenure: number;
-  reason: string;
-  emailsReceived: string[];
-  emailsOpened: string[];
-  platform: string;
-  usage: { searches: number; notes: number };
-}
-
-interface WinbackStats {
-  sent: number;
-  recovered: number;
-  rate: number;
-}
-
-interface ChurnIntelligence {
-  churnRate: number;
-  churnRateTrend: { date: string; rate: number }[];
-  atRiskUsers: AtRiskUser[];
-  churnedUsers: ChurnedUser[];
-  winbackEffectiveness: Record<string, WinbackStats>;
-  churnReasons: Record<string, number>;
-  avgTenureBeforeChurn: number;
-  atRiskCount: number;
-  trialAtRiskCount: number;
-  winbackRate: number;
-  topEngagedUsers: EngagedUser[];
-  engagedCount: number;
-  lastUpdated: string;
-  note?: string;
-  dataUnavailable?: boolean;
-}
+import { getDaysFromRange } from '@/lib/utils';
+import type { ChurnIntelligence, AdvancedMetrics } from '@/types/mixpanel';
 
 export default function ChurnIntelligencePage() {
   const { dateRange, setDateRange } = useDashboardFilters();
   const containerRef = useRef<HTMLDivElement>(null);
+  const hasAnimated = useRef(false);
   const [churnSearch, setChurnSearch] = useState('');
   const [atRiskSort, setAtRiskSort] = useState<'healthScore' | 'daysSinceActive' | 'subscriptionAge'>('healthScore');
   const [atRiskSortDir, setAtRiskSortDir] = useState<'asc' | 'desc'>('asc');
   const [engagedSort, setEngagedSort] = useState<'healthScore' | 'daysSinceActive' | 'searches'>('healthScore');
   const [engagedSortDir, setEngagedSortDir] = useState<'asc' | 'desc'>('desc');
 
-  const daysMap: Record<string, string> = { '7d': '7', '30d': '30', '90d': '90' };
-  const days = daysMap[dateRange] || '90';
+  const days = getDaysFromRange(dateRange, '90');
 
   const { data: churn, isLoading, isRefreshing, error, lastUpdated } =
     useAnalytics<ChurnIntelligence>('/api/rc/churn-intelligence', { days });
+
+  const { data: advanced } =
+    useAnalytics<AdvancedMetrics>('/api/metrics/advanced', { range: dateRange, platform: 'all', userType: 'all' });
 
   // Churn rate trend for line chart
   const churnTrendData = useMemo(() =>
@@ -200,7 +145,8 @@ export default function ChurnIntelligencePage() {
   );
 
   useEffect(() => {
-    if (!isLoading && churn) {
+    if (!isLoading && churn && !hasAnimated.current) {
+      hasAnimated.current = true;
       const ctx = gsap.context(() => {
         gsap.fromTo('.card-animate',
           { y: 30, opacity: 0 },
@@ -254,8 +200,8 @@ export default function ChurnIntelligencePage() {
   return (
     <div ref={containerRef} className="animate-in fade-in duration-300">
       <PageHeader
-        title="Churn Intelligence"
-        subtitle="Monitor churn, identify at-risk users, and track winback campaigns"
+        title="Churn & Retention"
+        subtitle="Monitor churn, retention, and at-risk users"
         dateRange={dateRange}
         onDateRangeChange={setDateRange}
         lastUpdated={lastUpdated}
@@ -352,6 +298,20 @@ export default function ChurnIntelligencePage() {
           }
         />
       </div>
+
+      {/* Retention & Stickiness */}
+      {advanced && (
+        <div className="mt-2 mb-8">
+          <h2 className="text-xl font-bold text-foreground tracking-tight mb-1">Retention & Stickiness</h2>
+          <p className="text-sm text-zinc-500 mb-6">How well users stick around after their first session</p>
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+            <StatCard title="DAU/MAU Ratio" value={advanced?.dauMauRatio ?? 0} format="ratio" subtitle="Stickiness" />
+            <StatCard title="Day 1 Retention" value={(advanced?.retention?.day1 ?? 0) / 100} format="percentage" subtitle="Return next day" />
+            <StatCard title="Day 7 Retention" value={(advanced?.retention?.day7 ?? 0) / 100} format="percentage" subtitle="Return within a week" />
+            <StatCard title="Day 30 Retention" value={(advanced?.retention?.day30 ?? 0) / 100} format="percentage" subtitle="Return within a month" />
+          </div>
+        </div>
+      )}
 
       {/* Churn Rate Trend */}
       <div className="grid grid-cols-1 gap-6 mb-8">

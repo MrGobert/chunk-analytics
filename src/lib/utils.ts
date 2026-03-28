@@ -34,6 +34,14 @@ export function getDateRange(range: string): { from: string; to: string } {
   }
 }
 
+/**
+ * Convert a date range string (e.g., '7d') to the days parameter used by RC API endpoints.
+ */
+export function getDaysFromRange(dateRange: string, fallback = '30'): string {
+  const map: Record<string, string> = { '1d': '1', '7d': '7', '30d': '30', '90d': '90', '365d': '365' };
+  return map[dateRange] || fallback;
+}
+
 export function formatNumber(num: number): string {
   if (num >= 1000000) {
     return (num / 1000000).toFixed(1) + 'M';

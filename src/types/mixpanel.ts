@@ -317,6 +317,118 @@ export interface ArtifactsMetrics {
   lastUpdated: string;
 }
 
+// ============================================
+// New consolidated dashboard types
+// ============================================
+
+export interface RevenueSummary {
+  mrr: number;
+  mrrChange: number;
+  arr: number;
+  todayRevenue: number;
+  totalSubscribers: number;
+  trialUsers: number;
+  churnRate: number;
+  byPlatform: Record<string, number>;
+  byProduct: Record<string, number>;
+  mrrTrend: { date: string; mrr: number }[];
+  newSubscribers: number;
+  churned: number;
+  netNew: number;
+  lastUpdated: string;
+  note?: string;
+}
+
+export interface SubscriberFunnel {
+  funnel: { stage: string; count: number; rate: number }[];
+  trialConversionRate: number;
+  medianDaysToConvert: number;
+  conversionByPlatform: Record<string, number>;
+  weekOverWeek: { trialStarts: number; conversions: number };
+  lastUpdated: string;
+  note?: string;
+}
+
+export interface ChurnIntelligence {
+  churnRate: number;
+  churnRateTrend: { date: string; rate: number }[];
+  atRiskUsers: {
+    uid: string;
+    email: string;
+    lastActive: string;
+    daysSinceActive: number | null;
+    healthScore: number;
+    subscriptionAge: number | null;
+    platform: string;
+    subscriptionType: 'active' | 'trial';
+    trialEndsIn?: number | null;
+  }[];
+  churnedUsers: {
+    uid: string;
+    email: string;
+    churnDate: string;
+    tenure: number;
+    reason: string;
+    emailsReceived: string[];
+    emailsOpened: string[];
+    platform: string;
+    usage: { searches: number; notes: number };
+  }[];
+  topEngagedUsers: {
+    uid: string;
+    email: string;
+    lastActive: string;
+    daysSinceActive: number;
+    healthScore: number;
+    subscriptionAge: number | null;
+    platform: string;
+    usage: { searches: number; documents: number; notes: number; collections: number };
+    factors: { recency: number; frequency: number; featureDepth: number; tenure: number; emailEngagement: number };
+  }[];
+  winbackEffectiveness: Record<string, { sent: number; recovered: number; rate: number }>;
+  churnReasons: Record<string, number>;
+  avgTenureBeforeChurn: number;
+  atRiskCount: number;
+  trialAtRiskCount: number;
+  winbackRate: number;
+  engagedCount: number;
+  lastUpdated: string;
+  note?: string;
+  dataUnavailable?: boolean;
+}
+
+export interface AdvancedMetrics {
+  dauMauRatio: number;
+  avgDAU: number;
+  mau: number;
+  avgSessionDuration: number;
+  searchesPerUser: number;
+  retention: { day1: number; day7: number; day30: number; totalNewUsers?: number };
+  userBreakdown: { total?: number; paid: number; free: number; guest: number; authenticated?: number; paidPercentage?: number; conversionRate?: number };
+  featureAdoption: { feature: string; users?: number; rate?: number; adoptionRate?: number }[];
+  trafficSources: { source: string; sessions?: number; count?: number }[];
+  utmSources: { source?: string; campaign?: string; sessions?: number; count?: number }[];
+  lastUpdated: string;
+}
+
+export interface PulseMetrics {
+  todayDAU: number;
+  yesterdayDAU: number;
+  todaySearches: number;
+  dauTrend7d: { date: string; users: number }[];
+  lastUpdated: string;
+}
+
+export interface FeatureOverviewMetrics {
+  features: {
+    name: string;
+    totalEvents: number;
+    uniqueUsers: number;
+    trend: number | null;
+  }[];
+  lastUpdated: string;
+}
+
 export interface MarketingMetrics {
   totalCTAClicks: number;
   tryForFreeClicks: number;

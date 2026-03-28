@@ -1,114 +1,66 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
+import Link from 'next/link';
 import { useDashboardFilters } from '@/hooks/useDashboardFilters';
 import gsap from 'gsap';
 import PageHeader from '@/components/layout/PageHeader';
 import StatCard from '@/components/cards/StatCard';
 import ChartCard from '@/components/cards/ChartCard';
 import AreaChart from '@/components/charts/AreaChart';
-import FunnelChart from '@/components/charts/FunnelChart';
-import BarChart from '@/components/charts/BarChart';
 import { SkeletonStatCard, SkeletonChartCard } from '@/components/ui/Skeleton';
 import { useAnalytics } from '@/hooks/useAnalytics';
+import { AlertTriangle, Bug, ArrowRight } from 'lucide-react';
+import { RevenueSummary, ChurnIntelligence, PulseMetrics } from '@/types/mixpanel';
+import { getDaysFromRange } from '@/lib/utils';
 
-interface RevenueSummary {
-  mrr: number;
-  mrrChange: number;
-  arr: number;
-  todayRevenue: number;
-  totalSubscribers: number;
-  trialUsers: number;
-  churnRate: number;
-  byPlatform: Record<string, number>;
-  byProduct: Record<string, number>;
-  mrrTrend: { date: string; mrr: number }[];
-  newSubscribers: number;
-  churned: number;
-  netNew: number;
-  lastUpdated: string;
-  note?: string;
-}
+// ─── Page ───────────────────────────────────────────────────────────────────
 
-interface SubscriberFunnel {
-  funnel: { stage: string; count: number; rate: number }[];
-  trialConversionRate: number;
-  medianDaysToConvert: number;
-  conversionByPlatform: Record<string, number>;
-  weekOverWeek: { trialStarts: number; conversions: number };
-  lastUpdated: string;
-  note?: string;
-}
-
-interface EmailStats {
-  totals: {
-    sent: number;
-    converted: number;
-    overallConversionRate: number;
-  };
-  by_email_type: Record<string, { sent: number; converted: number; conversionRate: number }>;
-  lastUpdated: string;
-  note?: string;
-}
-
-export default function OverviewPage() {
+export default function PulsePage() {
   const { dateRange, setDateRange } = useDashboardFilters();
   const containerRef = useRef<HTMLDivElement>(null);
 
-  const daysMap: Record<string, string> = { '7d': '7', '30d': '30', '90d': '90' };
-  const days = daysMap[dateRange] || '30';
+  const days = getDaysFromRange(dateRange);
 
+  // Revenue data (MRR, subscribers, churn, etc.)
   const { data: revenue, isLoading: revenueLoading, isRefreshing: revenueRefreshing, lastUpdated: revenueUpdated, error: revenueError } =
     useAnalytics<RevenueSummary>('/api/rc/revenue-summary', { days });
 
-  const { data: funnel, isLoading: funnelLoading, error: funnelError } =
-    useAnalytics<SubscriberFunnel>('/api/rc/subscriber-funnel', { days });
+  // Churn intelligence (at-risk count)
+  const { data: churn, isLoading: churnLoading } =
+    useAnalytics<ChurnIntelligence>('/api/rc/churn-intelligence', { days });
 
-  const { data: emailStats, isLoading: emailsLoading, error: emailsError } =
-    useAnalytics<EmailStats>('/api/metrics/emails', { days });
+  // Pulse metrics (DAU, searches, DAU trend)
+  const { data: pulse, isLoading: pulseLoading } =
+    useAnalytics<PulseMetrics>('/api/metrics/pulse', {});
 
+  // GSAP entrance animation (play once only)
+  const hasAnimated = useRef(false);
   useEffect(() => {
-    if (!revenueLoading && revenue) {
-      const ctx = gsap.context(() => {
-        gsap.fromTo('.card-animate',
-          { y: 30, opacity: 0 },
-          { y: 0, opacity: 1, duration: 0.8, stagger: 0.15, ease: 'power3.out' }
-        );
-      }, containerRef);
-      return () => ctx.revert();
-    }
+    if (hasAnimated.current || revenueLoading || !revenue) return;
+    hasAnimated.current = true;
+    const ctx = gsap.context(() => {
+      gsap.fromTo('.card-animate',
+        { y: 30, opacity: 0 },
+        { y: 0, opacity: 1, duration: 0.8, stagger: 0.15, ease: 'power3.out' }
+      );
+    }, containerRef);
+    return () => ctx.revert();
   }, [revenueLoading, revenue]);
 
-  // Format MRR trend for chart
-  const mrrChartData = (revenue?.mrrTrend || []).map((d) => ({
+  // Chart data
+  const mrrChartData = useMemo(() => (revenue?.mrrTrend || []).map((d) => ({ date: d.date, mrr: d.mrr })), [revenue?.mrrTrend]);
+
+  const dauChartData = (pulse?.dauTrend7d || []).map((d) => ({
     date: d.date,
-    mrr: d.mrr,
+    users: d.users,
   }));
-
-  // Build funnel data for the mini funnel
-  const funnelData = (funnel?.funnel || []).map((step, index, arr) => ({
-    name: step.stage,
-    count: step.count,
-    percentage: step.rate,
-    dropoff: index > 0 ? arr[index - 1].rate - step.rate : 0,
-  }));
-
-  // Build email campaign summary data
-  const emailCampaignData = Object.entries(emailStats?.by_email_type || {})
-    .map(([type, data]) => ({
-      type: type.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase()),
-      sent: data.sent || 0,
-      converted: data.converted || 0,
-    }))
-    .filter((d) => d.sent > 0)
-    .sort((a, b) => b.sent - a.sent)
-    .slice(0, 6);
 
   return (
     <div ref={containerRef} className="animate-in fade-in duration-300">
       <PageHeader
-        title="Command Center"
-        subtitle="Chunk AI — Key business metrics at a glance"
+        title="Pulse"
+        subtitle="Daily briefing — Chunk AI"
         dateRange={dateRange}
         onDateRangeChange={setDateRange}
         lastUpdated={revenueUpdated}
@@ -127,10 +79,10 @@ export default function OverviewPage() {
         </div>
       )}
 
-      {/* Hero Row — Key Business Metrics */}
+      {/* ── Stat Cards (6-up) ─────────────────────────────────────────────── */}
       {revenueLoading ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 mb-8">
-          {Array.from({ length: 5 }).map((_, i) => <SkeletonStatCard key={i} />)}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-6 mb-8">
+          {Array.from({ length: 6 }).map((_, i) => <SkeletonStatCard key={i} />)}
         </div>
       ) : revenueError ? (
         <div className="text-center py-10 mb-8">
@@ -138,7 +90,7 @@ export default function OverviewPage() {
           <p className="text-zinc-500 text-xs">Make sure CEREBRAL_AUTH_TOKEN is configured.</p>
         </div>
       ) : revenue ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-6 mb-8">
           <StatCard
             title="MRR"
             value={revenue.mrr}
@@ -188,112 +140,100 @@ export default function OverviewPage() {
               </svg>
             }
           />
+          <StatCard
+            title="At-Risk Users"
+            value={churnLoading ? '...' : (churn?.atRiskCount ?? 0)}
+            format={churnLoading ? 'text' : 'number'}
+            icon={
+              <svg className="w-5 h-5 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+            }
+          />
         </div>
       ) : null}
 
-      {/* MRR Trend Chart */}
-      {revenueLoading ? (
-        <div className="grid grid-cols-1 gap-6 mb-8">
+      {/* ── Sparkline Charts (2-up) ───────────────────────────────────────── */}
+      {revenueLoading && pulseLoading ? (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+          <SkeletonChartCard />
           <SkeletonChartCard />
         </div>
-      ) : revenue ? (
-        <div className="grid grid-cols-1 gap-6 mb-8">
-          <ChartCard title="MRR Trend" subtitle={`Monthly recurring revenue — last ${days} days`}>
-            {mrrChartData.length > 0 ? (
-              <AreaChart data={mrrChartData} xKey="date" yKey="mrr" color="#10b981" />
-            ) : (
-              <div className="flex items-center justify-center h-full text-zinc-500 font-mono text-sm">
-                No MRR trend data available yet
-              </div>
-            )}
-          </ChartCard>
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+          {/* MRR Trend */}
+          {revenueLoading ? (
+            <SkeletonChartCard />
+          ) : (
+            <ChartCard title="MRR Trend" subtitle={`Last ${days} days`}>
+              {mrrChartData.length > 0 ? (
+                <AreaChart data={mrrChartData} xKey="date" yKey="mrr" color="#10b981" />
+              ) : (
+                <div className="flex items-center justify-center h-full text-zinc-500 font-mono text-sm">
+                  No MRR trend data available yet
+                </div>
+              )}
+            </ChartCard>
+          )}
+
+          {/* DAU Trend */}
+          {pulseLoading ? (
+            <SkeletonChartCard />
+          ) : (
+            <ChartCard
+              title="Daily Active Users"
+              subtitle={`Last 7 days${pulse ? ` \u00B7 Today: ${pulse.todayDAU}` : ''}`}
+            >
+              {dauChartData.length > 0 ? (
+                <AreaChart data={dauChartData} xKey="date" yKey="users" color="#8b5cf6" />
+              ) : (
+                <div className="flex items-center justify-center h-full text-zinc-500 font-mono text-sm">
+                  No DAU data available yet
+                </div>
+              )}
+            </ChartCard>
+          )}
         </div>
-      ) : null}
+      )}
 
-      {/* Two-column: Funnel Mini + Email Campaign Performance */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-        {funnelLoading ? (
-          <SkeletonChartCard />
-        ) : funnelError ? (
-          <div className="rounded-xl bg-primary border border-zinc-800 p-6 flex items-center justify-center text-red-400 text-sm">
-            {funnelError}
-          </div>
-        ) : (
-          <ChartCard title="Subscriber Funnel" subtitle="Signup → Trial → Paid → Active">
-            {funnelData.length > 0 ? (
-              <FunnelChart data={funnelData} />
-            ) : (
-              <div className="flex items-center justify-center h-full text-zinc-500 font-mono text-sm">
-                No funnel data available yet
+      {/* ── Needs Attention ───────────────────────────────────────────────── */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <Link href="/churn" className="group">
+          <div className="card-animate bg-primary/60 backdrop-blur-xl border border-white/5 rounded-[1.5rem] p-5 transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_8px_30px_rgba(0,0,0,0.4)] hover:border-white/10">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/20">
+                  <AlertTriangle className="w-5 h-5 text-amber-400" />
+                </div>
+                <div>
+                  <span className="text-2xl font-bold font-mono text-foreground">
+                    {churnLoading ? '...' : (churn?.atRiskCount ?? 0)}
+                  </span>
+                  <p className="text-sm font-medium text-zinc-400">At-risk users</p>
+                </div>
               </div>
-            )}
-          </ChartCard>
-        )}
+              <ArrowRight className="w-5 h-5 text-zinc-600 group-hover:text-zinc-400 transition-colors" />
+            </div>
+          </div>
+        </Link>
 
-        {emailsLoading ? (
-          <SkeletonChartCard />
-        ) : emailsError ? (
-          <div className="rounded-xl bg-primary border border-zinc-800 p-6 flex items-center justify-center text-red-400 text-sm">
-            {emailsError}
-          </div>
-        ) : (
-          <ChartCard title="Email Campaign Performance" subtitle="Send volume by campaign type">
-            {emailCampaignData.length > 0 ? (
-              <BarChart
-                data={emailCampaignData}
-                xKey="type"
-                yKey="sent"
-                horizontal
-                color="#10b981"
-              />
-            ) : (
-              <div className="flex items-center justify-center h-full text-zinc-500 font-mono text-sm">
-                No email campaign data available yet
+        <Link href="/health" className="group">
+          <div className="card-animate bg-primary/60 backdrop-blur-xl border border-white/5 rounded-[1.5rem] p-5 transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_8px_30px_rgba(0,0,0,0.4)] hover:border-white/10">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-red-500/10 border border-red-500/20">
+                  <Bug className="w-5 h-5 text-red-400" />
+                </div>
+                <div>
+                  <span className="text-2xl font-bold font-mono text-foreground">--</span>
+                  <p className="text-sm font-medium text-zinc-400">Sentry errors (24h)</p>
+                </div>
               </div>
-            )}
-          </ChartCard>
-        )}
+              <ArrowRight className="w-5 h-5 text-zinc-600 group-hover:text-zinc-400 transition-colors" />
+            </div>
+          </div>
+        </Link>
       </div>
-
-      {/* Quick stats row */}
-      {revenueLoading ? (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          {Array.from({ length: 3 }).map((_, i) => <SkeletonStatCard key={i} />)}
-        </div>
-      ) : revenue ? (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <StatCard
-            title="New Subscribers"
-            value={revenue.newSubscribers}
-            subtitle={`Last ${days} days`}
-            icon={
-              <svg className="w-5 h-5 text-[#34D399]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
-              </svg>
-            }
-          />
-          <StatCard
-            title="Churned"
-            value={revenue.churned}
-            subtitle={`Last ${days} days`}
-            icon={
-              <svg className="w-5 h-5 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 17h8m0 0V9m0 8l-8-8-4 4-6-6" />
-              </svg>
-            }
-          />
-          <StatCard
-            title="Net New"
-            value={revenue.netNew}
-            subtitle={`Last ${days} days`}
-            icon={
-              <svg className="w-5 h-5 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-              </svg>
-            }
-          />
-        </div>
-      ) : null}
     </div>
   );
 }

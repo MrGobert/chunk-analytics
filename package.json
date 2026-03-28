@@ -13,7 +13,7 @@
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
     "@gsap/react": "^2.1.2",
-    "@sentry/nextjs": "^10.43.0",
+    "@sentry/nextjs": "^10.46.0",
     "date-fns": "^4.1.0",
     "firebase": "^12.10.0",
     "firebase-admin": "^13.7.0",
