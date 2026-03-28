@@ -128,12 +128,21 @@ def safe_analytics(empty_response):
 # ============================================================
 
 
-def _get_tenure_date(user_data: dict) -> datetime:
-    """Get subscription tenure date, preferring subscription dates over account creation."""
+def _get_creation_date(user_data: dict) -> datetime:
+    """Get account creation date, checking common field name variants."""
     return (
-        _to_datetime(user_data.get("trialEndDate"))
-        or _to_datetime(user_data.get("renewalDate"))
-        or _to_datetime(user_data.get("createdAt"))
+        _to_datetime(user_data.get("createdAt"))
+        or _to_datetime(user_data.get("created_at"))
+        or _to_datetime(user_data.get("signupDate"))
+    )
+
+
+def _get_tenure_date(user_data: dict) -> datetime:
+    """Get subscription start date for tenure calculation (always a past date)."""
+    # Prefer creation/signup date — renewalDate is typically a future billing date
+    return (
+        _get_creation_date(user_data)
+        or _to_datetime(user_data.get("trialEndDate"))
     )
 
 
@@ -265,7 +274,7 @@ def _compute_revenue_summary(days: int) -> dict:
     new_subscribers = 0
     for doc in active_docs:
         data = doc.to_dict()
-        created = _to_datetime(data.get("createdAt"))
+        created = _get_creation_date(data)
         if created and created >= cutoff:
             new_subscribers += 1
 
@@ -294,7 +303,7 @@ def _compute_revenue_summary(days: int) -> dict:
             prior_churned += 1
     for doc in active_docs:
         data = doc.to_dict()
-        created = _to_datetime(data.get("createdAt"))
+        created = _get_creation_date(data)
         if created and prior_start <= created < cutoff:
             prior_new += 1
 
@@ -463,7 +472,7 @@ def _compute_subscriber_funnel(days: int) -> dict:
 
     for doc in all_users_in_period:
         data = doc.to_dict()
-        created = _to_datetime(data.get("createdAt"))
+        created = _get_creation_date(data)
         status = data.get("subscriptionStatus", "")
 
         if created and created >= week_ago:
@@ -536,7 +545,7 @@ def _classify_churn_reason(data: dict, now: datetime) -> str:
     # Check if this was a trial user
     trial_end = _to_datetime(data.get("trialEndDate"))
     exp_date = _to_datetime(data.get("expirationDate"))
-    created = _to_datetime(data.get("createdAt"))
+    created = _get_creation_date(data)
     is_trial_churn = (
         trial_end and exp_date
         and abs((trial_end - exp_date).total_seconds()) < 86400 * 2  # expiration ≈ trial end
@@ -585,6 +594,7 @@ def _compute_churn_intelligence(days: int) -> dict:
     now = datetime.now(timezone.utc)
     cutoff = now - timedelta(days=days)
     seven_days_ago = now - timedelta(days=7)
+    fourteen_days_ago = now - timedelta(days=14)
 
     users_ref = db.collection("users")
 
@@ -660,8 +670,8 @@ def _compute_churn_intelligence(days: int) -> dict:
             })
             if trial_expiring_soon:
                 trial_at_risk_count += 1
-        elif not is_trial and health["healthScore"] >= 60:
-            # Engaged: active paying subscribers within 7 days with strong health
+        elif not is_trial and health["healthScore"] >= 40 and last_active and last_active >= fourteen_days_ago:
+            # Engaged: active paying subscribers within 14 days with decent health
             usage = data.get("usageStats", {}) or {}
             engaged_candidates.append({
                 "uid": doc.id,
@@ -724,7 +734,7 @@ def _compute_churn_intelligence(days: int) -> dict:
     churned_users = []
     for data in churned_subset:
         uid = data["_uid"]
-        created = _to_datetime(data.get("createdAt"))
+        created = _get_creation_date(data)
         exp_date = _to_datetime(data.get("expirationDate"))
         tenure = (exp_date - created).days if (exp_date and created) else 0
 
@@ -777,7 +787,7 @@ def _compute_churn_intelligence(days: int) -> dict:
     # Average tenure before churn
     tenures = []
     for data in churned_in_period:
-        created = _to_datetime(data.get("createdAt"))
+        created = _get_creation_date(data)
         exp_date = _to_datetime(data.get("expirationDate"))
         if created and exp_date:
             tenures.append((exp_date - created).days)
@@ -877,7 +887,7 @@ def _compute_customer_health() -> dict:
         for doc in docs:
             data = doc.to_dict()
             health = _compute_health_score(data, now)
-            created = _to_datetime(data.get("createdAt"))
+            created = _get_creation_date(data)
             subscribed_days = (now - created).days if created else 0
 
             customer = {
@@ -962,7 +972,7 @@ def _get_customer_detail(uid: str) -> dict:
 
     # Infer subscription history from user doc fields
     subscription_history = []
-    created = _to_datetime(data.get("createdAt"))
+    created = _get_creation_date(data)
     if created:
         subscription_history.append({
             "event": "created",

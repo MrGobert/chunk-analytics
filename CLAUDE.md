@@ -113,10 +113,10 @@ All endpoints require auth (`Authorization` header = `REVENUECAT_WEBHOOK_AUTH` e
 #### Health Score Algorithm
 
 Weighted composite of 5 factors:
-- Recency (30%) — days since last active
-- Tenure (25%) — days since account creation
-- Usage frequency (20%) — monthly searches
-- Feature depth (15%) — number of distinct features used
+- Recency (35%) — days since last active (0 after 30 days; halves tenure when inactive)
+- Usage frequency (25%) — monthly searches (20+ = max)
+- Feature depth (20%) — number of distinct features used (4+ = max)
+- Tenure (10%) — days since account creation (maxes at ~150 days)
 - Email engagement (10%) — emails received/interacted with
 
 Score → status: ≥60 healthy, ≥30 atRisk, <30 churning.
