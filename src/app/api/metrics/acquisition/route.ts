@@ -92,15 +92,19 @@ function buildFunnel(steps: { name: string; count: number }[]) {
   });
 }
 
-/** Safe division returning 0–1 range. Returns 0 when denominator is 0. */
+/** Safe division returning 0+ range. Returns 0 when denominator is 0. */
 function safeDiv(numerator: number, denominator: number): number {
   if (denominator <= 0) return 0;
-  return Math.min(1, Math.max(0, numerator / denominator));
+  return Math.max(0, numerator / denominator);
 }
 
 // ---------- Platform-specific funnel builders ----------
 
 function buildWebFunnel(events: MixpanelEvent[]) {
+  // All unique web users (any event = visited the site)
+  const allWebUsers = new Set(
+    events.map((e) => e.properties.distinct_id),
+  );
   const marketingUsers = uniqueUsersFor(events, [
     'Marketing_Session_Started',
   ]);
@@ -124,7 +128,8 @@ function buildWebFunnel(events: MixpanelEvent[]) {
   const subscriberUsers = uniqueUsersFor(events, PURCHASE_EVENTS);
 
   const steps = [
-    { name: 'Marketing Visit', count: marketingUsers.size },
+    { name: 'All Web Users', count: allWebUsers.size },
+    { name: 'Marketing Page', count: marketingUsers.size },
     { name: 'CTA Clicked', count: ctaUsers.size },
     { name: 'Guest Trial', count: guestUsers.size },
     { name: 'Signed Up', count: signupUsers.size },
@@ -137,8 +142,8 @@ function buildWebFunnel(events: MixpanelEvent[]) {
     funnel: buildFunnel(steps),
     statCards: [
       {
-        label: 'Marketing → CTA',
-        value: safeDiv(ctaUsers.size, marketingUsers.size),
+        label: 'CTA → Guest',
+        value: safeDiv(guestUsers.size, ctaUsers.size),
       },
       {
         label: 'Guest → Signup',
@@ -381,6 +386,10 @@ export async function GET(request: NextRequest) {
 
       dailyData = buildDailyData(events, days, [
         {
+          key: 'allWeb',
+          match: () => true,
+        },
+        {
           key: 'marketing',
           match: (e) => e.event === 'Marketing_Session_Started',
         },
@@ -415,7 +424,8 @@ export async function GET(request: NextRequest) {
         },
       ]);
       dailyLines = [
-        { key: 'marketing', color: '#f59e0b', name: 'Marketing Visit' },
+        { key: 'allWeb', color: '#a3a3a3', name: 'All Web Users' },
+        { key: 'marketing', color: '#f59e0b', name: 'Marketing Page' },
         { key: 'cta', color: '#ec4899', name: 'CTA Clicked' },
         { key: 'guest', color: '#8b5cf6', name: 'Guest Trial' },
         { key: 'signup', color: '#3b82f6', name: 'Signed Up' },
