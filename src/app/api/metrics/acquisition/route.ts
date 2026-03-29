@@ -142,12 +142,12 @@ function buildWebFunnel(events: MixpanelEvent[]) {
     funnel: buildFunnel(steps),
     statCards: [
       {
-        label: 'CTA → Guest',
-        value: safeDiv(guestUsers.size, ctaUsers.size),
+        label: 'Visitor → Signup',
+        value: safeDiv(signupUsers.size, allWebUsers.size),
       },
       {
-        label: 'Guest → Signup',
-        value: safeDiv(signupUsers.size, guestUsers.size),
+        label: 'Signup → Onboarded',
+        value: safeDiv(onboardingCompletedUsers.size, signupUsers.size),
       },
       {
         label: 'Onboarding Completion',
