@@ -37,11 +37,22 @@ export default function PieChart({
   innerRadius = 60,
   outerRadius = 100,
 }: PieChartProps) {
+  // Filter out zero-value entries to prevent Recharts rendering issues
+  const filteredData = data.filter((d) => d.value > 0);
+
+  if (filteredData.length === 0) {
+    return (
+      <div className="flex items-center justify-center h-full text-zinc-500 font-mono text-sm">
+        No data available
+      </div>
+    );
+  }
+
   return (
     <ResponsiveContainer width="100%" height="100%">
       <RechartsPieChart>
         <Pie
-          data={data}
+          data={filteredData}
           cx="50%"
           cy="50%"
           innerRadius={innerRadius}
@@ -50,7 +61,7 @@ export default function PieChart({
           dataKey="value"
           nameKey="name"
         >
-          {data.map((_, index) => (
+          {filteredData.map((_, index) => (
             <Cell key={`cell-${index}`} fill={colors[index % colors.length]} />
           ))}
         </Pie>
