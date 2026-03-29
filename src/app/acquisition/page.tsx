@@ -295,6 +295,22 @@ export default function AcquisitionPage() {
               )}
             </ChartCard>
           </div>
+
+          {/* Step Completion Funnel */}
+          <div className="grid grid-cols-1 gap-6 mt-6">
+            <ChartCard
+              title="Step-by-Step Progression"
+              subtitle="How users progress through each onboarding step"
+            >
+              {metrics.webOnboarding.stepCompletionFunnel.some((s) => s.count > 0) ? (
+                <FunnelChart data={metrics.webOnboarding.stepCompletionFunnel} />
+              ) : (
+                <div className="flex items-center justify-center h-64 text-zinc-500 font-mono text-sm">
+                  No step completion data yet
+                </div>
+              )}
+            </ChartCard>
+          </div>
         </>
       )}
 

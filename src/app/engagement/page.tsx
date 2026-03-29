@@ -9,9 +9,10 @@ import ChartCard from '@/components/cards/ChartCard';
 import LineChart from '@/components/charts/LineChart';
 import BarChart from '@/components/charts/BarChart';
 import PieChart from '@/components/charts/PieChart';
-import { SkeletonPage } from '@/components/ui/Skeleton';
+import DataTable from '@/components/charts/DataTable';
+import { SkeletonPage, SkeletonChartCard } from '@/components/ui/Skeleton';
 import { useAnalytics } from '@/hooks/useAnalytics';
-import { UserMetrics, AdvancedMetrics } from '@/types/mixpanel';
+import { UserMetrics, AdvancedMetrics, HelpCenterMetrics } from '@/types/mixpanel';
 
 // Format session duration as Xm Ys
 function formatDuration(duration: number) {
@@ -29,6 +30,9 @@ export default function EngagementPage() {
 
   const { data: advancedMetrics, isLoading: isAdvancedLoading, isRefreshing: isAdvancedRefreshing, lastUpdated: advancedLastUpdated } =
     useAnalytics<AdvancedMetrics>('/api/metrics/advanced', { range: dateRange, platform, userType });
+
+  const { data: helpMetrics, isLoading: isHelpLoading } =
+    useAnalytics<HelpCenterMetrics>('/api/metrics/help-center', { range: dateRange, platform, userType });
 
   const isLoading = isUsersLoading || isAdvancedLoading;
   const isRefreshing = isUsersRefreshing || isAdvancedRefreshing;
@@ -164,6 +168,123 @@ export default function EngagementPage() {
           />
         </ChartCard>
       </div>
+
+      {/* ─── Help Center ──────────────────────────────────────────────────── */}
+      {(helpMetrics || isHelpLoading) && (
+        <>
+          <div className="mt-12 mb-8 border-t border-zinc-800 pt-8">
+            <h2 className="text-xl font-bold text-foreground tracking-tight">Help Center</h2>
+            <p className="text-sm text-zinc-500 mt-1">Which features and FAQs users seek help with most</p>
+          </div>
+
+          {helpMetrics ? (
+            <>
+              {/* Help Center Stat Cards */}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+                <StatCard
+                  title="Help Page Views"
+                  value={helpMetrics.totalViews}
+                  trend={helpMetrics.viewsTrend}
+                  format="number"
+                />
+                <StatCard
+                  title="Unique Help Users"
+                  value={helpMetrics.uniqueUsers}
+                  trend={helpMetrics.uniqueUsersTrend}
+                  format="number"
+                />
+                <StatCard
+                  title="FAQ Opens"
+                  value={helpMetrics.faqOpens}
+                  trend={helpMetrics.faqOpensTrend}
+                  format="number"
+                />
+                <StatCard
+                  title="CTA Clicks"
+                  value={helpMetrics.ctaClicks}
+                  trend={helpMetrics.ctaClicksTrend}
+                  format="number"
+                />
+              </div>
+
+              {/* Help Pages by Views + FAQ Categories — 2-col */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+                <ChartCard title="Help Pages by Views" subtitle="Most visited help pages">
+                  {helpMetrics.pageViewDistribution.length > 0 ? (
+                    <BarChart
+                      data={helpMetrics.pageViewDistribution}
+                      xKey="page"
+                      yKey="count"
+                      horizontal
+                    />
+                  ) : (
+                    <div className="flex items-center justify-center h-64 text-zinc-500 font-mono text-sm">
+                      No help page view data yet
+                    </div>
+                  )}
+                </ChartCard>
+                <ChartCard title="FAQ Categories" subtitle="Which help categories get the most interaction">
+                  {helpMetrics.faqCategoryDistribution.length > 0 ? (
+                    <BarChart
+                      data={helpMetrics.faqCategoryDistribution}
+                      xKey="category"
+                      yKey="count"
+                      horizontal
+                    />
+                  ) : (
+                    <div className="flex items-center justify-center h-64 text-zinc-500 font-mono text-sm">
+                      No FAQ data yet
+                    </div>
+                  )}
+                </ChartCard>
+              </div>
+
+              {/* Top FAQ Questions + Daily Activity — 2-col */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <ChartCard title="Top FAQ Questions" subtitle="Most opened FAQ entries">
+                  {helpMetrics.topFaqQuestions.length > 0 ? (
+                    <DataTable
+                      data={helpMetrics.topFaqQuestions}
+                      columns={[
+                        { key: 'question', header: 'Question' },
+                        { key: 'category', header: 'Category' },
+                        { key: 'count', header: 'Opens' },
+                      ]}
+                    />
+                  ) : (
+                    <div className="flex items-center justify-center h-64 text-zinc-500 font-mono text-sm">
+                      No FAQ question data yet
+                    </div>
+                  )}
+                </ChartCard>
+                <ChartCard title="Daily Help Center Activity" subtitle="Views, FAQ opens, and CTA clicks per day">
+                  {helpMetrics.dailyData.length > 0 ? (
+                    <LineChart
+                      data={helpMetrics.dailyData}
+                      xKey="date"
+                      lines={[
+                        { key: 'views', color: '#3b82f6', name: 'Page Views' },
+                        { key: 'faqOpens', color: '#f59e0b', name: 'FAQ Opens' },
+                        { key: 'ctaClicks', color: '#10b981', name: 'CTA Clicks' },
+                      ]}
+                      showLegend
+                    />
+                  ) : (
+                    <div className="flex items-center justify-center h-64 text-zinc-500 font-mono text-sm">
+                      No daily data available
+                    </div>
+                  )}
+                </ChartCard>
+              </div>
+            </>
+          ) : (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <SkeletonChartCard />
+              <SkeletonChartCard />
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }

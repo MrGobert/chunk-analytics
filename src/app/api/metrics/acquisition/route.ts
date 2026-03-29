@@ -53,6 +53,7 @@ const WEB_ONBOARDING_START_EVENTS = ['First_Run_Onboarding_Started'];
 const WEB_ONBOARDING_COMPLETE_EVENTS = ['First_Run_Onboarding_Completed'];
 const WEB_ONBOARDING_SKIP_EVENTS = ['First_Run_Onboarding_Skipped'];
 const WEB_ONBOARDING_INTENT_EVENTS = ['First_Run_Onboarding_Intent_Selected'];
+const WEB_ONBOARDING_STEP_EVENTS = ['First_Run_Onboarding_Step_Completed'];
 
 function uniqueUsersFor(
   events: MixpanelEvent[],
@@ -167,6 +168,7 @@ function buildWebOnboardingMetrics(events: MixpanelEvent[]) {
   const completed = events.filter((e) => WEB_ONBOARDING_COMPLETE_EVENTS.includes(e.event));
   const skipped = events.filter((e) => WEB_ONBOARDING_SKIP_EVENTS.includes(e.event));
   const intentEvents = events.filter((e) => WEB_ONBOARDING_INTENT_EVENTS.includes(e.event));
+  const stepEvents = events.filter((e) => WEB_ONBOARDING_STEP_EVENTS.includes(e.event));
 
   const startedCount = new Set(started.map((e) => e.properties.distinct_id)).size;
   const completedCount = new Set(completed.map((e) => e.properties.distinct_id)).size;
@@ -195,22 +197,43 @@ function buildWebOnboardingMetrics(events: MixpanelEvent[]) {
     : null;
 
   // Skip step distribution
-  const skipStepCounts: Record<string, number> = {};
+  const stepLabels: Record<number, string> = {
+    0: 'Welcome',
+    1: 'Guided Action',
+    2: 'Aha Moment',
+    3: "What's Next",
+  };
+  const skipStepCounts: Record<number, number> = {};
   for (const e of skipped) {
-    const step = String(e.properties.step ?? 'unknown');
-    skipStepCounts[step] = (skipStepCounts[step] || 0) + 1;
+    const step = Number(e.properties.step);
+    if (!isNaN(step)) {
+      skipStepCounts[step] = (skipStepCounts[step] || 0) + 1;
+    }
   }
   const skipStepDistribution = Object.entries(skipStepCounts)
-    .map(([step, count]) => {
-      const stepLabels: Record<string, string> = {
-        '0': 'Welcome',
-        '1': 'Guided Action',
-        '2': 'Aha Moment',
-        '3': 'Feature Overview',
-      };
+    .map(([stepKey, count]) => {
+      const step = Number(stepKey);
       return { step: stepLabels[step] || `Step ${step}`, count };
     })
     .sort((a, b) => b.count - a.count);
+
+  // Step completion funnel — unique users who completed each step
+  const stepUserCounts: Record<number, Set<string>> = {};
+  for (const e of stepEvents) {
+    const step = Number(e.properties.step);
+    if (!isNaN(step)) {
+      if (!stepUserCounts[step]) stepUserCounts[step] = new Set();
+      stepUserCounts[step].add(e.properties.distinct_id);
+    }
+  }
+  const stepCompletionFunnel = buildFunnel([
+    { name: 'Started', count: startedCount },
+    { name: stepLabels[0] || 'Step 0', count: stepUserCounts[0]?.size || 0 },
+    { name: stepLabels[1] || 'Step 1', count: stepUserCounts[1]?.size || 0 },
+    { name: stepLabels[2] || 'Step 2', count: stepUserCounts[2]?.size || 0 },
+    { name: stepLabels[3] || 'Step 3', count: stepUserCounts[3]?.size || 0 },
+    { name: 'Completed', count: completedCount },
+  ]);
 
   return {
     started: startedCount,
@@ -221,6 +244,7 @@ function buildWebOnboardingMetrics(events: MixpanelEvent[]) {
     avgCompletionTime,
     intentDistribution,
     skipStepDistribution,
+    stepCompletionFunnel,
   };
 }
 

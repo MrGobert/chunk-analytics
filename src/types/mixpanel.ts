@@ -73,6 +73,7 @@ export interface WebOnboardingMetrics {
   avgCompletionTime: number | null;
   intentDistribution: { intent: string; count: number }[];
   skipStepDistribution: { step: string; count: number }[];
+  stepCompletionFunnel: FunnelStep[];
 }
 
 export interface AcquisitionFunnelMetrics {
@@ -439,6 +440,23 @@ export interface FeatureOverviewMetrics {
     uniqueUsers: number;
     trend: number | null;
   }[];
+  lastUpdated: string;
+}
+
+export interface HelpCenterMetrics {
+  totalViews: number;
+  uniqueUsers: number;
+  faqOpens: number;
+  ctaClicks: number;
+  viewsTrend: number | null;
+  uniqueUsersTrend: number | null;
+  faqOpensTrend: number | null;
+  ctaClicksTrend: number | null;
+  pageViewDistribution: { page: string; count: number }[];
+  faqCategoryDistribution: { category: string; count: number }[];
+  topFaqQuestions: { question: string; category: string; count: number }[];
+  navDestinations: { destination: string; count: number }[];
+  dailyData: { date: string; views: number; faqOpens: number; ctaClicks: number }[];
   lastUpdated: string;
 }
 
