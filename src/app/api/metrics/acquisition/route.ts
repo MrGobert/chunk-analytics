@@ -48,6 +48,12 @@ const ONBOARDING_COMPLETE_EVENTS = [
   'onboarding_v2_completed',
 ];
 
+// Web first-run onboarding events
+const WEB_ONBOARDING_START_EVENTS = ['First_Run_Onboarding_Started'];
+const WEB_ONBOARDING_COMPLETE_EVENTS = ['First_Run_Onboarding_Completed'];
+const WEB_ONBOARDING_SKIP_EVENTS = ['First_Run_Onboarding_Skipped'];
+const WEB_ONBOARDING_INTENT_EVENTS = ['First_Run_Onboarding_Intent_Selected'];
+
 function uniqueUsersFor(
   events: MixpanelEvent[],
   eventNames: string[],
@@ -113,6 +119,8 @@ function buildWebFunnel(events: MixpanelEvent[]) {
       .map((e) => e.properties.distinct_id),
   );
   const signupUsers = uniqueUsersFor(events, SIGNUP_EVENTS);
+  const onboardingStartedUsers = uniqueUsersFor(events, WEB_ONBOARDING_START_EVENTS);
+  const onboardingCompletedUsers = uniqueUsersFor(events, WEB_ONBOARDING_COMPLETE_EVENTS);
   const subscriberUsers = uniqueUsersFor(events, PURCHASE_EVENTS);
 
   const steps = [
@@ -120,6 +128,8 @@ function buildWebFunnel(events: MixpanelEvent[]) {
     { name: 'CTA Clicked', count: ctaUsers.size },
     { name: 'Guest Trial', count: guestUsers.size },
     { name: 'Signed Up', count: signupUsers.size },
+    { name: 'Onboarding Started', count: onboardingStartedUsers.size },
+    { name: 'Onboarding Completed', count: onboardingCompletedUsers.size },
     { name: 'Subscribed', count: subscriberUsers.size },
   ];
 
@@ -131,18 +141,81 @@ function buildWebFunnel(events: MixpanelEvent[]) {
         value: safeDiv(ctaUsers.size, marketingUsers.size),
       },
       {
-        label: 'CTA → Guest',
-        value: safeDiv(guestUsers.size, ctaUsers.size),
-      },
-      {
         label: 'Guest → Signup',
         value: safeDiv(signupUsers.size, guestUsers.size),
+      },
+      {
+        label: 'Onboarding Completion',
+        value: safeDiv(onboardingCompletedUsers.size, onboardingStartedUsers.size),
       },
       {
         label: 'Signup → Subscriber',
         value: safeDiv(subscriberUsers.size, signupUsers.size),
       },
     ],
+  };
+}
+
+/** Build web onboarding breakdown: intent distribution, skip rate, avg time */
+function buildWebOnboardingMetrics(events: MixpanelEvent[]) {
+  const started = events.filter((e) => WEB_ONBOARDING_START_EVENTS.includes(e.event));
+  const completed = events.filter((e) => WEB_ONBOARDING_COMPLETE_EVENTS.includes(e.event));
+  const skipped = events.filter((e) => WEB_ONBOARDING_SKIP_EVENTS.includes(e.event));
+  const intentEvents = events.filter((e) => WEB_ONBOARDING_INTENT_EVENTS.includes(e.event));
+
+  const startedCount = new Set(started.map((e) => e.properties.distinct_id)).size;
+  const completedCount = new Set(completed.map((e) => e.properties.distinct_id)).size;
+  const skippedCount = new Set(skipped.map((e) => e.properties.distinct_id)).size;
+
+  // Intent distribution
+  const intentCounts: Record<string, number> = {};
+  const seenUsers = new Set<string>();
+  for (const e of intentEvents) {
+    const uid = e.properties.distinct_id;
+    if (seenUsers.has(uid)) continue; // count each user once
+    seenUsers.add(uid);
+    const intent = (e.properties.intent as string) || 'unknown';
+    intentCounts[intent] = (intentCounts[intent] || 0) + 1;
+  }
+  const intentDistribution = Object.entries(intentCounts)
+    .map(([intent, count]) => ({ intent, count }))
+    .sort((a, b) => b.count - a.count);
+
+  // Average time to complete (seconds)
+  const completionTimes = completed
+    .map((e) => e.properties.time_to_complete_seconds as number)
+    .filter((t) => typeof t === 'number' && t > 0);
+  const avgCompletionTime = completionTimes.length > 0
+    ? Math.round(completionTimes.reduce((a, b) => a + b, 0) / completionTimes.length)
+    : null;
+
+  // Skip step distribution
+  const skipStepCounts: Record<string, number> = {};
+  for (const e of skipped) {
+    const step = String(e.properties.step ?? 'unknown');
+    skipStepCounts[step] = (skipStepCounts[step] || 0) + 1;
+  }
+  const skipStepDistribution = Object.entries(skipStepCounts)
+    .map(([step, count]) => {
+      const stepLabels: Record<string, string> = {
+        '0': 'Welcome',
+        '1': 'Guided Action',
+        '2': 'Aha Moment',
+        '3': 'Feature Overview',
+      };
+      return { step: stepLabels[step] || `Step ${step}`, count };
+    })
+    .sort((a, b) => b.count - a.count);
+
+  return {
+    started: startedCount,
+    completed: completedCount,
+    skipped: skippedCount,
+    completionRate: safeDiv(completedCount, startedCount),
+    skipRate: safeDiv(skippedCount, startedCount),
+    avgCompletionTime,
+    intentDistribution,
+    skipStepDistribution,
   };
 }
 
@@ -295,12 +368,16 @@ export async function GET(request: NextRequest) {
     let dailyLines: { key: string; color: string; name: string }[];
     let subtitle: string;
 
+    // Build web onboarding metrics (returned for web platform only)
+    let webOnboarding = null;
+
     if (platformParam === 'web') {
       const result = buildWebFunnel(events);
       funnel = result.funnel;
       statCards = result.statCards;
       subtitle =
-        'Marketing site → guest trial → signup → subscription';
+        'Marketing site → guest trial → signup → onboarding → subscription';
+      webOnboarding = buildWebOnboardingMetrics(events);
 
       dailyData = buildDailyData(events, days, [
         {
@@ -325,6 +402,14 @@ export async function GET(request: NextRequest) {
           match: (e) => SIGNUP_EVENTS.includes(e.event),
         },
         {
+          key: 'onboardingStarted',
+          match: (e) => WEB_ONBOARDING_START_EVENTS.includes(e.event),
+        },
+        {
+          key: 'onboardingCompleted',
+          match: (e) => WEB_ONBOARDING_COMPLETE_EVENTS.includes(e.event),
+        },
+        {
           key: 'subscriber',
           match: (e) => PURCHASE_EVENTS.includes(e.event),
         },
@@ -334,6 +419,8 @@ export async function GET(request: NextRequest) {
         { key: 'cta', color: '#ec4899', name: 'CTA Clicked' },
         { key: 'guest', color: '#8b5cf6', name: 'Guest Trial' },
         { key: 'signup', color: '#3b82f6', name: 'Signed Up' },
+        { key: 'onboardingStarted', color: '#f97316', name: 'Onboarding Started' },
+        { key: 'onboardingCompleted', color: '#14b8a6', name: 'Onboarding Completed' },
         { key: 'subscriber', color: '#10b981', name: 'Subscribed' },
       ];
     } else if (platformParam === 'ios') {
@@ -427,6 +514,7 @@ export async function GET(request: NextRequest) {
         statCards,
         dailyData,
         dailyLines,
+        ...(webOnboarding ? { webOnboarding } : {}),
         lastUpdated: getLastUpdated(),
       },
       {

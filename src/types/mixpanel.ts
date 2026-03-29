@@ -64,6 +64,17 @@ export interface DailyDataPoint {
   [key: string]: string | number;
 }
 
+export interface WebOnboardingMetrics {
+  started: number;
+  completed: number;
+  skipped: number;
+  completionRate: number;
+  skipRate: number;
+  avgCompletionTime: number | null;
+  intentDistribution: { intent: string; count: number }[];
+  skipStepDistribution: { step: string; count: number }[];
+}
+
 export interface AcquisitionFunnelMetrics {
   platform: 'web' | 'ios' | 'macOS';
   subtitle: string;
@@ -71,6 +82,7 @@ export interface AcquisitionFunnelMetrics {
   statCards: { label: string; value: number }[];
   dailyData: Record<string, string | number>[];
   dailyLines: { key: string; color: string; name: string }[];
+  webOnboarding?: WebOnboardingMetrics;
   lastUpdated: string;
 }
 
