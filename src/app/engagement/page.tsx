@@ -47,6 +47,25 @@ export default function EngagementPage() {
     return () => ctx.revert();
   }, [isLoading, userMetrics, advancedMetrics]);
 
+  // Prepare user breakdown data for PieChart (must be before any early returns)
+  const userBreakdownData = useMemo(() => {
+    if (!advancedMetrics) return [];
+    return [
+      { name: 'Paid', value: advancedMetrics.userBreakdown.paid },
+      { name: 'Free', value: advancedMetrics.userBreakdown.free },
+      { name: 'Guest', value: advancedMetrics.userBreakdown.guest },
+    ];
+  }, [advancedMetrics]);
+
+  // Prepare feature adoption data for horizontal BarChart (must be before any early returns)
+  const featureAdoptionData = useMemo(() => {
+    if (!advancedMetrics) return [];
+    return advancedMetrics.featureAdoption.map((f) => ({
+      feature: f.feature,
+      rate: Math.round((f.adoptionRate ?? 0) * 10) / 10,
+    }));
+  }, [advancedMetrics]);
+
   if (isLoading) {
     return <SkeletonPage statCards={3} statCardCols="grid-cols-1 md:grid-cols-3" chartCards={4} />;
   }
@@ -58,19 +77,6 @@ export default function EngagementPage() {
       </div>
     );
   }
-
-  // Prepare user breakdown data for PieChart
-  const userBreakdownData = useMemo(() => [
-    { name: 'Paid', value: advancedMetrics.userBreakdown.paid },
-    { name: 'Free', value: advancedMetrics.userBreakdown.free },
-    { name: 'Guest', value: advancedMetrics.userBreakdown.guest },
-  ], [advancedMetrics.userBreakdown]);
-
-  // Prepare feature adoption data for horizontal BarChart
-  const featureAdoptionData = useMemo(() => advancedMetrics.featureAdoption.map((f) => ({
-    feature: f.feature,
-    rate: Math.round((f.adoptionRate ?? 0) * 10) / 10,
-  })), [advancedMetrics.featureAdoption]);
 
   return (
     <div ref={containerRef} className="animate-in fade-in duration-300">
