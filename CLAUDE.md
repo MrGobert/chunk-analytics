@@ -144,7 +144,7 @@ Score → status: ≥60 healthy, ≥30 atRisk, <30 churning.
 **Sending**: `email_service.py` → Resend API. All emails use a "Brutalist Signal" HTML design system matching Chunk's brand. Each template returns `(subject, html, plaintext)`.
 
 **Templates** (13 types):
-- Welcome sequence: day1_superpowers, day3_collections, day7_researcher_stories
+- Welcome sequence: day1_help_center, day3_artifacts, day7_researcher_stories
 - Trial: trial_started, trial_ending
 - Churn: subscription_expired, winback_7day, winback_30day
 - Engagement: reengagement_14day, signup_no_trial_nudge, monthly_recap
