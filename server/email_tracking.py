@@ -41,8 +41,8 @@ TRACKABLE_EMAIL_TYPES = [
     "feature_announcement",
     "renewal_reminder",
     "monthly_recap",
-    "day1_superpowers",
-    "day3_collections",
+    "day1_help_center",
+    "day3_artifacts",
     "day7_researcher_stories",
 ]
 

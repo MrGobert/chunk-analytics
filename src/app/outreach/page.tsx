@@ -81,8 +81,8 @@ const EMAIL_TYPE_LABELS: Record<string, string> = {
   feature_announcement: 'Feature Announcement',
   renewal_reminder: 'Renewal Reminder',
   monthly_recap: 'Monthly Recap',
-  day1_superpowers: 'Day 1 Welcome',
-  day3_collections: 'Day 3 Collections',
+  day1_help_center: 'Day 1 Help Center',
+  day3_artifacts: 'Day 3 Artifacts',
   day7_researcher_stories: 'Day 7 Stories',
 };
 

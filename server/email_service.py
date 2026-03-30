@@ -912,112 +912,106 @@ def get_renewal_reminder_email(
     )
 
 
-def get_day1_superpowers_email(user_name: str = "there") -> tuple[str, str, str]:
+def get_day1_help_center_email(user_name: str = "there") -> tuple[str, str, str]:
     """
-    Day 1 welcome email: 4 AI superpowers you now have.
-    Focus: breadth of capabilities. Tone: empowering, exciting.
+    Day 1 welcome email: Help Center announcement.
+    Focus: reducing overwhelm, showing new users where to find help. Tone: supportive, empowering.
     """
-    subject = "⚡ 4 AI Superpowers You Now Have"
+    subject = "📖 Your guide to getting the most out of Chunk"
 
     body = f"""
     <p style="margin:0 0 20px 0;font-family:{FONT_SANS};font-size:16px;color:{BRAND['text_primary']};line-height:1.6" class="text-dark">
         Hey {user_name},
     </p>
+    <p style="margin:0 0 16px 0;font-family:{FONT_SANS};font-size:16px;color:{BRAND['text_primary']};line-height:1.6" class="text-dark">
+        Chunk is a powerful workspace — AI chat, research reports, connected notes, collections, artifacts, and more. That's a lot to explore.
+    </p>
     <p style="margin:0 0 24px 0;font-family:{FONT_SANS};font-size:16px;color:{BRAND['text_primary']};line-height:1.6" class="text-dark">
-        Welcome to Chunk. You just unlocked access to the world's most powerful AI models and a research workspace that <em>thinks with you</em>. Here are <strong>4 superpowers</strong> you can use right now:
+        We built the <strong style="color:{BRAND['primary']}">Help Center</strong> so you always know exactly where to go next. Step-by-step guides, feature deep-dives, real workflows, and quick answers — all in one place.
     </p>
 
-    {_feature_card("📚", "Research in Collections", "Gather documents, notes, URLs, and past conversations into one Collection — then chat with AI that has already read all of it. Ask questions across everything at once.", BRAND['color_documents'], "SUPERPOWER 01")}
-    {_feature_card("📝", "Connected Notes + Knowledge Graph", "Write notes with wiki-links ([[like this]]). Watch a living knowledge graph visualize how your ideas connect. AI writing tools help you think — not replace your thinking.", BRAND['color_notes'], "SUPERPOWER 02")}
-    {_feature_card("🔬", "Deep Research Mode", "Ask a complex question and get a comprehensive, multi-source report with citations. What used to take hours of tab-hopping now takes minutes.", BRAND['color_reports'], "SUPERPOWER 03")}
-    {_feature_card("🧠", "Every AI Model, One App", "GPT-5, Claude, Gemini, Llama — switch between them per conversation. Different models excel at different tasks. Chunk lets you use the right one every time.", BRAND['purple'], "SUPERPOWER 04")}
+    {_serif_statement("Learn faster. Get unstuck.")}
 
-    {_content_type_legend()}
+    {_feature_card("🚀", "Getting Started", "New to Chunk? A 10-minute walkthrough covering your first question, first research report, first note, and first collection.", BRAND['color_notes'], "ONBOARDING")}
+    {_feature_card("🔍", "Feature Guides", "Deep dives into AI Chat, Research Reports, Notes & Wiki-Links, Artifacts, Documents, and Collections — with tips you won't find anywhere else.", BRAND['color_documents'], "FEATURES")}
+    {_feature_card("🗺️", "Workflows", "Step-by-step guides for real tasks: researching a topic end-to-end, organizing your notes, and building a knowledge base from scratch.", BRAND['color_urls'], "GUIDES")}
+    {_feature_card("💡", "FAQ", "Quick answers on billing, platforms, AI models, privacy, exporting data, and more — so you can spend less time searching and more time learning.", BRAND['gold'], "ANSWERS")}
 
-    {_dark_card(f"""
-        <p style="margin:0 0 8px 0;font-family:{FONT_MONO};font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:{BRAND['primary']};font-weight:700">YOUR FIRST MISSION</p>
-        <p style="margin:0;font-family:{FONT_SANS};font-size:15px;color:{BRAND['text_inverse']};line-height:1.6">Create a Collection. Add a few documents or URLs about something you're researching. Then ask Chunk a question about them. That's the moment it clicks.</p>
-    """)}
+    <p style="margin:20px 0 4px 0;font-family:{FONT_SANS};font-size:16px;color:{BRAND['text_primary']};line-height:1.6;text-align:center" class="text-dark">
+        Whether you're just getting started or want to go deeper — the Help Center has you covered.
+    </p>
     """
 
     html = _base_email_template(
-        preheader="Welcome to Chunk — 4 AI superpowers you can use right now. Collections, Connected Notes, Deep Research, and every AI model.",
-        hero_title="4 AI Superpowers You Now Have",
-        hero_subtitle="Welcome to Chunk — let's get you started.",
+        preheader="New: Help Center with step-by-step guides, feature tutorials, and answers to common questions.",
+        hero_title="Your guide to getting the most out of Chunk.",
+        hero_subtitle="Everything you need — from first steps to advanced workflows.",
         body_content=body,
-        cta_text="Open Chunk",
-        cta_url=BRAND["login_url"],
-        footer_tip="Every AI response has a Save to Notes button at the bottom — tap it to instantly turn any chat response into a note in your library.",
+        cta_text="Explore the Help Center",
+        cta_url="https://www.chunkapp.com/help",
         hero_dark=True,
         hero_label="WELCOME · DAY 1",
-        hero_serif_word="Superpowers",
+        hero_serif_word="guide",
     )
 
     return (
         subject,
         html,
-        f"Welcome to Chunk! 4 AI superpowers: Research in Collections, Connected Notes + Knowledge Graph, Deep Research, and every AI model in one app. {BRAND['login_url']}",
+        f"We built the Help Center so you always know where to go next — getting started guides, feature deep-dives, workflows, and FAQ. https://www.chunkapp.com/help",
     )
 
 
-def get_day3_collections_email(user_name: str = "there") -> tuple[str, str, str]:
+def get_day3_artifacts_email(user_name: str = "there") -> tuple[str, str, str]:
     """
-    Day 3 email: Deep dive on Collections + Research in Collections.
-    Focus: depth of one killer feature. Tone: educational, practical.
+    Day 3 email: Artifacts feature announcement.
+    Focus: turning any content into interactive learning materials. Tone: exciting, practical.
     """
-    subject = "📚 Meet Collections — Your Research Command Center"
+    subject = "🧪 Turn any content into flashcards, quizzes, and summaries — instantly"
 
     body = f"""
     <p style="margin:0 0 20px 0;font-family:{FONT_SANS};font-size:16px;color:{BRAND['text_primary']};line-height:1.6" class="text-dark">
         Hey {user_name},
     </p>
     <p style="margin:0 0 24px 0;font-family:{FONT_SANS};font-size:16px;color:{BRAND['text_primary']};line-height:1.6" class="text-dark">
-        Here's the feature that transforms Chunk from a chat app into a <strong>research powerhouse</strong>: Collections.
+        Turn any content into knowledge. Instantly.
     </p>
 
-    {_serif_statement("One workspace. Every source. Total command.", "Total command.")}
+    {_serif_statement("Don't just consume. Understand.")}
 
-    <p style="margin:0 0 20px 0;font-family:{FONT_SANS};font-size:16px;color:{BRAND['text_primary']};line-height:1.6" class="text-dark">
-        Think of Collections as intelligent research workspaces. Gather everything about a topic in one place — then chat with AI that has <em>already read all of it</em>.
+    <p style="margin:0 0 24px 0;font-family:{FONT_SANS};font-size:16px;color:{BRAND['text_primary']};line-height:1.6" class="text-dark">
+        <strong style="color:{BRAND['primary']}">Artifacts</strong> transforms YouTube videos, PDFs, podcasts, audio files, and web articles into interactive study materials — flashcards, quizzes, summaries, and concept maps — in seconds.
     </p>
 
-    <!-- What goes into a Collection -->
-    <p style="margin:0 0 12px 0;font-family:{FONT_MONO};font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:{BRAND['text_muted']};font-weight:700">What goes into a collection</p>
+    {_protocol_step("01", "Drop in your content", "Paste a URL, upload a PDF, or drag in an audio file.")}
+    {_protocol_step("02", "Choose your outputs", "Select from transcripts, summaries, flashcards, quizzes, or concept maps.")}
+    {_protocol_step("03", "Learn, don't just read", "Interactive flashcards, quiz yourself, explore concept maps.")}
 
-    {_feature_card("📝", "Your Notes", "Add notes you've written — Chunk understands the full text and wiki-link connections.", BRAND['color_notes'])}
-    {_feature_card("📄", "Documents & PDFs", "Upload research papers, contracts, reports. Chunk extracts and indexes everything.", BRAND['color_documents'])}
-    {_feature_card("🔗", "Web Articles & URLs", "Save any webpage. Chunk automatically extracts and processes the content. Share directly from Safari.", BRAND['color_urls'])}
-    {_feature_card("🧪", "Research Reports", "Add previously generated Deep Research reports as context for deeper follow-up.", BRAND['color_reports'])}
-    {_feature_card("💬", "Past Conversations", "Pull in previous AI chats. Pick up where you left off, with full history as context.", BRAND['color_conversations'])}
+    {_feature_card("🎓", "Students", "Drop a 90-min recorded lecture — get flashcards and a quiz in 60 seconds. Perfect for spaced repetition and self-testing.", BRAND['primary'], "USE CASE")}
+    {_feature_card("🔬", "Researchers", "Upload research PDFs — get concept maps showing how ideas connect, plus structured summaries.", BRAND['color_documents'], "USE CASE")}
+    {_feature_card("💼", "Professionals", "Paste an industry podcast — get a 2-minute executive summary with key timestamps.", BRAND['color_urls'], "USE CASE")}
 
-    {_content_type_legend()}
-
-    <!-- How people use Collections -->
-    {_dark_card(f"""
-        <p style="margin:0 0 12px 0;font-family:{FONT_MONO};font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:{BRAND['signal_green']};font-weight:700">HOW PEOPLE USE COLLECTIONS</p>
-        <p style="margin:0 0 6px 0;font-family:{FONT_SANS};font-size:14px;color:{BRAND['text_inverse']};line-height:1.8">📖 <strong>Research projects</strong> — gather all papers and sources, ask AI to find connections</p>
-        <p style="margin:0 0 6px 0;font-family:{FONT_SANS};font-size:14px;color:{BRAND['text_inverse']};line-height:1.8">🎓 <strong>Study materials</strong> — organize course content, generate study guides on demand</p>
-        <p style="margin:0 0 6px 0;font-family:{FONT_SANS};font-size:14px;color:{BRAND['text_inverse']};line-height:1.8">✍️ <strong>Content creation</strong> — collect references, synthesize into articles</p>
-        <p style="margin:0;font-family:{FONT_SANS};font-size:14px;color:{BRAND['text_inverse']};line-height:1.8">💼 <strong>Work projects</strong> — build team knowledge bases with full AI access</p>
-    """)}
+    <p style="margin:20px 0 0 0;font-family:{FONT_SANS};font-size:16px;color:{BRAND['text_primary']};line-height:1.6" class="text-dark">
+        Artifacts is available now in Chunk Pro. Transform any content into interactive learning materials in seconds.
+    </p>
     """
 
     html = _base_email_template(
-        preheader="Collections: gather notes, documents, URLs, and chats into one workspace — then research across all of it with AI.",
-        hero_title="Meet Collections",
-        hero_subtitle="Your AI-powered research command center.",
+        preheader="Turn lectures, YouTube videos, and PDFs into interactive study guides, flashcards, quizzes, and concept maps in seconds.",
+        hero_title="Input Content. Extract Knowledge. Instantly.",
+        hero_subtitle="Turn any content into flashcards, quizzes, summaries, and concept maps.",
         body_content=body,
-        cta_text="Create Your First Collection",
-        cta_url=BRAND["web_url"],
-        footer_tip="Use Safari's Share button to add articles directly to a Collection. Chunk automatically extracts and indexes the content.",
-        hero_dark=False,
+        cta_text="Try Artifacts",
+        cta_url="https://www.chunkapp.com/artifacts-feature",
+        footer_tip="Artifacts is a Pro feature. Upgrade to Chunk Pro to unlock unlimited transformations.",
+        hero_dark=True,
         hero_label="WELCOME · DAY 3",
+        hero_serif_word="Instantly.",
     )
 
     return (
         subject,
         html,
-        f"Discover Collections — gather notes, documents, URLs, and conversations in one workspace, then research across all of it with AI. {BRAND['web_url']}",
+        f"Turn any content into knowledge — flashcards, quizzes, summaries, and concept maps from YouTube, PDFs, podcasts, and more. https://www.chunkapp.com/artifacts-feature",
     )
 
 
@@ -1618,16 +1612,16 @@ def send_renewal_reminder(
     return send_email(to_email, subject, html, text, email_type="renewal_reminder", user_id=user_id)
 
 
-def send_day1_superpowers(to_email: str, user_name: str = "there", user_id: str = None) -> dict:
-    """Send Day 1 welcome sequence email."""
-    subject, html, text = get_day1_superpowers_email(user_name)
-    return send_email(to_email, subject, html, text, email_type="day1_superpowers", user_id=user_id)
+def send_day1_help_center(to_email: str, user_name: str = "there", user_id: str = None) -> dict:
+    """Send Day 1 welcome sequence email: Help Center."""
+    subject, html, text = get_day1_help_center_email(user_name)
+    return send_email(to_email, subject, html, text, email_type="day1_help_center", user_id=user_id)
 
 
-def send_day3_collections(to_email: str, user_name: str = "there", user_id: str = None) -> dict:
-    """Send Day 3 Collections email."""
-    subject, html, text = get_day3_collections_email(user_name)
-    return send_email(to_email, subject, html, text, email_type="day3_collections", user_id=user_id)
+def send_day3_artifacts(to_email: str, user_name: str = "there", user_id: str = None) -> dict:
+    """Send Day 3 Artifacts feature email."""
+    subject, html, text = get_day3_artifacts_email(user_name)
+    return send_email(to_email, subject, html, text, email_type="day3_artifacts", user_id=user_id)
 
 
 def send_day7_researcher_stories(to_email: str, user_name: str = "there", user_id: str = None) -> dict:

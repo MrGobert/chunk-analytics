@@ -775,7 +775,7 @@ def check_welcome_instant_task(self):
 
 @shared_task(
     bind=True,
-    name="send_day1_superpowers_email",
+    name="send_day1_help_center_email",
     ignore_result=True,
     soft_time_limit=30,
     time_limit=45,
@@ -783,33 +783,33 @@ def check_welcome_instant_task(self):
     retry_backoff=True,
     retry_kwargs={"max_retries": 3},
 )
-def send_day1_superpowers_task(self, email: str, user_name: str = "there", user_id: str = None):
+def send_day1_help_center_task(self, email: str, user_name: str = "there", user_id: str = None):
     """
-    Send Day 1 welcome email: 3 AI Superpowers.
+    Send Day 1 welcome email: Help Center.
 
     Called 24 hours after signup.
     """
     if not is_valid_email(email):
         logging.warning(f"[EMAIL_TASK] Invalid email, skipping Day 1: {email}")
         return {"status": "skipped", "email": email, "reason": "invalid_email"}
-        
+
     # Check if user is unsubscribed
     if check_unsubscribed(email):
         logging.info(f"[EMAIL_TASK] Skipping {email} - user unsubscribed")
         return {"status": "skipped", "email": email, "reason": "unsubscribed"}
 
     try:
-        logging.info(f"[EMAIL_TASK] Sending Day 1 superpowers email to {email}")
+        logging.info(f"[EMAIL_TASK] Sending Day 1 help center email to {email}")
 
-        result = email_service.send_day1_superpowers(email, user_name, user_id)
+        result = email_service.send_day1_help_center(email, user_name, user_id)
         resend_email_id = result.get("id")
 
         # Track for analytics
         if user_id:
-            track_email_sent(user_id, email, "day1_superpowers", resend_email_id)
+            track_email_sent(user_id, email, "day1_help_center", resend_email_id)
 
-        logging.info(f"[EMAIL_TASK] ✓ Day 1 superpowers email sent to {email}")
-        return {"status": "sent", "email": email, "type": "day1_superpowers"}
+        logging.info(f"[EMAIL_TASK] ✓ Day 1 help center email sent to {email}")
+        return {"status": "sent", "email": email, "type": "day1_help_center"}
 
     except Exception as e:
         logging.error(f"[EMAIL_TASK] ❌ Failed to send Day 1 email to {email}: {e}")
@@ -818,7 +818,7 @@ def send_day1_superpowers_task(self, email: str, user_name: str = "there", user_
 
 @shared_task(
     bind=True,
-    name="send_day3_collections_email",
+    name="send_day3_artifacts_email",
     ignore_result=True,
     soft_time_limit=30,
     time_limit=45,
@@ -826,37 +826,37 @@ def send_day1_superpowers_task(self, email: str, user_name: str = "there", user_
     retry_backoff=True,
     retry_kwargs={"max_retries": 3},
 )
-def send_day3_collections_task(self, email: str, user_name: str = "there", user_id: str = None):
+def send_day3_artifacts_task(self, email: str, user_name: str = "there", user_id: str = None):
     """
-    Send Day 3 welcome email: Collections feature highlight.
+    Send Day 3 welcome email: Artifacts feature highlight.
 
     Called 72 hours after signup.
     """
     if not is_valid_email(email):
         logging.warning(f"[EMAIL_TASK] Invalid email, skipping Day 3: {email}")
         return {"status": "skipped", "email": email, "reason": "invalid_email"}
-        
+
     # Check if user is unsubscribed
     if check_unsubscribed(email):
         logging.info(f"[EMAIL_TASK] Skipping {email} - user unsubscribed")
         return {"status": "skipped", "email": email, "reason": "unsubscribed"}
 
     try:
-        logging.info(f"[EMAIL_TASK] Sending Day 3 collections email to {email}")
+        logging.info(f"[EMAIL_TASK] Sending Day 3 artifacts email to {email}")
 
-        result = email_service.send_day3_collections(email, user_name, user_id)
+        result = email_service.send_day3_artifacts(email, user_name, user_id)
         resend_email_id = result.get("id")
 
         # Track for analytics
         if user_id:
-            track_email_sent(user_id, email, "day3_collections", resend_email_id)
+            track_email_sent(user_id, email, "day3_artifacts", resend_email_id)
 
-        logging.info(f"[EMAIL_TASK] ✓ Day 3 collections email sent to {email}")
-        return {"status": "sent", "email": email, "type": "day3_collections"}
+        logging.info(f"[EMAIL_TASK] ✓ Day 3 artifacts email sent to {email}")
+        return {"status": "sent", "email": email, "type": "day3_artifacts"}
 
     except Exception as e:
         logging.error(
-            f"[EMAIL_TASK] ❌ Failed to send Day 3 collections email to {email}: {e}"
+            f"[EMAIL_TASK] ❌ Failed to send Day 3 artifacts email to {email}: {e}"
         )
         raise
 
@@ -1118,7 +1118,7 @@ def check_welcome_sequence_day1_task(self):
     from firebase_setup import db
 
     try:
-        logging.info("[BEAT_TASK] Checking for users needing Day 1 email...")
+        logging.info("[BEAT_TASK] Checking for users needing Day 1 help center email...")
 
         now = datetime.now(timezone.utc)
         # Window: users who signed up 20-28 hours ago
@@ -1152,14 +1152,14 @@ def check_welcome_sequence_day1_task(self):
                 continue
 
             if email:
-                send_day1_superpowers_task.delay(email, name, doc.id)
+                send_day1_help_center_task.delay(email, name, doc.id)
 
                 doc.reference.update({"emailsSent.welcomeDay1": now})
 
                 count += 1
-                logging.info(f"[BEAT_TASK] Queued Day 1 email for {email}")
+                logging.info(f"[BEAT_TASK] Queued Day 1 help center email for {email}")
 
-        logging.info(f"[BEAT_TASK] ✓ Queued {count} Day 1 welcome emails")
+        logging.info(f"[BEAT_TASK] ✓ Queued {count} Day 1 help center emails")
         return {"status": "completed", "emails_queued": count}
 
     except Exception as e:
@@ -1187,7 +1187,7 @@ def check_welcome_sequence_day3_task(self):
 
     try:
         logging.info(
-            "[BEAT_TASK] Checking for users needing Day 3 collections email..."
+            "[BEAT_TASK] Checking for users needing Day 3 artifacts email..."
         )
 
         now = datetime.now(timezone.utc)
@@ -1224,18 +1224,18 @@ def check_welcome_sequence_day3_task(self):
                 continue
 
             if email:
-                send_day3_collections_task.delay(email, name, doc.id)
+                send_day3_artifacts_task.delay(email, name, doc.id)
 
                 doc.reference.update({"emailsSent.welcomeDay3": now})
 
                 count += 1
-                logging.info(f"[BEAT_TASK] Queued Day 3 collections email for {email}")
+                logging.info(f"[BEAT_TASK] Queued Day 3 artifacts email for {email}")
 
-        logging.info(f"[BEAT_TASK] ✓ Queued {count} Day 3 collections emails")
+        logging.info(f"[BEAT_TASK] ✓ Queued {count} Day 3 artifacts emails")
         return {"status": "completed", "emails_queued": count}
 
     except Exception as e:
-        logging.error(f"[BEAT_TASK] ❌ Error checking Day 3 collections users: {e}")
+        logging.error(f"[BEAT_TASK] ❌ Error checking Day 3 artifacts users: {e}")
         import traceback
 
         logging.error(f"[BEAT_TASK] Traceback: {traceback.format_exc()}")

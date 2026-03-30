@@ -1199,19 +1199,19 @@ _EMAIL_TEMPLATES = {
         "trigger": "beat",
         "schedule": "Daily at 09:00 UTC (check_renewal_reminders)",
     },
-    "day1_superpowers": {
-        "name": "Day 1 — AI Superpowers",
+    "day1_help_center": {
+        "name": "Day 1 — Help Center",
         "category": "Welcome Sequence",
-        "description": "First onboarding email, sent 24 hours after signup.",
+        "description": "First onboarding email introducing the Help Center, sent 24 hours after signup.",
         "trigger": "beat",
         "schedule": "Every 6 hours (check_welcome_sequence_day1)",
     },
-    "day3_collections": {
-        "name": "Day 3 — Collections",
+    "day3_artifacts": {
+        "name": "Day 3 — Artifacts",
         "category": "Welcome Sequence",
-        "description": "Second onboarding email highlighting Collections feature.",
+        "description": "Second onboarding email highlighting Artifacts feature.",
         "trigger": "beat",
-        "schedule": "Daily at 11:00 UTC (check_welcome_sequence_day3)",
+        "schedule": "Twice daily at 05:00/17:00 UTC (check_welcome_sequence_day3)",
     },
     "day7_researcher_stories": {
         "name": "Day 7 — Researcher Stories",
@@ -1275,8 +1275,8 @@ def _render_email_template(key: str) -> dict | None:
         "subscription_expired": lambda: email_service.get_subscription_expired_email("James"),
         "billing_issue": lambda: email_service.get_billing_issue_email("James"),
         "renewal_reminder": lambda: email_service.get_renewal_reminder_email("James", days_until_renewal=7, amount="$9.99"),
-        "day1_superpowers": lambda: email_service.get_day1_superpowers_email("James"),
-        "day3_collections": lambda: email_service.get_day3_collections_email("James"),
+        "day1_help_center": lambda: email_service.get_day1_help_center_email("James"),
+        "day3_artifacts": lambda: email_service.get_day3_artifacts_email("James"),
         "day7_researcher_stories": lambda: email_service.get_day7_researcher_stories_email("James"),
         "monthly_recap": lambda: email_service.get_monthly_recap_email("James", searches=127, documents=23, images=8, notes=34, collections=6),
         "reengagement_14day": lambda: email_service.get_reengagement_14day_email("James"),
