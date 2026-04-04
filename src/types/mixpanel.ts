@@ -440,6 +440,10 @@ export interface FeatureOverviewMetrics {
     uniqueUsers: number;
     trend: number | null;
   }[];
+  memoryEnabled: {
+    uniqueUsers: number;
+    trend: number | null;
+  };
   lastUpdated: string;
 }
 

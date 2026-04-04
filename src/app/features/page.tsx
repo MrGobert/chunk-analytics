@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useMemo } from 'react';
+import { Brain } from 'lucide-react';
 import gsap from 'gsap';
 import { useDashboardFilters } from '@/hooks/useDashboardFilters';
 import PageHeader from '@/components/layout/PageHeader';
@@ -458,6 +459,19 @@ export default function FeaturesPage() {
         lastUpdated={lastUpdated}
         isRefreshing={isRefreshing}
       />
+
+      {/* ── Memory Enabled Stat Card ─────────────────────────────────────── */}
+      {overview && (
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+          <StatCard
+            title="Memory Enabled"
+            value={overview.memoryEnabled.uniqueUsers}
+            trend={overview.memoryEnabled.trend}
+            icon={<Brain className="w-4 h-4" />}
+            subtitle="Users who turned on Memory"
+          />
+        </div>
+      )}
 
       {/* ── Feature Overview Charts ────────────────────────────────────────── */}
       {overview && (

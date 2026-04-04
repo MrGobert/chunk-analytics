@@ -92,6 +92,44 @@ export async function GET(request: NextRequest) {
       previousCategoryTotals.set(category, (previousCategoryTotals.get(category) || 0) + 1);
     }
 
+    // Memory enabled: unique users who toggled Memory ON or enabled via onboarding modal
+    const memoryEnabledUsers = new Set<string>();
+    for (const event of featureEvents) {
+      if (
+        event.event === 'Memory_Toggled' &&
+        (event.properties.enabled === true || event.properties.enabled === 'true')
+      ) {
+        memoryEnabledUsers.add(event.properties.distinct_id);
+      }
+    }
+    // Also count users who enabled Memory via the onboarding modal
+    for (const event of events) {
+      if (
+        event.event === 'Onboarding_Completed' &&
+        event.properties.source === 'memory_modal'
+      ) {
+        memoryEnabledUsers.add(event.properties.distinct_id);
+      }
+    }
+
+    const prevMemoryEnabledUsers = new Set<string>();
+    for (const event of prevFeatureEvents) {
+      if (
+        event.event === 'Memory_Toggled' &&
+        (event.properties.enabled === true || event.properties.enabled === 'true')
+      ) {
+        prevMemoryEnabledUsers.add(event.properties.distinct_id);
+      }
+    }
+    for (const event of prevEvents) {
+      if (
+        event.event === 'Onboarding_Completed' &&
+        event.properties.source === 'memory_modal'
+      ) {
+        prevMemoryEnabledUsers.add(event.properties.distinct_id);
+      }
+    }
+
     // Build response
     const features = Object.keys(FEATURE_CATEGORIES).map(category => {
       const stats = categoryStats.get(category)!;
@@ -106,6 +144,10 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       features,
+      memoryEnabled: {
+        uniqueUsers: memoryEnabledUsers.size,
+        trend: calculateTrend(memoryEnabledUsers.size, prevMemoryEnabledUsers.size),
+      },
       dateRange,
       platform,
       userType,
