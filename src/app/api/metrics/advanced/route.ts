@@ -79,23 +79,25 @@ export async function GET(request: NextRequest) {
       const day7RetainedUsers = new Set<string>();
       const day30RetainedUsers = new Set<string>();
 
-      userFirstDates.forEach((firstDate, userId) => {
-        // Get all sessions for this user
-        const userEvents = events.filter((e) =>
-          e.properties.distinct_id === userId &&
-          (e.event === '$ae_session' || e.event === 'Session_Started' || e.event === 'Marketing_Session_Started' || e.event === 'App_Session_Started')
-        );
+      // Pre-group session events by user for O(events) instead of O(users × events)
+      const sessionEvents = filterEventsByType(events, ['App_Session_Started', 'Marketing_Session_Started']);
+      const sessionsByUser = new Map<string, typeof sessionEvents>();
+      for (const e of sessionEvents) {
+        const uid = e.properties.distinct_id;
+        if (!sessionsByUser.has(uid)) sessionsByUser.set(uid, []);
+        sessionsByUser.get(uid)!.push(e);
+      }
 
+      userFirstDates.forEach((firstDate, userId) => {
+        const userEvents = sessionsByUser.get(userId) || [];
         for (const e of userEvents) {
           const eventDate = new Date(e.properties.time * 1000);
           const daysDiff = differenceInDays(eventDate, firstDate);
 
-          // Window-based retention: Day 1 = returned within days 1-2
+          // Window-based retention with industry-standard narrow windows
           if (daysDiff >= 1 && daysDiff <= 2) day1RetainedUsers.add(userId);
-          // Day 7 = returned within days 7-14
-          if (daysDiff >= 7 && daysDiff <= 14) day7RetainedUsers.add(userId);
-          // Day 30 = returned within days 30-60
-          if (daysDiff >= 30 && daysDiff <= 60) day30RetainedUsers.add(userId);
+          if (daysDiff >= 6 && daysDiff <= 8) day7RetainedUsers.add(userId);
+          if (daysDiff >= 28 && daysDiff <= 32) day30RetainedUsers.add(userId);
         }
       });
 
@@ -128,11 +130,7 @@ export async function GET(request: NextRequest) {
       [...allUserIds].filter((id) => !guestUserIds.has(id))
     );
 
-    const purchaseEvents = filterEventsByType(events, [
-      'Purchase Completed',
-      'Purchase_Completed',
-      '$ae_iap'
-    ]);
+    const purchaseEvents = filterEventsByType(events, ['Purchase_Completed']);
     const paidUserIds = new Set(purchaseEvents.map((e) => e.properties.distinct_id));
 
     const paidUsers = paidUserIds.size;
@@ -142,15 +140,13 @@ export async function GET(request: NextRequest) {
     // ============================================
     // Traffic Sources (Web only)
     // ============================================
-    const sessionEvents = events.filter((e) => 
-      e.event === 'Session_Started' || e.event === 'Marketing_Session_Started' || e.event === 'App_Session_Started' || e.event === 'Page_Viewed'
-    );
+    const trafficSessionEvents = filterEventsByType(events, ['App_Session_Started', 'Marketing_Session_Started', 'Page_Viewed']);
     
     // Extract referrer domains
     const referrerCounts = new Map<string, number>();
     const utmSourceCounts = new Map<string, number>();
     
-    sessionEvents.forEach((e) => {
+    trafficSessionEvents.forEach((e) => {
       const referrer = e.properties.referrer as string;
       const utmSource = e.properties.utm_source as string;
       
@@ -189,8 +185,8 @@ export async function GET(request: NextRequest) {
     // ============================================
     // Average Session Duration
     // ============================================
-    const sessionLengths = events
-      .filter((e) => (e.event === '$ae_session' || e.event === 'App_Session_Started' || e.event === 'Marketing_Session_Started') && e.properties.$ae_session_length)
+    const sessionLengths = filterEventsByType(events, ['App_Session_Started', 'Marketing_Session_Started'])
+      .filter((e) => e.properties.$ae_session_length)
       .map((e) => e.properties.$ae_session_length as number)
       .filter((length) => length > 0 && length < 7200); // Filter outliers (< 2 hours)
     
@@ -201,7 +197,7 @@ export async function GET(request: NextRequest) {
     // ============================================
     // Searches per User
     // ============================================
-    const searchEvents = filterEventsByType(events, ['Search Performed', 'Search', 'Search_Performed']);
+    const searchEvents = filterEventsByType(events, ['Search_Performed']);
     const searchesPerUser = allUserIds.size > 0 ? searchEvents.length / allUserIds.size : 0;
 
     // ============================================
@@ -209,21 +205,19 @@ export async function GET(request: NextRequest) {
     // ============================================
     const featureFirstUse = new Map<string, Set<string>>();
     const featureEvents = [
-      { events: ['Note_Created', 'Notes'], name: 'Notes' },
-      { events: ['Document_Uploaded', 'Documents'], name: 'Documents' },
-      { events: ['Image_Generation_Started', 'Image Generation'], name: 'Image Generation' },
-      { events: ['Collection_Created', 'Collections'], name: 'Collections' },
-      { events: ['Memory_Added', 'AI Memory'], name: 'Memory' },
+      { events: ['Note_Created'], name: 'Notes' },
+      { events: ['Document_Uploaded'], name: 'Documents' },
+      { events: ['Image_Generation_Started'], name: 'Image Generation' },
+      { events: ['Collection_Created'], name: 'Collections' },
+      { events: ['Memory_Added'], name: 'Memory' },
       { events: ['Research_Report_Initiated', 'Research_Report_Completed'], name: 'Research Reports' },
       { events: ['Note_Writing_Tool_Used'], name: 'Writing Tools' },
-      { events: ['Search Performed', 'Search', 'Search_Performed'], name: 'Searches' },
+      { events: ['Search_Performed'], name: 'Searches' },
     ];
 
     featureEvents.forEach(({ events: eventNames, name }) => {
       const users = new Set(
-        events
-          .filter((e) => eventNames.includes(e.event))
-          .map((e) => e.properties.distinct_id)
+        filterEventsByType(events, eventNames).map((e) => e.properties.distinct_id)
       );
       featureFirstUse.set(name, users);
     });

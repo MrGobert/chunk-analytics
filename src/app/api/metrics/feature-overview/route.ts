@@ -6,23 +6,26 @@ import {
   fetchMixpanelEvents,
   filterByPlatform,
   filterByUserType,
+  normalizeEventName,
   getLastUpdated,
   calculateTrend,
   UserType,
 } from '@/lib/mixpanel';
+import { MixpanelEvent } from '@/types/mixpanel';
 import { getDateRange, formatDate } from '@/lib/utils';
 import { subDays } from 'date-fns';
 
-// Map events to feature categories for cross-feature comparison
+// Map canonical event names to feature categories for cross-feature comparison.
+// All event names here must be canonical — legacy names are resolved via normalizeEventName().
 const FEATURE_CATEGORIES: Record<string, string[]> = {
-  Search: ['Search_Performed', 'Search Performed', 'Search'],
+  Search: ['Search_Performed'],
   Research: ['Research_Report_Initiated', 'Research_Report_Completed', 'Research_Report_Viewed', 'Research_Report_Exported', 'Research_Report_Shared', 'Research_Report_Deleted', 'Research_History_Viewed', 'Research_Settings_Changed', 'Research_Report_Added_To_Collection', 'Research_Report_Filtered', 'Research_Published'],
   Notes: ['Note_Created', 'Note_Viewed', 'Note_Saved', 'Note_Shared', 'Note_Published', 'Note_Writing_Tool_Used', 'Note_Uploaded_To_Documents', 'Note_Deleted'],
   Collections: ['Collection_Created', 'Collection_Viewed', 'Collection_Chat_Started', 'Collection_Exported', 'Collection_Shared', 'Collection_URL_Added', 'Collection_Updated', 'Collection_Deleted', 'Collection_URL_Removed'],
   Artifacts: ['Artifact_Created', 'Artifact_Completed', 'Artifact_Viewed', 'Artifact_Saved_To_Notes', 'Artifact_File_Uploaded', 'Artifact_Failed', 'Artifact_Deleted', 'Artifact_Tab_Switched', 'Artifact_Visual_Generated', 'Artifact_Filtered', 'Artifact_Searched', 'Artifact_Onboarding_Viewed', 'Artifact_Onboarding_Completed', 'Artifact_Onboarding_Skipped', 'Artifact_Batch_Started', 'Artifact_Batch_Completed'],
-  Documents: ['Document_Uploaded', 'Document_Viewed', 'Document_Deleted', 'Document_Attached', 'Documents'],
-  'Image Gen': ['Image_Generation_Started', 'Image_Generation_Completed', 'Image Generation', 'Images'],
-  Memory: ['Memory_Viewed', 'Memory_Toggled', 'Memory_Added', 'Memory_Deleted', 'AI Memory', 'Memory Management Viewed', 'Memory_Management_Viewed'],
+  Documents: ['Document_Uploaded', 'Document_Viewed', 'Document_Deleted', 'Document_Attached'],
+  'Image Gen': ['Image_Generation_Started', 'Image_Generation_Completed'],
+  Memory: ['Memory_Viewed', 'Memory_Toggled', 'Memory_Added', 'Memory_Deleted', 'Memory_Management_Viewed'],
 };
 
 // Flatten all category events into a single set for efficient filtering
@@ -37,7 +40,37 @@ for (const [category, events] of Object.entries(FEATURE_CATEGORIES)) {
 }
 
 function categorizeEvent(eventName: string): string | null {
-  return EVENT_TO_CATEGORY.get(eventName) ?? null;
+  return EVENT_TO_CATEGORY.get(normalizeEventName(eventName)) ?? null;
+}
+
+/** Compute the set of users whose latest Memory_Toggled state is ON (or who enabled via onboarding). */
+function getMemoryEnabledUsers(toggleEvents: MixpanelEvent[], allEvents: MixpanelEvent[]): Set<string> {
+  const userLatestToggle = new Map<string, { enabled: boolean; time: number }>();
+  for (const event of toggleEvents) {
+    if (event.event === 'Memory_Toggled') {
+      const userId = event.properties.distinct_id;
+      const time = event.properties.time as number;
+      const enabled = event.properties.enabled === true || event.properties.enabled === 'true';
+      const existing = userLatestToggle.get(userId);
+      if (!existing || time > existing.time) {
+        userLatestToggle.set(userId, { enabled, time });
+      }
+    }
+  }
+  const enabledUsers = new Set<string>();
+  for (const [userId, { enabled }] of userLatestToggle) {
+    if (enabled) enabledUsers.add(userId);
+  }
+  for (const event of allEvents) {
+    if (event.event === 'Onboarding_Completed' && event.properties.source === 'memory_modal') {
+      const userId = event.properties.distinct_id;
+      const latestToggle = userLatestToggle.get(userId);
+      if (!latestToggle || latestToggle.enabled) {
+        enabledUsers.add(userId);
+      }
+    }
+  }
+  return enabledUsers;
 }
 
 export async function GET(request: NextRequest) {
@@ -64,7 +97,8 @@ export async function GET(request: NextRequest) {
 
     const platformFiltered = filterByPlatform(allEvents, platform);
     const events = filterByUserType(platformFiltered, userType);
-    const featureEvents = events.filter(e => ALL_FEATURE_EVENTS.has(e.event));
+    // Normalize event names before categorization so legacy names map to canonical categories
+    const featureEvents = events.filter(e => ALL_FEATURE_EVENTS.has(normalizeEventName(e.event)));
 
     // Aggregate per category: total events + unique users
     const categoryStats = new Map<string, { totalEvents: number; uniqueUsers: Set<string> }>();
@@ -84,7 +118,7 @@ export async function GET(request: NextRequest) {
     const previousCategoryTotals = new Map<string, number>();
     const prevPlatform = filterByPlatform(prevAllEvents, platform);
     const prevEvents = filterByUserType(prevPlatform, userType);
-    const prevFeatureEvents = prevEvents.filter(e => ALL_FEATURE_EVENTS.has(e.event));
+    const prevFeatureEvents = prevEvents.filter(e => ALL_FEATURE_EVENTS.has(normalizeEventName(e.event)));
 
     for (const event of prevFeatureEvents) {
       const category = categorizeEvent(event.event);
@@ -92,43 +126,9 @@ export async function GET(request: NextRequest) {
       previousCategoryTotals.set(category, (previousCategoryTotals.get(category) || 0) + 1);
     }
 
-    // Memory enabled: unique users who toggled Memory ON or enabled via onboarding modal
-    const memoryEnabledUsers = new Set<string>();
-    for (const event of featureEvents) {
-      if (
-        event.event === 'Memory_Toggled' &&
-        (event.properties.enabled === true || event.properties.enabled === 'true')
-      ) {
-        memoryEnabledUsers.add(event.properties.distinct_id);
-      }
-    }
-    // Also count users who enabled Memory via the onboarding modal
-    for (const event of events) {
-      if (
-        event.event === 'Onboarding_Completed' &&
-        event.properties.source === 'memory_modal'
-      ) {
-        memoryEnabledUsers.add(event.properties.distinct_id);
-      }
-    }
-
-    const prevMemoryEnabledUsers = new Set<string>();
-    for (const event of prevFeatureEvents) {
-      if (
-        event.event === 'Memory_Toggled' &&
-        (event.properties.enabled === true || event.properties.enabled === 'true')
-      ) {
-        prevMemoryEnabledUsers.add(event.properties.distinct_id);
-      }
-    }
-    for (const event of prevEvents) {
-      if (
-        event.event === 'Onboarding_Completed' &&
-        event.properties.source === 'memory_modal'
-      ) {
-        prevMemoryEnabledUsers.add(event.properties.distinct_id);
-      }
-    }
+    // Memory adoption — use extracted helper for both periods
+    const memoryEnabledUsers = getMemoryEnabledUsers(featureEvents, events);
+    const prevMemoryEnabledUsers = getMemoryEnabledUsers(prevFeatureEvents, prevEvents);
 
     // Build response
     const features = Object.keys(FEATURE_CATEGORIES).map(category => {

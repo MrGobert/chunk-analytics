@@ -6,6 +6,8 @@ import {
   fetchMixpanelEvents,
   filterByPlatform,
   filterByUserType,
+  filterEventsByType,
+  normalizeEventName,
   getUniqueUsers,
   getUniqueUsersByType,
   getUserCountsByType,
@@ -43,20 +45,13 @@ export async function GET(request: NextRequest) {
     const uniqueUsers = getUniqueUsersByType(appOnlyPlatformEvents, userType);
     const totalUsers = uniqueUsers.size;
     const marketingSessions = countEvents(events, 'Marketing_Session_Started');
-    const appSessions = countEvents(events, 'App_Session_Started') + countEvents(events, '$ae_session') + countEvents(events, 'Session_Started');
+    const appSessions = countEvents(events, 'App_Session_Started');
     const totalSessions = marketingSessions + appSessions;
-    // Count both old and new event names for backwards compatibility
-    const totalSearches = countEvents(events, 'Search Performed') +
-      countEvents(events, 'Search') +
-      countEvents(events, 'Search_Performed');
+    const totalSearches = countEvents(events, 'Search_Performed');
 
-    // Count unique users who signed up (both old and new event names)
-    const signupEvents = events.filter((e) =>
-      e.event === 'SignUp' ||
-      e.event === 'Signup_Completed' ||
-      e.event === 'Account Created'
-    );
-    const uniqueSignups = new Set(signupEvents.map((e) => e.properties.distinct_id)).size;
+    // Count unique users who signed up — use same filtered event set for consistent denominator
+    const signupEventsFiltered = filterEventsByType(events, ['Signup_Completed']);
+    const uniqueSignups = new Set(signupEventsFiltered.map((e) => e.properties.distinct_id)).size;
     const conversionRate = totalUsers > 0 ? uniqueSignups / totalUsers : 0;
 
     // Calculate trends (compare to previous period)
@@ -78,11 +73,9 @@ export async function GET(request: NextRequest) {
 
     const previousUsers = getUniqueUsersByType(previousAppOnlyPlatformEvents, userType).size;
     const previousMarketingSessions = countEvents(previousEvents, 'Marketing_Session_Started');
-    const previousAppSessions = countEvents(previousEvents, 'App_Session_Started') + countEvents(previousEvents, '$ae_session') + countEvents(previousEvents, 'Session_Started');
+    const previousAppSessions = countEvents(previousEvents, 'App_Session_Started');
     const previousSessions = previousMarketingSessions + previousAppSessions;
-    const previousSearches = countEvents(previousEvents, 'Search Performed') +
-      countEvents(previousEvents, 'Search') +
-      countEvents(previousEvents, 'Search_Performed');
+    const previousSearches = countEvents(previousEvents, 'Search_Performed');
 
     const usersTrend = calculateTrend(totalUsers, previousUsers);
     const sessionsTrend = calculateTrend(totalSessions, previousSessions);
@@ -102,7 +95,7 @@ export async function GET(request: NextRequest) {
       });
 
       const dayMarketingSessions = dayEvents.filter((e) => e.event === 'Marketing_Session_Started').length;
-      const dayAppSessions = dayEvents.filter((e) => e.event === 'App_Session_Started' || e.event === '$ae_session' || e.event === 'Session_Started').length;
+      const dayAppSessions = dayEvents.filter((e) => normalizeEventName(e.event) === 'App_Session_Started').length;
 
       return {
         date,
@@ -110,11 +103,7 @@ export async function GET(request: NextRequest) {
         sessions: dayMarketingSessions + dayAppSessions,
         marketingSessions: dayMarketingSessions,
         appSessions: dayAppSessions,
-        searches: dayEvents.filter((e) =>
-          e.event === 'Search Performed' ||
-          e.event === 'Search' ||
-          e.event === 'Search_Performed'
-        ).length,
+        searches: dayEvents.filter((e) => normalizeEventName(e.event) === 'Search_Performed').length,
       };
     });
 

@@ -88,26 +88,30 @@ export async function GET(request: NextRequest) {
       .map(([name, value]) => ({ name, value }))
       .sort((a, b) => b.value - a.value);
 
-    // Research funnel
-    const completedPct = totalReportsInitiated > 0 ? Math.min(100, (totalReportsCompleted / totalReportsInitiated) * 100) : 0;
-    // Note: viewedPct is based on event counts (not unique users), so it can exceed 100% if reports are viewed multiple times
-    const viewedPct = totalReportsInitiated > 0 ? Math.min(100, (totalReportsViewed / totalReportsInitiated) * 100) : 0;
-    const exportedAndShared = totalExports + totalShares;
-    const exportedPct = totalReportsInitiated > 0 ? Math.min(100, (exportedAndShared / totalReportsInitiated) * 100) : 0;
+    // Research funnel — use unique users per step for accurate funnel percentages
+    const usersInitiated = new Set(researchEvents.filter(e => e.event === 'Research_Report_Initiated').map(e => e.properties.distinct_id));
+    const usersCompleted = new Set(researchEvents.filter(e => e.event === 'Research_Report_Completed').map(e => e.properties.distinct_id));
+    const usersViewed = new Set(researchEvents.filter(e => e.event === 'Research_Report_Viewed').map(e => e.properties.distinct_id));
+    const usersExportedOrShared = new Set(researchEvents.filter(e => e.event === 'Research_Report_Exported' || e.event === 'Research_Report_Shared').map(e => e.properties.distinct_id));
+
+    const funnelBase = usersInitiated.size || 1;
+    const completedPct = (usersCompleted.size / funnelBase) * 100;
+    const viewedPct = (usersViewed.size / funnelBase) * 100;
+    const exportedPct = (usersExportedOrShared.size / funnelBase) * 100;
 
     const researchFunnel = [
-      { name: 'Initiated', count: totalReportsInitiated, percentage: 100, dropoff: 0 },
+      { name: 'Initiated', count: usersInitiated.size, percentage: 100, dropoff: 0 },
       {
-        name: 'Completed', count: totalReportsCompleted, percentage: completedPct,
-        dropoff: totalReportsInitiated > 0 ? Math.min(100, Math.max(0, ((totalReportsInitiated - totalReportsCompleted) / totalReportsInitiated) * 100)) : 0
+        name: 'Completed', count: usersCompleted.size, percentage: completedPct,
+        dropoff: usersInitiated.size > 0 ? ((usersInitiated.size - usersCompleted.size) / usersInitiated.size) * 100 : 0
       },
       {
-        name: 'Viewed', count: totalReportsViewed, percentage: viewedPct,
-        dropoff: totalReportsCompleted > 0 ? Math.min(100, Math.max(0, ((totalReportsCompleted - totalReportsViewed) / totalReportsCompleted) * 100)) : 0
+        name: 'Viewed', count: usersViewed.size, percentage: viewedPct,
+        dropoff: usersCompleted.size > 0 ? ((usersCompleted.size - usersViewed.size) / usersCompleted.size) * 100 : 0
       },
       {
-        name: 'Exported/Shared', count: exportedAndShared, percentage: exportedPct,
-        dropoff: totalReportsViewed > 0 ? Math.min(100, Math.max(0, ((totalReportsViewed - exportedAndShared) / totalReportsViewed) * 100)) : 0
+        name: 'Exported/Shared', count: usersExportedOrShared.size, percentage: exportedPct,
+        dropoff: usersViewed.size > 0 ? ((usersViewed.size - usersExportedOrShared.size) / usersViewed.size) * 100 : 0
       },
     ];
 

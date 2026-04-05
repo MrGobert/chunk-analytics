@@ -6,7 +6,7 @@ import {
   fetchMixpanelEvents,
   filterByPlatform,
   filterByUserType,
-  countEventsNormalized,
+  countEvents,
   getUniqueUsersByDate,
   getLastUpdated,
   UserType,
@@ -39,7 +39,7 @@ export async function GET(request: NextRequest) {
 
     // Today's searches
     const todayEvents = appEvents.filter(e => formatDate(new Date(e.properties.time * 1000)) === today);
-    const todaySearches = countEventsNormalized(todayEvents, 'Search_Performed');
+    const todaySearches = countEvents(todayEvents, 'Search_Performed');
 
     // 7-day DAU trend
     const days = getDaysInRange(dateRange.from, dateRange.to);

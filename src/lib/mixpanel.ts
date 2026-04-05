@@ -19,9 +19,18 @@ const EVENT_NAME_MAP: Record<string, string> = {
   'Search': 'Search_Performed',
   // Purchase variants → canonical
   'Purchase Completed': 'Purchase_Completed',
+  '$ae_iap': 'Purchase_Completed',
   // Signup variants → canonical
   'SignUp': 'Signup_Completed',
   'Account Created': 'Signup_Completed',
+  // Session variants → canonical
+  'Session_Started': 'App_Session_Started',
+  '$ae_session': 'App_Session_Started',
+  // Paywall variants → canonical
+  'Paywall Dismissed': 'Paywall_Dismissed',
+  // Coach mark legacy names → canonical
+  'collection_coach_mark_shown': 'Collection_Coach_Mark_Shown',
+  'collection_coach_mark_tapped': 'Collection_Coach_Mark_Tapped',
 };
 
 /**
@@ -31,22 +40,6 @@ export function normalizeEventName(eventName: string): string {
   return EVENT_NAME_MAP[eventName] || eventName;
 }
 
-/**
- * Count events by canonical name, automatically normalizing duplicates.
- */
-export function countEventsNormalized(events: MixpanelEvent[], canonicalName: string): number {
-  return events.filter((e) => normalizeEventName(e.event) === canonicalName).length;
-}
-
-/**
- * Filter events by canonical name(s), automatically normalizing.
- */
-export function filterEventsByTypeNormalized(
-  events: MixpanelEvent[],
-  canonicalNames: string[]
-): MixpanelEvent[] {
-  return events.filter((e) => canonicalNames.includes(normalizeEventName(e.event)));
-}
 
 // ============================================
 // User Type Detection
@@ -306,7 +299,7 @@ export function filterEventsByType(
   events: MixpanelEvent[],
   eventTypes: string[]
 ): MixpanelEvent[] {
-  return events.filter((e) => eventTypes.includes(e.event));
+  return events.filter((e) => eventTypes.includes(normalizeEventName(e.event)));
 }
 
 export function filterByPlatform(
@@ -351,7 +344,7 @@ export function getUniqueUsers(events: MixpanelEvent[]): Set<string> {
 }
 
 export function countEvents(events: MixpanelEvent[], eventType: string): number {
-  return events.filter((e) => e.event === eventType).length;
+  return events.filter((e) => normalizeEventName(e.event) === eventType).length;
 }
 
 export function groupEventsByDate(
@@ -388,6 +381,11 @@ export function getUniqueUsersByDate(
   return grouped;
 }
 
+/**
+ * Calculate percentage change between two periods.
+ * Returns null when previous=0 and current>0 (metric is "new" — no meaningful trend).
+ * Frontend StatCard renders null as a "New" badge, which is intentional UX.
+ */
 export function calculateTrend(
   current: number,
   previous: number
