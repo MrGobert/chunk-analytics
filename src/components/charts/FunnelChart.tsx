@@ -12,7 +12,11 @@ interface FunnelChartProps {
 }
 
 export default function FunnelChart({ data }: FunnelChartProps) {
-  const maxCount = Math.max(...data.map((d) => d.count));
+  if (data.length === 0) {
+    return <div className="text-sm text-zinc-500 text-center py-8">No funnel data available</div>;
+  }
+
+  const maxCount = Math.max(...data.map((d) => d.count), 1);
 
   return (
     <div className="space-y-4 h-full flex flex-col justify-center">

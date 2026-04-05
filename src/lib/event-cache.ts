@@ -4,6 +4,7 @@ import os from 'os';
 import path from 'path';
 
 const TTL = 5 * 60 * 1000; // 5 minutes
+const LOCK_MAX_AGE = 5 * 60 * 1000; // 5 minutes — stale locks are auto-cleaned
 
 // In addition to memory cache (for same worker), use temp directory cache
 const eventCache = new Map<string, { events: MixpanelEvent[]; timestamp: number }>();
@@ -36,6 +37,16 @@ export async function getCachedEventsAsync(fromDate: string, toDate: string): Pr
 
   // 2. Wait for Lock if another worker is currently downloading the 39MB file
   const lockFile = getLockFilePath(key);
+  // Clean up stale lock files from crashed workers
+  if (fs.existsSync(lockFile)) {
+    try {
+      const lockStat = fs.statSync(lockFile);
+      if (Date.now() - lockStat.mtimeMs > LOCK_MAX_AGE) {
+        console.warn(`Removing stale lock file (age: ${Math.round((Date.now() - lockStat.mtimeMs) / 1000)}s): ${lockFile}`);
+        fs.unlinkSync(lockFile);
+      }
+    } catch { /* lock was already removed */ }
+  }
   let trys = 0;
   while (fs.existsSync(lockFile) && trys < 60) {
     await sleep(500); // Poll every 500ms
@@ -82,7 +93,21 @@ export async function getStaleCachedEvents(fromDate: string, toDate: string): Pr
 export function acquireLock(fromDate: string, toDate: string): boolean {
   const key = buildKey(fromDate, toDate);
   const lockFile = getLockFilePath(key);
-  if (fs.existsSync(lockFile)) return false;
+
+  if (fs.existsSync(lockFile)) {
+    // Allow stealing stale locks from crashed workers
+    try {
+      const lockStat = fs.statSync(lockFile);
+      if (Date.now() - lockStat.mtimeMs > LOCK_MAX_AGE) {
+        console.warn(`Stealing stale lock (age: ${Math.round((Date.now() - lockStat.mtimeMs) / 1000)}s): ${lockFile}`);
+        fs.unlinkSync(lockFile);
+      } else {
+        return false;
+      }
+    } catch {
+      return false;
+    }
+  }
 
   try {
     fs.writeFileSync(lockFile, Date.now().toString(), { flag: 'wx' });

@@ -146,6 +146,27 @@ def _get_tenure_date(user_data: dict) -> datetime:
     )
 
 
+def _is_annual_plan(user_data: dict, price: float) -> bool:
+    """Detect annual plan from subscription metadata, falling back to price heuristic."""
+    # Prefer explicit period field from RevenueCat
+    period = (user_data.get("subscriptionPeriod") or "").lower()
+    if period in ("annual", "yearly", "year"):
+        return True
+    if period in ("monthly", "month"):
+        return False
+    # Check productId for annual indicators
+    product_id = (user_data.get("productId") or user_data.get("product_id") or "").lower()
+    if "annual" in product_id or "yearly" in product_id or "year" in product_id:
+        return True
+    if "monthly" in product_id or "month" in product_id:
+        return False
+    # Fallback: price heuristic (annual plans are typically > $15)
+    if price > 15:
+        logging.debug(f"Annual plan detected via price heuristic (${price}) — no subscriptionPeriod/productId field")
+        return True
+    return False
+
+
 def _compute_health_score(user_data: dict, now: datetime) -> dict:
     """Compute health score from 5 weighted factors."""
 
@@ -240,6 +261,11 @@ def _compute_revenue_summary(days: int) -> dict:
     expired_docs = list(users_ref.where("subscriptionStatus", "==", "expired").limit(5000).stream())
     cancelled_docs = list(users_ref.where("subscriptionStatus", "==", "cancelled").limit(5000).stream())
 
+    for label, docs in [("active", active_docs), ("trial", trial_docs),
+                         ("expired", expired_docs), ("cancelled", cancelled_docs)]:
+        if len(docs) == 5000:
+            logging.warning(f"[ANALYTICS_API] revenue_summary: '{label}' query returned exactly 5000 docs — results may be truncated")
+
     total_subscribers = len(active_docs)
     trial_users = len(trial_docs)
 
@@ -253,8 +279,7 @@ def _compute_revenue_summary(days: int) -> dict:
         price = float(data.get("subscriptionPrice", DEFAULT_MONTHLY_PRICE) or DEFAULT_MONTHLY_PRICE)
 
         # Normalize annual prices to monthly equivalent for MRR
-        # Annual plans are typically > $15 (e.g., $69.99/year vs $9.99/month)
-        is_annual = price > 15
+        is_annual = _is_annual_plan(data, price)
         monthly_price = round(price / 12, 2) if is_annual else price
         mrr += monthly_price
 
@@ -293,45 +318,9 @@ def _compute_revenue_summary(days: int) -> dict:
     start_active = total_subscribers + churned
     churn_rate = round((churned / start_active * 100) if start_active > 0 else 0, 1)
 
-    # MRR change vs prior period
-    prior_churned = 0
-    prior_new = 0
-    for doc in expired_docs + cancelled_docs:
-        data = doc.to_dict()
-        exp_date = _to_datetime(data.get("expirationDate"))
-        if exp_date and prior_start <= exp_date < cutoff:
-            prior_churned += 1
-    for doc in active_docs:
-        data = doc.to_dict()
-        created = _get_creation_date(data)
-        if created and prior_start <= created < cutoff:
-            prior_new += 1
-
-    prior_net = prior_new - prior_churned
-    if prior_net != 0:
-        mrr_change = round(((net_new - prior_net) / abs(prior_net)) * 100, 1)
-    elif net_new > 0:
-        mrr_change = 100.0
-    else:
-        mrr_change = 0.0
-
-    # Today's revenue (approximate from conversions today)
-    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    today_revenue = 0.0
-    try:
-        tracking_docs = list(
-            db.collection("emailTracking")
-            .where("converted", "==", True)
-            .where("convertedAt", ">=", today_start)
-            .limit(500)
-            .stream()
-        )
-        today_revenue = len(tracking_docs) * DEFAULT_MONTHLY_PRICE
-    except Exception:
-        pass
-
-    # MRR trend: try to load from Redis cache (populated by daily snapshot task)
+    # MRR trend + change: load daily MRR snapshots from Redis (populated by snapshot_daily_mrr task)
     mrr_trend = []
+    mrr_change = 0.0
     redis = _get_redis()
     if redis:
         try:
@@ -340,6 +329,34 @@ def _compute_revenue_summary(days: int) -> dict:
                 mrr_trend = json.loads(trend_data)
         except Exception:
             pass
+
+    # MRR change: compare current MRR against historical MRR from `days` ago
+    if mrr_trend:
+        target_date = (now - timedelta(days=days)).strftime("%Y-%m-%d")
+        prior_mrr = None
+        for point in mrr_trend:
+            if point.get("date") == target_date:
+                prior_mrr = point.get("mrr", 0)
+                break
+        # If exact date not found, use the oldest available point
+        if prior_mrr is None:
+            prior_mrr = mrr_trend[0].get("mrr", 0)
+        if prior_mrr and prior_mrr > 0:
+            mrr_change = round(((mrr - prior_mrr) / prior_mrr) * 100, 1)
+        elif mrr > 0:
+            mrr_change = 100.0
+
+    # Today's revenue: count all new active subscribers created today (not just
+    # email-attributed conversions) and use their actual subscription price.
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    today_revenue = 0.0
+    for doc in active_docs:
+        data = doc.to_dict()
+        created = _get_creation_date(data)
+        if created and created >= today_start:
+            price = float(data.get("subscriptionPrice", DEFAULT_MONTHLY_PRICE) or DEFAULT_MONTHLY_PRICE)
+            is_annual = _is_annual_plan(data, price)
+            today_revenue += round(price / 12, 2) if is_annual else price
 
     # If no historical data, return single point for today
     if not mrr_trend:
@@ -396,6 +413,8 @@ def _compute_subscriber_funnel(days: int) -> dict:
     all_users_in_period = list(
         users_ref.where("createdAt", ">=", cutoff).limit(5000).stream()
     )
+    if len(all_users_in_period) == 5000:
+        logging.warning("[ANALYTICS_API] subscriber_funnel: createdAt query returned exactly 5000 docs — results may be truncated")
 
     signed_up = len(all_users_in_period)
 
@@ -605,6 +624,11 @@ def _compute_churn_intelligence(days: int) -> dict:
     # Churned users in period
     expired_docs = list(users_ref.where("subscriptionStatus", "==", "expired").limit(5000).stream())
     cancelled_docs = list(users_ref.where("subscriptionStatus", "==", "cancelled").limit(5000).stream())
+
+    for label, docs in [("active", active_docs), ("trial", trial_docs),
+                         ("expired", expired_docs), ("cancelled", cancelled_docs)]:
+        if len(docs) == 5000:
+            logging.warning(f"[ANALYTICS_API] churn_intelligence: '{label}' query returned exactly 5000 docs — results may be truncated")
 
     churned_in_period = []
     for doc in expired_docs + cancelled_docs:
