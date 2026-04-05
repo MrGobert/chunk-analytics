@@ -314,6 +314,52 @@ export default function AcquisitionPage() {
         </>
       )}
 
+      {/* ─── Top Pages (Web only) ────────────────────────────────────────── */}
+      {metrics.topPages && metrics.topPages.length > 0 && (
+        <>
+          <div className="mt-12 mb-8 border-t border-zinc-800 pt-8">
+            <h2 className="text-xl font-bold text-foreground tracking-tight">Top Pages</h2>
+            <p className="text-sm text-zinc-500 mt-1">Most visited pages from the marketing site</p>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <ChartCard
+              title="Page Visit Distribution"
+              subtitle="Feature and marketing pages by visit count"
+            >
+              <BarChart
+                data={metrics.topPages.map((d) => ({
+                  page: d.page
+                    .replace(/-/g, ' ')
+                    .replace(/\b\w/g, (c) => c.toUpperCase()),
+                  visits: d.visits,
+                }))}
+                xKey="page"
+                yKey="visits"
+                horizontal
+              />
+            </ChartCard>
+            <ChartCard
+              title="Page Visits"
+              subtitle="Ranked by total visits"
+            >
+              <DataTable
+                data={metrics.topPages.map((d) => ({
+                  page: d.page
+                    .replace(/-/g, ' ')
+                    .replace(/\b\w/g, (c) => c.toUpperCase()),
+                  visits: d.visits,
+                }))}
+                columns={[
+                  { key: 'page', header: 'Page' },
+                  { key: 'visits', header: 'Visits' },
+                ]}
+              />
+            </ChartCard>
+          </div>
+        </>
+      )}
+
       {/* ─── Marketing & Conversion ──────────────────────────────────────── */}
       {marketing && (
         <>

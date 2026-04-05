@@ -3,6 +3,7 @@ import {
   fetchMixpanelEvents,
   filterByUserType,
   getLastUpdated,
+  getPropertyDistribution,
   UserType,
 } from '@/lib/mixpanel';
 import { getDateRange, getDaysInRange, formatDate } from '@/lib/utils';
@@ -397,8 +398,9 @@ export async function GET(request: NextRequest) {
     let dailyLines: { key: string; color: string; name: string }[];
     let subtitle: string;
 
-    // Build web onboarding metrics (returned for web platform only)
+    // Build web onboarding metrics and top pages (returned for web platform only)
     let webOnboarding = null;
+    let topPages: { page: string; visits: number }[] | null = null;
 
     if (platformParam === 'web') {
       const result = buildWebFunnel(events);
@@ -407,6 +409,29 @@ export async function GET(request: NextRequest) {
       subtitle =
         'Marketing site → guest trial → signup → onboarding → subscription';
       webOnboarding = buildWebOnboardingMetrics(events);
+
+      // Top pages — aggregate Feature_Page_Visited and Page_Viewed by page name
+      const featurePageEvents = events.filter((e) => e.event === 'Feature_Page_Visited');
+      const pageViewedEvents = events.filter((e) => e.event === 'Page_Viewed');
+
+      const featurePageDist = getPropertyDistribution(featurePageEvents, 'page');
+      const pageViewedDist = getPropertyDistribution(pageViewedEvents, 'page');
+
+      // Merge both distributions into a single map
+      const combinedPages = new Map<string, number>();
+      for (const [page, count] of featurePageDist) {
+        if (!page) continue;
+        combinedPages.set(page, (combinedPages.get(page) || 0) + count);
+      }
+      for (const [page, count] of pageViewedDist) {
+        if (!page) continue;
+        combinedPages.set(page, (combinedPages.get(page) || 0) + count);
+      }
+
+      topPages = Array.from(combinedPages)
+        .map(([page, visits]) => ({ page, visits }))
+        .sort((a, b) => b.visits - a.visits)
+        .slice(0, 15);
 
       dailyData = buildDailyData(events, days, [
         {
@@ -549,6 +574,7 @@ export async function GET(request: NextRequest) {
         dailyData,
         dailyLines,
         ...(webOnboarding ? { webOnboarding } : {}),
+        ...(topPages ? { topPages } : {}),
         lastUpdated: getLastUpdated(),
       },
       {

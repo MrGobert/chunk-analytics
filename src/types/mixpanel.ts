@@ -84,6 +84,7 @@ export interface AcquisitionFunnelMetrics {
   dailyData: Record<string, string | number>[];
   dailyLines: { key: string; color: string; name: string }[];
   webOnboarding?: WebOnboardingMetrics;
+  topPages?: { page: string; visits: number }[];
   lastUpdated: string;
 }
 
