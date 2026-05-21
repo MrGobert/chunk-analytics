@@ -26,6 +26,20 @@ const FEATURE_CATEGORIES: Record<string, string[]> = {
   Documents: ['Document_Uploaded', 'Document_Viewed', 'Document_Deleted', 'Document_Attached'],
   'Image Gen': ['Image_Generation_Started', 'Image_Generation_Completed'],
   Memory: ['Memory_Viewed', 'Memory_Toggled', 'Memory_Added', 'Memory_Deleted', 'Memory_Management_Viewed'],
+  Connectors: [
+    'Connector_Connect_Started',
+    'Connector_Connect_Succeeded',
+    'Connector_Connect_Failed',
+    'Connector_Disconnected',
+    'Connector_OAuth_Callback',
+    'Connector_Operation_Used',
+    'Notion_Search_Used',
+    'Notion_Page_Created',
+    'Notion_Append_Performed',
+    'Gamma_Generation_Started',
+    'Gamma_Generation_Completed',
+    'Gamma_Generation_Failed',
+  ],
 };
 
 // Flatten all category events into a single set for efficient filtering

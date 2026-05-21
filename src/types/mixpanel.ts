@@ -282,6 +282,27 @@ export interface SharingMetrics {
   lastUpdated: string;
 }
 
+export interface ConnectorsMetrics {
+  totalConnectStarted: number;
+  totalConnectSucceeded: number;
+  totalConnectFailed: number;
+  totalDisconnected: number;
+  totalOperations: number;
+  totalOperationsFailed: number;
+  uniqueConnectedUsers: number;
+  connectSuccessRate: number;
+  oauthCallbackSuccessRate: number;
+  connectStartedTrend: number | null;
+  connectSucceededTrend: number | null;
+  operationsTrend: number | null;
+  connectorsFunnel: FunnelStep[];
+  connectorBreakdown: { name: string; value: number }[];
+  operationBreakdown: { connector: string; operation: string; count: number }[];
+  dailyActivity: { date: string; connects: number; operations: number; disconnects: number }[];
+  topErrors: { error: string; count: number }[];
+  lastUpdated: string;
+}
+
 export interface CollectionsMetrics {
   totalCreated: number;
   totalViewed: number;
