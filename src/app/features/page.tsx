@@ -23,6 +23,7 @@ import type {
   CollectionsMetrics,
   ArtifactsMetrics,
   SharingMetrics,
+  ConnectorsMetrics,
 } from '@/types/mixpanel';
 
 // ─── Color palette ──────────────────────────────────────────────────────────
@@ -377,6 +378,156 @@ function SharingSection({ dateRange, platform, userType }: FilterProps) {
   );
 }
 
+// ─── Connectors Tab ─────────────────────────────────────────────────────────
+
+function ConnectorsSection({ dateRange, platform, userType }: FilterProps) {
+  const { data: metrics, isLoading } = useAnalytics<ConnectorsMetrics>(
+    '/api/metrics/connectors',
+    { range: dateRange, platform, userType },
+  );
+
+  if (isLoading || !metrics) return <TabSkeleton />;
+
+  const operationsByConnector = metrics.operationBreakdown.map((row) => ({
+    label: `${row.connector} · ${row.operation}`,
+    count: row.count,
+  }));
+
+  return (
+    <div className="mt-8">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+        <StatCard
+          title="Connections Started"
+          value={metrics.totalConnectStarted}
+          trend={metrics.connectStartedTrend}
+        />
+        <StatCard
+          title="Connect Success Rate"
+          value={metrics.connectSuccessRate}
+          format="percentage"
+        />
+        <StatCard
+          title="Operations Used"
+          value={metrics.totalOperations}
+          trend={metrics.operationsTrend}
+        />
+        <StatCard
+          title="Active Users"
+          value={metrics.uniqueConnectedUsers}
+          subtitle="Unique users with connector activity"
+        />
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+        <StatCard
+          title="Failed Connects"
+          value={metrics.totalConnectFailed}
+        />
+        <StatCard
+          title="OAuth Callback Success"
+          value={metrics.oauthCallbackSuccessRate}
+          format="percentage"
+        />
+        <StatCard
+          title="Disconnected"
+          value={metrics.totalDisconnected}
+        />
+      </div>
+
+      <div className="grid grid-cols-1 gap-6 mb-8">
+        <ChartCard
+          title="Connection Funnel"
+          subtitle="Start → Succeed → First Operation"
+        >
+          {metrics.connectorsFunnel.length > 0 ? (
+            <FunnelChart data={metrics.connectorsFunnel} />
+          ) : (
+            <div className="flex items-center justify-center h-64 text-zinc-500">
+              No funnel data yet
+            </div>
+          )}
+        </ChartCard>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+        <ChartCard title="Which App Is Used" subtitle="Operations by connector">
+          {metrics.connectorBreakdown.length > 0 ? (
+            <PieChart
+              data={metrics.connectorBreakdown}
+              colors={['#E63B2E', '#8b5cf6', '#0ea5e9', '#14b8a6']}
+            />
+          ) : (
+            <div className="flex items-center justify-center h-64 text-zinc-500">
+              No operation data yet
+            </div>
+          )}
+        </ChartCard>
+        <ChartCard
+          title="Operations Breakdown"
+          subtitle="By connector and operation"
+        >
+          {operationsByConnector.length > 0 ? (
+            <BarChart
+              data={operationsByConnector}
+              xKey="label"
+              yKey="count"
+              horizontal
+              color="#0ea5e9"
+            />
+          ) : (
+            <div className="flex items-center justify-center h-64 text-zinc-500">
+              No operation data yet
+            </div>
+          )}
+        </ChartCard>
+      </div>
+
+      <div className="grid grid-cols-1 gap-6 mb-8">
+        <ChartCard
+          title="Daily Activity"
+          subtitle="Connects, operations, and disconnects per day"
+        >
+          {metrics.dailyActivity.some(
+            (d) => d.connects > 0 || d.operations > 0 || d.disconnects > 0
+          ) ? (
+            <LineChart
+              data={metrics.dailyActivity}
+              xKey="date"
+              lines={[
+                { key: 'connects', color: '#22c55e', name: 'Connects' },
+                { key: 'operations', color: '#0ea5e9', name: 'Operations' },
+                { key: 'disconnects', color: '#ef4444', name: 'Disconnects' },
+              ]}
+              showLegend
+            />
+          ) : (
+            <div className="flex items-center justify-center h-64 text-zinc-500">
+              No activity yet
+            </div>
+          )}
+        </ChartCard>
+      </div>
+
+      {metrics.topErrors.length > 0 && (
+        <div className="grid grid-cols-1 gap-6">
+          <ChartCard
+            title="Top Errors"
+            subtitle="Most common failures across connect and operation events"
+          >
+            <BarChart
+              data={metrics.topErrors}
+              xKey="error"
+              yKey="count"
+              horizontal
+              color="#ef4444"
+            />
+          </ChartCard>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Active Tab Content ─────────────────────────────────────────────────────
 
 function TabContent({ activeTab, dateRange, platform, userType }: FilterProps & { activeTab: string }) {
@@ -393,6 +544,8 @@ function TabContent({ activeTab, dateRange, platform, userType }: FilterProps & 
       return <ArtifactsSection dateRange={dateRange} platform={platform} userType={userType} />;
     case 'sharing':
       return <SharingSection dateRange={dateRange} platform={platform} userType={userType} />;
+    case 'connectors':
+      return <ConnectorsSection dateRange={dateRange} platform={platform} userType={userType} />;
     default:
       return null;
   }
