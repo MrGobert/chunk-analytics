@@ -246,15 +246,15 @@ async function fetchMixpanelEventsFromAPI(
   return filteredEvents;
 }
 
-export async function fetchMixpanelEvents(
+export async function fetchMixpanelEventsWithStatus(
   fromDate: string,
   toDate: string
-): Promise<MixpanelEvent[]> {
+): Promise<{ events: MixpanelEvent[]; dataUnavailable: boolean }> {
   const cacheKey = `${fromDate}:${toDate}`;
 
   // 1. Ask the Event Cache for data (checks memory, waits for locks, checks disk)
   const cached = await getCachedEventsAsync(fromDate, toDate);
-  if (cached) return cached;
+  if (cached) return { events: cached, dataUnavailable: false };
 
   // 2. Try to acquire the system file lock for this date range
   const hasLock = acquireLock(fromDate, toDate);
@@ -263,7 +263,7 @@ export async function fetchMixpanelEvents(
     // If we missed the lock right after checking cache, wait a tiny bit and retry the async cache getter
     await new Promise(r => setTimeout(r, 1000));
     const retryCached = await getCachedEventsAsync(fromDate, toDate);
-    if (retryCached) return retryCached;
+    if (retryCached) return { events: retryCached, dataUnavailable: false };
     console.warn(`Mixpanel fetch timed out waiting for lock ${cacheKey}, falling back to stale data.`);
   }
 
@@ -281,18 +281,33 @@ export async function fetchMixpanelEvents(
     }
   }
 
-  if (events) return events;
+  if (events) return { events, dataUnavailable: false };
 
   // 4. Fallback: serve stale data ignoring TTL if Mixpanel returns 429
   const stale = await getStaleCachedEvents(fromDate, toDate);
   if (stale) {
     console.warn(`Serving ${stale.length} stale events for ${cacheKey} due to API rate limits or timeout.`);
-    return stale;
+    return { events: stale, dataUnavailable: false };
   }
 
-  // 5. Ultimate Fallback: Return empty so the page can still render '0' stats instead of throwing a 500 error
-  console.warn(`No stale cache available for ${cacheKey}. Returning empty events list.`);
-  return [];
+  // 5. Ultimate fallback: no fresh fetch AND no stale cache. This is a genuine
+  // total failure, NOT a real "zero events" result — flag it so callers can
+  // render a "data unavailable" state instead of misleading zeros.
+  console.warn(`No stale cache available for ${cacheKey}. Returning empty events list (data unavailable).`);
+  return { events: [], dataUnavailable: true };
+}
+
+/**
+ * Backwards-compatible wrapper: returns just the events array (empty on a
+ * total failure). Routes that don't surface a data-unavailable state keep
+ * using this unchanged.
+ */
+export async function fetchMixpanelEvents(
+  fromDate: string,
+  toDate: string
+): Promise<MixpanelEvent[]> {
+  const { events } = await fetchMixpanelEventsWithStatus(fromDate, toDate);
+  return events;
 }
 
 export function filterEventsByType(

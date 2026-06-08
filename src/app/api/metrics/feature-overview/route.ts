@@ -4,6 +4,7 @@ export const maxDuration = 60;
 import { NextRequest, NextResponse } from 'next/server';
 import {
   fetchMixpanelEvents,
+  fetchMixpanelEventsWithStatus,
   filterByPlatform,
   filterByUserType,
   normalizeEventName,
@@ -33,6 +34,9 @@ const FEATURE_CATEGORIES: Record<string, string[]> = {
     'Connector_Disconnected',
     'Connector_OAuth_Callback',
     'Connector_Operation_Used',
+    'Connector_Disconnect_Failed',
+    'Connector_Status_Degraded',
+    'Connector_Settings_Viewed',
     'Notion_Search_Used',
     'Notion_Page_Created',
     'Notion_Append_Performed',
@@ -104,10 +108,12 @@ export async function GET(request: NextRequest) {
     const previousFrom = formatDate(subDays(new Date(dateRange.from), rangeDays));
     const previousTo = formatDate(subDays(new Date(dateRange.to), rangeDays));
 
-    const [allEvents, prevAllEvents] = await Promise.all([
-      fetchMixpanelEvents(dateRange.from, dateRange.to),
+    const [current, prevAllEvents] = await Promise.all([
+      fetchMixpanelEventsWithStatus(dateRange.from, dateRange.to),
       fetchMixpanelEvents(previousFrom, previousTo).catch(() => []),
     ]);
+    const allEvents = current.events;
+    const dataUnavailable = current.dataUnavailable;
 
     const platformFiltered = filterByPlatform(allEvents, platform);
     const events = filterByUserType(platformFiltered, userType);
@@ -162,6 +168,7 @@ export async function GET(request: NextRequest) {
         uniqueUsers: memoryEnabledUsers.size,
         trend: calculateTrend(memoryEnabledUsers.size, prevMemoryEnabledUsers.size),
       },
+      dataUnavailable,
       dateRange,
       platform,
       userType,

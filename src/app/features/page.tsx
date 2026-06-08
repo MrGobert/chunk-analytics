@@ -49,6 +49,18 @@ interface FilterProps {
   userType: string;
 }
 
+// ─── Data Unavailable Banner ────────────────────────────────────────────────
+
+function DataUnavailableBanner() {
+  return (
+    <div className="mb-8 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-300">
+      Live analytics data is temporarily unavailable — the Mixpanel export
+      couldn’t be reached and no cached data was available. Figures below may
+      read as zero; retry shortly.
+    </div>
+  );
+}
+
 // ─── Tab Section Skeleton ───────────────────────────────────────────────────
 
 function TabSkeleton() {
@@ -395,6 +407,7 @@ function ConnectorsSection({ dateRange, platform, userType }: FilterProps) {
 
   return (
     <div className="mt-8">
+      {metrics.dataUnavailable && <DataUnavailableBanner />}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
         <StatCard
           title="Connections Started"
@@ -434,10 +447,28 @@ function ConnectorsSection({ dateRange, platform, userType }: FilterProps) {
         />
       </div>
 
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+        <StatCard
+          title="Disconnect Failures"
+          value={metrics.totalDisconnectFailed}
+          subtitle="Disconnect attempts that errored"
+        />
+        <StatCard
+          title="Status Degraded"
+          value={metrics.totalStatusDegraded}
+          subtitle="Connected → error/expired (e.g. token expiry)"
+        />
+        <StatCard
+          title="Settings Viewed"
+          value={metrics.totalSettingsViewed}
+          subtitle={`${metrics.uniqueSettingsViewers} unique viewers`}
+        />
+      </div>
+
       <div className="grid grid-cols-1 gap-6 mb-8">
         <ChartCard
           title="Connection Funnel"
-          subtitle="Start → Succeed → First Operation"
+          subtitle="Viewed → Start → Succeed → First Operation"
         >
           {metrics.connectorsFunnel.length > 0 ? (
             <FunnelChart data={metrics.connectorsFunnel} />
@@ -612,6 +643,8 @@ export default function FeaturesPage() {
         lastUpdated={lastUpdated}
         isRefreshing={isRefreshing}
       />
+
+      {overview?.dataUnavailable && <DataUnavailableBanner />}
 
       {/* ── Memory Enabled Stat Card ─────────────────────────────────────── */}
       {overview && (

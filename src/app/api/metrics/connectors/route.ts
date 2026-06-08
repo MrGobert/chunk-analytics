@@ -4,6 +4,7 @@ export const maxDuration = 60;
 import { NextRequest, NextResponse } from 'next/server';
 import {
   fetchMixpanelEvents,
+  fetchMixpanelEventsWithStatus,
   filterByPlatform,
   filterByUserType,
   filterEventsByType,
@@ -27,10 +28,17 @@ const CONNECT_EVENTS = [
 ];
 const OAUTH_CALLBACK_EVENT = 'Connector_OAuth_Callback';
 const OPERATION_EVENT = 'Connector_Operation_Used';
+// Newer lifecycle events (web first; Apple clients are not yet instrumented).
+const DISCONNECT_FAILED_EVENT = 'Connector_Disconnect_Failed';
+const STATUS_DEGRADED_EVENT = 'Connector_Status_Degraded';
+const SETTINGS_VIEWED_EVENT = 'Connector_Settings_Viewed';
 const ALL_CONNECTOR_EVENTS = [
   ...CONNECT_EVENTS,
   OAUTH_CALLBACK_EVENT,
   OPERATION_EVENT,
+  DISCONNECT_FAILED_EVENT,
+  STATUS_DEGRADED_EVENT,
+  SETTINGS_VIEWED_EVENT,
   'Notion_Search_Used',
   'Notion_Page_Created',
   'Notion_Append_Performed',
@@ -67,10 +75,14 @@ export async function GET(request: NextRequest) {
     const previousFrom = formatDate(subDays(new Date(dateRange.from), rangeDays));
     const previousTo = formatDate(subDays(new Date(dateRange.to), rangeDays));
 
-    const [allEvents, prevAllEvents] = await Promise.all([
-      fetchMixpanelEvents(dateRange.from, dateRange.to),
+    const [current, prevAllEvents] = await Promise.all([
+      fetchMixpanelEventsWithStatus(dateRange.from, dateRange.to),
       fetchMixpanelEvents(previousFrom, previousTo).catch(() => []),
     ]);
+    const allEvents = current.events;
+    // True only on a genuine fetch failure (no fresh data AND no stale cache) —
+    // lets the UI show "data unavailable" instead of misleading zeros.
+    const dataUnavailable = current.dataUnavailable;
 
     const platformFiltered = filterByPlatform(allEvents, platform);
     const events = filterByUserType(platformFiltered, userType);
@@ -85,6 +97,9 @@ export async function GET(request: NextRequest) {
     const totalConnectSucceeded = countEvents(connectorEvents, 'Connector_Connect_Succeeded');
     const totalConnectFailed = countEvents(connectorEvents, 'Connector_Connect_Failed');
     const totalDisconnected = countEvents(connectorEvents, 'Connector_Disconnected');
+    const totalDisconnectFailed = countEvents(connectorEvents, DISCONNECT_FAILED_EVENT);
+    const totalStatusDegraded = countEvents(connectorEvents, STATUS_DEGRADED_EVENT);
+    const totalSettingsViewed = countEvents(connectorEvents, SETTINGS_VIEWED_EVENT);
 
     // Operations completed via the generic cross-connector event. We
     // count the generic event (not the per-connector helpers) so totals
@@ -120,57 +135,59 @@ export async function GET(request: NextRequest) {
         ? Math.min(1, Math.max(0, oauthSuccesses / oauthCallbacks.length))
         : 0;
 
-    // ── Funnel: Start → Succeed → First Operation ────────────────────
-    // "First operation" counts unique users who completed at least one
-    // operation — drop-off from connect-succeeded shows whether new
-    // connections actually get used.
+    // ── Funnel: Viewed → Start → Succeed → First Operation ───────────
+    // A unique-user funnel: each step counts distinct users so drop-off
+    // reflects people, not raw event counts. "Settings Viewed" is the
+    // awareness top. NB: connects can also start from the chat composer
+    // (not just Settings), so Started can exceed Viewed — percentages are
+    // clamped to [0,100] and the baseline falls back to starters when no
+    // view events exist (e.g. before the web build that emits them ships).
     const usersWithOperation = new Set<string>();
-    for (const e of operationEvents) {
-      if (e.properties.status === 'completed') {
-        usersWithOperation.add(e.properties.distinct_id);
+    const uniqueViewers = new Set<string>();
+    const uniqueStarters = new Set<string>();
+    const uniqueSucceeders = new Set<string>();
+    for (const e of connectorEvents) {
+      const uid = e.properties.distinct_id as string | undefined;
+      if (!uid) continue;
+      if (e.event === SETTINGS_VIEWED_EVENT) uniqueViewers.add(uid);
+      else if (e.event === 'Connector_Connect_Started') uniqueStarters.add(uid);
+      else if (e.event === 'Connector_Connect_Succeeded') uniqueSucceeders.add(uid);
+      else if (e.event === OPERATION_EVENT && e.properties.status === 'completed') {
+        usersWithOperation.add(uid);
       }
     }
-    const funnelTop = totalConnectStarted || 1;
+    const uniqueSettingsViewers = uniqueViewers.size;
+    const funnelTop = uniqueViewers.size || uniqueStarters.size || 1;
+    const funnelPct = (n: number) =>
+      Math.min(100, Math.max(0, Math.round((n / funnelTop) * 100 * 10) / 10));
+    const funnelDropoff = (prev: number, cur: number) =>
+      prev > 0
+        ? Math.round(Math.max(0, ((prev - cur) / prev) * 100) * 10) / 10
+        : 0;
     const connectorsFunnel = [
       {
-        name: 'Connect Started',
-        count: totalConnectStarted,
-        percentage: 100,
+        name: 'Settings Viewed',
+        count: uniqueViewers.size,
+        percentage: funnelPct(uniqueViewers.size),
         dropoff: 0,
       },
       {
+        name: 'Connect Started',
+        count: uniqueStarters.size,
+        percentage: funnelPct(uniqueStarters.size),
+        dropoff: funnelDropoff(uniqueViewers.size, uniqueStarters.size),
+      },
+      {
         name: 'Connect Succeeded',
-        count: totalConnectSucceeded,
-        percentage:
-          Math.round((totalConnectSucceeded / funnelTop) * 100 * 10) / 10,
-        dropoff:
-          totalConnectStarted > 0
-            ? Math.round(
-                Math.max(
-                  0,
-                  ((totalConnectStarted - totalConnectSucceeded) /
-                    totalConnectStarted) *
-                    100
-                ) * 10
-              ) / 10
-            : 0,
+        count: uniqueSucceeders.size,
+        percentage: funnelPct(uniqueSucceeders.size),
+        dropoff: funnelDropoff(uniqueStarters.size, uniqueSucceeders.size),
       },
       {
         name: 'First Operation',
         count: usersWithOperation.size,
-        percentage:
-          Math.round((usersWithOperation.size / funnelTop) * 100 * 10) / 10,
-        dropoff:
-          totalConnectSucceeded > 0
-            ? Math.round(
-                Math.max(
-                  0,
-                  ((totalConnectSucceeded - usersWithOperation.size) /
-                    totalConnectSucceeded) *
-                    100
-                ) * 10
-              ) / 10
-            : 0,
+        percentage: funnelPct(usersWithOperation.size),
+        dropoff: funnelDropoff(uniqueSucceeders.size, usersWithOperation.size),
       },
     ];
 
@@ -188,23 +205,28 @@ export async function GET(request: NextRequest) {
       .sort((a, b) => b.value - a.value);
 
     // ── Operation breakdown (per connector × per operation) ─────────
-    const opCounts = new Map<string, number>();
+    // Store structured values rather than packing "connector op" into a
+    // string key — an operation containing a space would otherwise be
+    // truncated by split(' ').
+    const opCounts = new Map<
+      string,
+      { connector: string; operation: string; count: number }
+    >();
     for (const e of operationEvents) {
       if (e.properties.status !== 'completed') continue;
-      const id = displayConnector(e.properties.connector_id);
-      const op =
+      const connector = displayConnector(e.properties.connector_id);
+      const operation =
         typeof e.properties.operation === 'string' && e.properties.operation
           ? e.properties.operation
           : 'unknown';
-      const key = `${id} ${op}`;
-      opCounts.set(key, (opCounts.get(key) ?? 0) + 1);
+      const key = `${connector}::${operation}`;
+      const existing = opCounts.get(key);
+      if (existing) existing.count += 1;
+      else opCounts.set(key, { connector, operation, count: 1 });
     }
-    const operationBreakdown = Array.from(opCounts.entries())
-      .map(([key, count]) => {
-        const [connector, operation] = key.split(' ');
-        return { connector, operation, count };
-      })
-      .sort((a, b) => b.count - a.count);
+    const operationBreakdown = Array.from(opCounts.values()).sort(
+      (a, b) => b.count - a.count
+    );
 
     // ── Daily activity (connects, operations, disconnects) ──────────
     const days = getDaysInRange(dateRange.from, dateRange.to);
@@ -240,6 +262,10 @@ export async function GET(request: NextRequest) {
         msg = e.properties.error_message;
       } else if (e.event === 'Gamma_Generation_Failed') {
         msg = e.properties.error_message;
+      } else if (e.event === DISCONNECT_FAILED_EVENT) {
+        msg = e.properties.error_message;
+      } else if (e.event === STATUS_DEGRADED_EVENT) {
+        msg = e.properties.error_message;
       }
       if (typeof msg === 'string' && msg.trim()) {
         const trimmed = msg.length > 80 ? `${msg.slice(0, 77)}…` : msg;
@@ -261,6 +287,10 @@ export async function GET(request: NextRequest) {
       totalConnectSucceeded,
       totalConnectFailed,
       totalDisconnected,
+      totalDisconnectFailed,
+      totalStatusDegraded,
+      totalSettingsViewed,
+      uniqueSettingsViewers,
       totalOperations,
       totalOperationsFailed,
       uniqueConnectedUsers,
@@ -277,6 +307,7 @@ export async function GET(request: NextRequest) {
       dateRange,
       platform,
       userType,
+      dataUnavailable,
       lastUpdated: getLastUpdated(),
     });
     response.headers.set(

@@ -287,11 +287,18 @@ export interface ConnectorsMetrics {
   totalConnectSucceeded: number;
   totalConnectFailed: number;
   totalDisconnected: number;
+  totalDisconnectFailed: number;
+  totalStatusDegraded: number;
+  totalSettingsViewed: number;
+  uniqueSettingsViewers: number;
   totalOperations: number;
   totalOperationsFailed: number;
   uniqueConnectedUsers: number;
   connectSuccessRate: number;
   oauthCallbackSuccessRate: number;
+  // True only on a genuine Mixpanel fetch failure (no fresh data and no stale
+  // cache) — lets the UI show "data unavailable" instead of misleading zeros.
+  dataUnavailable?: boolean;
   connectStartedTrend: number | null;
   connectSucceededTrend: number | null;
   operationsTrend: number | null;
@@ -466,6 +473,9 @@ export interface FeatureOverviewMetrics {
     uniqueUsers: number;
     trend: number | null;
   };
+  // True only on a genuine Mixpanel fetch failure (no fresh data and no stale
+  // cache) — lets the UI show "data unavailable" instead of misleading zeros.
+  dataUnavailable?: boolean;
   lastUpdated: string;
 }
 
