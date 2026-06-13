@@ -11,6 +11,7 @@ import {
   Mail,
   LayoutGrid,
   Rocket,
+  Globe,
   Menu,
   X,
   Eye,
@@ -30,6 +31,7 @@ const ROUTE_TO_ENDPOINT: Record<string, string> = {
   '/revenue': '/api/rc/revenue-summary',
   '/churn': '/api/rc/churn-intelligence',
   '/acquisition': '/api/metrics/acquisition',
+  '/marketing': '/api/metrics/marketing',
   '/engagement': '/api/metrics/users',
   '/features': '/api/metrics/feature-overview',
   '/outreach': '/api/metrics/emails',
@@ -60,6 +62,7 @@ const navSections: NavSection[] = [
     title: 'PRODUCT',
     items: [
       { href: '/acquisition', label: 'Acquisition', icon: Rocket },
+      { href: '/marketing', label: 'Landing Pages', icon: Globe },
       { href: '/engagement', label: 'Engagement', icon: Activity },
       { href: '/features', label: 'Features', icon: LayoutGrid },
     ],

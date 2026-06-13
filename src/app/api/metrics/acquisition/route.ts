@@ -6,7 +6,7 @@ import {
   getPropertyDistribution,
   UserType,
 } from '@/lib/mixpanel';
-import { getDateRange, getDaysInRange, formatDate } from '@/lib/utils';
+import { getDateRange, getDaysInRange, formatDate, safeDiv } from '@/lib/utils';
 import { MixpanelEvent } from '@/types/mixpanel';
 
 // Required for Vercel — without this the function times out at 10s
@@ -92,12 +92,6 @@ function buildFunnel(steps: { name: string; count: number }[]) {
             : 0,
     };
   });
-}
-
-/** Safe division returning 0+ range. Returns 0 when denominator is 0. */
-function safeDiv(numerator: number, denominator: number): number {
-  if (denominator <= 0) return 0;
-  return Math.max(0, numerator / denominator);
 }
 
 // ---------- Platform-specific funnel builders ----------
@@ -410,25 +404,16 @@ export async function GET(request: NextRequest) {
         'Marketing site → guest trial → signup → onboarding → subscription';
       webOnboarding = buildWebOnboardingMetrics(events);
 
-      // Top pages — aggregate Feature_Page_Visited and Page_Viewed by page name
-      const featurePageEvents = events.filter((e) => e.event === 'Feature_Page_Visited');
+      // Top pages — canonical source is Page_Viewed.page_name (e.g. "Landing Page",
+      // "Notes Feature Page"), which covers the home page + every feature page.
+      // We deliberately do NOT merge Feature_Page_Visited (keyed on slug `page` like
+      // "notes"): it fires on the same feature pages, so merging listed each page
+      // twice under two label spaces with split counts.
       const pageViewedEvents = events.filter((e) => e.event === 'Page_Viewed');
+      const pageViewedDist = getPropertyDistribution(pageViewedEvents, 'page_name');
 
-      const featurePageDist = getPropertyDistribution(featurePageEvents, 'page');
-      const pageViewedDist = getPropertyDistribution(pageViewedEvents, 'page');
-
-      // Merge both distributions into a single map
-      const combinedPages = new Map<string, number>();
-      for (const [page, count] of featurePageDist) {
-        if (!page) continue;
-        combinedPages.set(page, (combinedPages.get(page) || 0) + count);
-      }
-      for (const [page, count] of pageViewedDist) {
-        if (!page) continue;
-        combinedPages.set(page, (combinedPages.get(page) || 0) + count);
-      }
-
-      topPages = Array.from(combinedPages)
+      topPages = Array.from(pageViewedDist)
+        .filter(([page]) => page && page !== 'Unknown')
         .map(([page, visits]) => ({ page, visits }))
         .sort((a, b) => b.visits - a.visits)
         .slice(0, 15);

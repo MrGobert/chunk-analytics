@@ -1,5 +1,11 @@
 import { format, subDays, parseISO } from 'date-fns';
 
+/** Safe division clamped to a non-negative range. Returns 0 when the denominator is 0. */
+export function safeDiv(numerator: number, denominator: number): number {
+  if (denominator <= 0) return 0;
+  return Math.max(0, numerator / denominator);
+}
+
 export function formatDate(date: Date): string {
   const formatter = new Intl.DateTimeFormat('en-US', {
     timeZone: 'America/Los_Angeles',

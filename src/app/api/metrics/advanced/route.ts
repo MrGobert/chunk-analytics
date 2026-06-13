@@ -11,6 +11,7 @@ import {
   filterEventsByType,
   getPropertyDistribution,
   getLastUpdated,
+  referrerHost,
   UserType,
 } from '@/lib/mixpanel';
 import { getDateRange, getDaysInRange } from '@/lib/utils';
@@ -142,25 +143,16 @@ export async function GET(request: NextRequest) {
     // ============================================
     const trafficSessionEvents = filterEventsByType(events, ['App_Session_Started', 'Marketing_Session_Started', 'Page_Viewed']);
     
-    // Extract referrer domains
+    // Extract referrer domains (shared normalization: www-stripped host, own-domain
+    // and empty/unparseable referrers fold into "(direct)").
     const referrerCounts = new Map<string, number>();
     const utmSourceCounts = new Map<string, number>();
-    
+
     trafficSessionEvents.forEach((e) => {
-      const referrer = e.properties.referrer as string;
+      const domain = referrerHost(e.properties.referrer);
+      referrerCounts.set(domain, (referrerCounts.get(domain) || 0) + 1);
+
       const utmSource = e.properties.utm_source as string;
-      
-      if (referrer) {
-        try {
-          const domain = new URL(referrer).hostname.replace('www.', '');
-          referrerCounts.set(domain, (referrerCounts.get(domain) || 0) + 1);
-        } catch {
-          referrerCounts.set('direct', (referrerCounts.get('direct') || 0) + 1);
-        }
-      } else {
-        referrerCounts.set('direct', (referrerCounts.get('direct') || 0) + 1);
-      }
-      
       if (utmSource) {
         utmSourceCounts.set(utmSource, (utmSourceCounts.get(utmSource) || 0) + 1);
       }

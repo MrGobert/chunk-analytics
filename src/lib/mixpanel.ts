@@ -435,6 +435,22 @@ export function getPropertyDistribution(
   return distribution;
 }
 
+/**
+ * Normalize a referrer URL to its bare hostname for acquisition attribution.
+ * Empty/unparseable → "(direct)". The marketing site's own domain is internal
+ * navigation, not an external source, so it also folds into "(direct)".
+ */
+export function referrerHost(referrer: unknown): string {
+  if (typeof referrer !== 'string' || referrer.trim() === '') return '(direct)';
+  try {
+    const host = new URL(referrer).hostname.replace(/^www\./, '');
+    if (!host || host === 'chunkapp.com' || host.endsWith('.chunkapp.com')) return '(direct)';
+    return host;
+  } catch {
+    return '(direct)';
+  }
+}
+
 export function getLastUpdated(): string {
   return new Date().toISOString();
 }

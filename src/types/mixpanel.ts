@@ -505,15 +505,25 @@ export interface MarketingMetrics {
   paywallDismissals: number;
   featureLimitReached: number;
   marketingSessions: number;
+  pageViews: number;
+  pagesPerSession: number;
+  newVisitors: number;
   ctaClicksTrend: number | null;
   featurePagesTrend: number | null;
   guestPromptsTrend: number | null;
   paywallDismissalsTrend: number | null;
+  pageViewsTrend: number | null;
   ctaSourceDistribution: { source: string; count: number }[];
   featurePageDistribution: { page: string; count: number }[];
   featureLimitDistribution: { feature: string; count: number }[];
   guestPromptSourceDistribution: { source: string; count: number }[];
+  pageViewDistribution: { page: string; views: number; visitors: number }[];
+  referrerDistribution: { source: string; sessions: number }[];
+  utmSourceDistribution: { source: string; sessions: number }[];
+  utmMediumDistribution: { source: string; sessions: number }[];
+  utmCampaignDistribution: { source: string; sessions: number }[];
   dailyData: { date: string; tryFree: number; createAccount: number; featurePages: number; guestPrompts: number }[];
+  newVisitorsDaily: { date: string; newVisitors: number }[];
   marketingCTAFunnel: FunnelStep[];
   lastUpdated: string;
 }
