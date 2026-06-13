@@ -13,6 +13,7 @@ import PieChart from '@/components/charts/PieChart';
 import LineChart from '@/components/charts/LineChart';
 import FunnelChart from '@/components/charts/FunnelChart';
 import FeatureTabBar, { FEATURE_TABS } from '@/components/features/FeatureTabBar';
+import { chart } from '@/lib/chartTheme';
 import { SkeletonPage, SkeletonStatCard, SkeletonChartCard } from '@/components/ui/Skeleton';
 import { useAnalytics } from '@/hooks/useAnalytics';
 import type {
@@ -28,18 +29,7 @@ import type {
 
 // ─── Color palette ──────────────────────────────────────────────────────────
 
-const FEATURE_COLORS = [
-  '#E63B2E', // Signal Red
-  '#8b5cf6', // Violet
-  '#0ea5e9', // Sky Blue
-  '#14b8a6', // Teal
-  '#f97316', // Orange
-  '#eab308', // Yellow
-  '#22c55e', // Green
-  '#ec4899', // Pink
-  '#6366f1', // Indigo
-  '#3b82f6', // Blue
-];
+const FEATURE_COLORS = chart.series;
 
 // ─── Shared filter props ────────────────────────────────────────────────────
 
@@ -53,7 +43,7 @@ interface FilterProps {
 
 function DataUnavailableBanner() {
   return (
-    <div className="mb-8 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-300">
+    <div className="mb-8 rounded-card border border-butter bg-butter-tint px-4 py-3 text-sm text-ink">
       Live analytics data is temporarily unavailable — the Mixpanel export
       couldn’t be reached and no cached data was available. Figures below may
       read as zero; retry shortly.
@@ -97,31 +87,59 @@ function SearchSection({ dateRange, platform, userType }: FilterProps) {
     : 0;
 
   const searchModeData = metrics.searchModes.map((m) => ({ name: m.mode, value: m.count }));
+  const modelLines = (metrics.topModels || []).map((m, i) => ({
+    key: m,
+    color: i === 0 ? chart.primary : chart.series[i % chart.series.length],
+    name: m.length > 18 ? `${m.slice(0, 18)}…` : m,
+  }));
+  const responseTimeData = (metrics.responseTimes || []).map((r) => ({
+    model: r.model.length > 16 ? `${r.model.slice(0, 16)}…` : r.model,
+    p50: r.p50,
+    p90: r.p90,
+  }));
 
   return (
     <div className="mt-8">
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
         <StatCard title="Total Searches" value={metrics.totalSearches} trend={metrics.searchTrend} />
         <StatCard title="Avg Daily Searches" value={avgDaily} />
         <StatCard title="Peak Hour" value={`${peakHour}:00`} format="text" />
+        <StatCard title="Search Failure Rate" value={metrics.searchFailRate ?? 0} format="percentage" invertTrend />
       </div>
 
       <div className="grid grid-cols-1 gap-6 mb-8">
         <ChartCard title="Searches Over Time" subtitle="Daily search volume">
           {metrics.searchesOverTime.length > 0 ? (
-            <AreaChart data={metrics.searchesOverTime} xKey="date" yKey="searches" color="#8b5cf6" />
+            <AreaChart data={metrics.searchesOverTime} xKey="date" yKey="searches" color={chart.series[0]} />
           ) : (
-            <div className="flex items-center justify-center h-64 text-zinc-500">No search data yet</div>
+            <div className="empty-state h-64">No search data yet</div>
           )}
         </ChartCard>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
         <ChartCard title="Search Modes" subtitle="Distribution of search modes">
           <PieChart data={searchModeData} />
         </ChartCard>
         <ChartCard title="Models Used" subtitle="AI models selected for searches">
           <BarChart data={metrics.modelsUsed} xKey="model" yKey="count" horizontal />
+        </ChartCard>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <ChartCard title="Model Mix Over Time" subtitle="Daily search volume by top model">
+          {modelLines.length > 0 ? (
+            <LineChart data={metrics.modelsOverTime || []} xKey="date" lines={modelLines} showLegend />
+          ) : (
+            <div className="empty-state h-64">No model data yet</div>
+          )}
+        </ChartCard>
+        <ChartCard title="Response Time by Model" subtitle="p50 / p90 latency in ms">
+          {responseTimeData.length > 0 ? (
+            <BarChart data={responseTimeData} xKey="model" yKey="p90" horizontal color={chart.series[3]} />
+          ) : (
+            <div className="empty-state h-64">No response-time data captured</div>
+          )}
         </ChartCard>
       </div>
     </div>
@@ -152,7 +170,7 @@ function ResearchSection({ dateRange, platform, userType }: FilterProps) {
           {metrics.researchFunnel.length > 0 ? (
             <FunnelChart data={metrics.researchFunnel} />
           ) : (
-            <div className="flex items-center justify-center h-64 text-zinc-500">No funnel data yet</div>
+            <div className="empty-state h-64">No funnel data yet</div>
           )}
         </ChartCard>
       </div>
@@ -162,7 +180,7 @@ function ResearchSection({ dateRange, platform, userType }: FilterProps) {
           {metrics.reportTypeDistribution.length > 0 ? (
             <PieChart data={metrics.reportTypeDistribution} />
           ) : (
-            <div className="flex items-center justify-center h-64 text-zinc-500">No report data yet</div>
+            <div className="empty-state h-64">No report data yet</div>
           )}
         </ChartCard>
         <ChartCard title="Daily Activity" subtitle="Reports initiated, completed, and viewed over time">
@@ -170,9 +188,9 @@ function ResearchSection({ dateRange, platform, userType }: FilterProps) {
             data={metrics.dailyData}
             xKey="date"
             lines={[
-              { key: 'initiated', color: '#8b5cf6', name: 'Initiated' },
-              { key: 'completed', color: '#22c55e', name: 'Completed' },
-              { key: 'viewed', color: '#3b82f6', name: 'Viewed' },
+              { key: 'initiated', color: chart.series[0], name: 'Initiated' },
+              { key: 'completed', color: chart.sage, name: 'Completed' },
+              { key: 'viewed', color: chart.series[1], name: 'Viewed' },
             ]}
             showLegend
           />
@@ -206,7 +224,7 @@ function NotesSection({ dateRange, platform, userType }: FilterProps) {
           {metrics.notesFunnel.length > 0 ? (
             <FunnelChart data={metrics.notesFunnel} />
           ) : (
-            <div className="flex items-center justify-center h-64 text-zinc-500">No funnel data yet</div>
+            <div className="empty-state h-64">No funnel data yet</div>
           )}
         </ChartCard>
       </div>
@@ -219,10 +237,10 @@ function NotesSection({ dateRange, platform, userType }: FilterProps) {
               xKey="tool"
               yKey="count"
               horizontal
-              color="#8b5cf6"
+              color={chart.series[0]}
             />
           ) : (
-            <div className="flex items-center justify-center h-64 text-zinc-500">No writing tool data yet</div>
+            <div className="empty-state h-64">No writing tool data yet</div>
           )}
         </ChartCard>
       </div>
@@ -254,7 +272,7 @@ function CollectionsSection({ dateRange, platform, userType }: FilterProps) {
           {metrics.collectionsFunnel.length > 0 ? (
             <FunnelChart data={metrics.collectionsFunnel} />
           ) : (
-            <div className="flex items-center justify-center h-64 text-zinc-500">No funnel data yet</div>
+            <div className="empty-state h-64">No funnel data yet</div>
           )}
         </ChartCard>
       </div>
@@ -266,13 +284,13 @@ function CollectionsSection({ dateRange, platform, userType }: FilterProps) {
               data={metrics.urlManagement}
               xKey="date"
               lines={[
-                { key: 'added', color: '#22c55e', name: 'URLs Added' },
-                { key: 'removed', color: '#ef4444', name: 'URLs Removed' },
+                { key: 'added', color: chart.sage, name: 'URLs Added' },
+                { key: 'removed', color: chart.emberDeep, name: 'URLs Removed' },
               ]}
               showLegend
             />
           ) : (
-            <div className="flex items-center justify-center h-64 text-zinc-500">No URL management data yet</div>
+            <div className="empty-state h-64">No URL management data yet</div>
           )}
         </ChartCard>
       </div>
@@ -304,7 +322,7 @@ function ArtifactsSection({ dateRange, platform, userType }: FilterProps) {
           {metrics.artifactsFunnel.length > 0 ? (
             <FunnelChart data={metrics.artifactsFunnel} />
           ) : (
-            <div className="flex items-center justify-center h-64 text-zinc-500">No funnel data yet</div>
+            <div className="empty-state h-64">No funnel data yet</div>
           )}
         </ChartCard>
       </div>
@@ -314,10 +332,10 @@ function ArtifactsSection({ dateRange, platform, userType }: FilterProps) {
           {metrics.sourceTypeDistribution.length > 0 ? (
             <PieChart
               data={metrics.sourceTypeDistribution}
-              colors={['#ef4444', '#3b82f6', '#a855f7', '#22c55e', '#f97316']}
+              colors={[...chart.series]}
             />
           ) : (
-            <div className="flex items-center justify-center h-64 text-zinc-500">No source type data yet</div>
+            <div className="empty-state h-64">No source type data yet</div>
           )}
         </ChartCard>
         <ChartCard title="Output Types" subtitle="Which output types users generate most">
@@ -327,10 +345,10 @@ function ArtifactsSection({ dateRange, platform, userType }: FilterProps) {
               xKey="type"
               yKey="count"
               horizontal
-              color="#E84D2B"
+              color={chart.primary}
             />
           ) : (
-            <div className="flex items-center justify-center h-64 text-zinc-500">No output type data yet</div>
+            <div className="empty-state h-64">No output type data yet</div>
           )}
         </ChartCard>
       </div>
@@ -369,7 +387,7 @@ function SharingSection({ dateRange, platform, userType }: FilterProps) {
           {metrics.sharingFunnel.length > 0 ? (
             <FunnelChart data={metrics.sharingFunnel} />
           ) : (
-            <div className="flex items-center justify-center h-64 text-zinc-500">No funnel data yet</div>
+            <div className="empty-state h-64">No funnel data yet</div>
           )}
         </ChartCard>
       </div>
@@ -379,10 +397,10 @@ function SharingSection({ dateRange, platform, userType }: FilterProps) {
           {metrics.contentTypeDistribution.length > 0 ? (
             <PieChart
               data={metrics.contentTypeDistribution}
-              colors={['#8b5cf6', '#3b82f6', '#22c55e', '#f59e0b']}
+              colors={[...chart.series]}
             />
           ) : (
-            <div className="flex items-center justify-center h-64 text-zinc-500">No sharing data yet</div>
+            <div className="empty-state h-64">No sharing data yet</div>
           )}
         </ChartCard>
       </div>
@@ -473,7 +491,7 @@ function ConnectorsSection({ dateRange, platform, userType }: FilterProps) {
           {metrics.connectorsFunnel.length > 0 ? (
             <FunnelChart data={metrics.connectorsFunnel} />
           ) : (
-            <div className="flex items-center justify-center h-64 text-zinc-500">
+            <div className="empty-state h-64">
               No funnel data yet
             </div>
           )}
@@ -485,10 +503,10 @@ function ConnectorsSection({ dateRange, platform, userType }: FilterProps) {
           {metrics.connectorBreakdown.length > 0 ? (
             <PieChart
               data={metrics.connectorBreakdown}
-              colors={['#E63B2E', '#8b5cf6', '#0ea5e9', '#14b8a6']}
+              colors={[...chart.series]}
             />
           ) : (
-            <div className="flex items-center justify-center h-64 text-zinc-500">
+            <div className="empty-state h-64">
               No operation data yet
             </div>
           )}
@@ -503,10 +521,10 @@ function ConnectorsSection({ dateRange, platform, userType }: FilterProps) {
               xKey="label"
               yKey="count"
               horizontal
-              color="#0ea5e9"
+              color={chart.series[4]}
             />
           ) : (
-            <div className="flex items-center justify-center h-64 text-zinc-500">
+            <div className="empty-state h-64">
               No operation data yet
             </div>
           )}
@@ -525,14 +543,14 @@ function ConnectorsSection({ dateRange, platform, userType }: FilterProps) {
               data={metrics.dailyActivity}
               xKey="date"
               lines={[
-                { key: 'connects', color: '#22c55e', name: 'Connects' },
-                { key: 'operations', color: '#0ea5e9', name: 'Operations' },
-                { key: 'disconnects', color: '#ef4444', name: 'Disconnects' },
+                { key: 'connects', color: chart.sage, name: 'Connects' },
+                { key: 'operations', color: chart.series[0], name: 'Operations' },
+                { key: 'disconnects', color: chart.emberDeep, name: 'Disconnects' },
               ]}
               showLegend
             />
           ) : (
-            <div className="flex items-center justify-center h-64 text-zinc-500">
+            <div className="empty-state h-64">
               No activity yet
             </div>
           )}
@@ -550,7 +568,7 @@ function ConnectorsSection({ dateRange, platform, userType }: FilterProps) {
               xKey="error"
               yKey="count"
               horizontal
-              color="#ef4444"
+              color={chart.emberDeep}
             />
           </ChartCard>
         </div>
@@ -607,6 +625,14 @@ export default function FeaturesPage() {
       feature: f.name,
       count: f.uniqueUsers,
     })),
+    [overview?.features]
+  );
+
+  const stickinessData = useMemo(() =>
+    (overview?.features ?? [])
+      .filter((f) => typeof f.stickiness === 'number' && f.uniqueUsers > 0)
+      .map((f) => ({ feature: f.name, stickiness: Math.round((f.stickiness as number) * 1000) / 10 }))
+      .sort((a, b) => b.stickiness - a.stickiness),
     [overview?.features]
   );
 
@@ -679,6 +705,15 @@ export default function FeaturesPage() {
               horizontal
               colors={usersData.map((_, i) => FEATURE_COLORS[i % FEATURE_COLORS.length])}
             />
+          </ChartCard>
+        </div>
+      )}
+
+      {/* ── Feature Stickiness ─────────────────────────────────────────────── */}
+      {overview && stickinessData.length > 0 && (
+        <div className="grid grid-cols-1 gap-6 mb-8">
+          <ChartCard title="Feature Stickiness" subtitle="DAU/MAU per feature — which features become daily habits (%)">
+            <BarChart data={stickinessData} xKey="feature" yKey="stickiness" horizontal color={chart.lake} />
           </ChartCard>
         </div>
       )}

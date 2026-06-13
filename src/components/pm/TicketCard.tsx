@@ -5,6 +5,17 @@ import { CSS } from '@dnd-kit/utilities';
 import { Ticket, usePM } from '@/store/PMContext';
 import { AlignLeft, Paperclip } from 'lucide-react';
 
+/** Tag colours were picked for a dark board; on cream, force ink text when a colour is too light. */
+function tagTextColor(hex: string): string {
+  const m = hex.replace('#', '');
+  if (m.length < 6) return '#2D2418';
+  const r = parseInt(m.slice(0, 2), 16);
+  const g = parseInt(m.slice(2, 4), 16);
+  const b = parseInt(m.slice(4, 6), 16);
+  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return luminance > 0.6 ? '#2D2418' : hex;
+}
+
 interface TicketCardProps {
     ticket: Ticket;
     onClick?: () => void;
@@ -28,7 +39,7 @@ export default function TicketCard({ ticket, onClick, isOverlay }: TicketCardPro
 
     if (isDragging && !isOverlay) {
         return (
-            <div ref={setNodeRef} style={style} className="h-24 bg-white/5 border-2 border-dashed border-white/20 rounded-xl" />
+            <div ref={setNodeRef} style={style} className="h-24 bg-paper-deep border-2 border-dashed border-line rounded-btn" />
         );
     }
 
@@ -40,20 +51,20 @@ export default function TicketCard({ ticket, onClick, isOverlay }: TicketCardPro
             {...listeners}
             onClick={onClick}
             className={`
-        bg-primary border border-white/10 rounded-xl p-4 cursor-grab active:cursor-grabbing hover:border-accent/40 hover:shadow-[0_0_15px_var(--accent-glow)] transition-all
-        ${isOverlay ? 'rotate-2 scale-105 shadow-2xl glass-panel opacity-95' : ''}
+        card-surface rounded-btn p-4 cursor-grab active:cursor-grabbing hover:-translate-y-0.5 hover:border-ink/30 hover:shadow-lift transition-all
+        ${isOverlay ? 'rotate-2 scale-105 shadow-lift opacity-95' : ''}
       `}
         >
             <div className="flex flex-wrap gap-1.5 mb-2">
                 {ticketTags.map(tag => (
-                    <span key={tag.id} className="text-[10px] uppercase tracking-wider font-bold px-1.5 py-0.5 rounded" style={{ backgroundColor: `${tag.color}20`, color: tag.color, border: `1px solid ${tag.color}40` }}>
+                    <span key={tag.id} className="text-[10px] uppercase tracking-wider font-bold px-1.5 py-0.5 rounded" style={{ backgroundColor: `${tag.color}1A`, color: tagTextColor(tag.color), border: `1px solid ${tag.color}55` }}>
                         {tag.name}
                     </span>
                 ))}
             </div>
-            <h3 className="text-white text-sm font-medium leading-snug mb-2">{ticket.title}</h3>
+            <h3 className="text-ink text-sm font-medium leading-snug mb-2">{ticket.title}</h3>
             {(ticket.description || (ticket.attachments && ticket.attachments.length > 0)) && (
-                <div className="flex items-center gap-3 text-zinc-500">
+                <div className="flex items-center gap-3 text-ink-faint">
                     {ticket.description && <AlignLeft className="w-3.5 h-3.5" />}
                     {(ticket.attachments && ticket.attachments.length > 0) && (
                         <div className="flex items-center gap-1">

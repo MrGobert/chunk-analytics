@@ -10,6 +10,7 @@ import {
   ResponsiveContainer,
   Legend,
 } from 'recharts';
+import { chart } from '@/lib/chartTheme';
 
 interface LineChartProps {
   data: { [key: string]: string | number | boolean | null | undefined }[];
@@ -22,10 +23,10 @@ export default function LineChart({ data, xKey, lines, showLegend = false }: Lin
   return (
     <ResponsiveContainer width="100%" height="100%">
       <RechartsLineChart data={data} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke="#d4d4d8" />
+        <CartesianGrid strokeDasharray="3 3" stroke={chart.grid} vertical={false} />
         <XAxis
           dataKey={xKey}
-          stroke="#71717a"
+          stroke={chart.axis}
           fontSize={12}
           fontFamily="var(--font-mono)"
           tickLine={false}
@@ -38,25 +39,24 @@ export default function LineChart({ data, xKey, lines, showLegend = false }: Lin
             return value;
           }}
         />
-        <YAxis stroke="#71717a" fontSize={12} fontFamily="var(--font-mono)" tickLine={false} axisLine={false} />
+        <YAxis stroke={chart.axis} fontSize={12} fontFamily="var(--font-mono)" tickLine={false} axisLine={false} />
         <Tooltip
-          contentStyle={{
-            backgroundColor: '#E8E4DD',
-            border: '1px solid #d4d4d8',
-            borderRadius: '0',
-            fontFamily: 'var(--font-mono)',
-          }}
-          labelStyle={{ color: '#71717a', fontWeight: 'bold' }}
-          itemStyle={{ color: '#111111' }}
+          contentStyle={chart.tooltip}
+          labelStyle={chart.tooltipLabelStyle}
+          itemStyle={chart.tooltipItemStyle}
         />
-        {showLegend && <Legend wrapperStyle={{ fontFamily: 'var(--font-sans)', fontSize: '12px' }} />}
+        {showLegend && (
+          <Legend
+            wrapperStyle={{ fontFamily: 'var(--font-sans)', fontSize: '12px', color: chart.axis }}
+          />
+        )}
         {lines.map((line) => (
           <Line
             key={line.key}
             type="monotone"
             dataKey={line.key}
             stroke={line.color}
-            strokeWidth={3}
+            strokeWidth={2.5}
             dot={false}
             name={line.name || line.key}
           />

@@ -27,7 +27,7 @@ interface FeatureTabBarProps {
 
 export default function FeatureTabBar({ activeTab, onTabChange }: FeatureTabBarProps) {
   return (
-    <div className="flex gap-1 p-1 rounded-2xl bg-primary/60 backdrop-blur-xl border border-white/5 overflow-x-auto">
+    <div className="flex gap-1 p-1 rounded-btn bg-card border border-line shadow-card overflow-x-auto">
       {FEATURE_TABS.map((tab) => {
         const Icon = tab.icon;
         const isActive = activeTab === tab.id;
@@ -36,10 +36,10 @@ export default function FeatureTabBar({ activeTab, onTabChange }: FeatureTabBarP
             key={tab.id}
             onClick={() => onTabChange(tab.id)}
             className={cn(
-              'flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 whitespace-nowrap',
+              'flex items-center gap-2 px-4 py-2.5 rounded-chip text-sm font-medium transition-all duration-200 whitespace-nowrap',
               isActive
-                ? 'bg-accent text-white shadow-lg shadow-accent/25'
-                : 'text-zinc-400 hover:text-zinc-200 hover:bg-white/5'
+                ? 'bg-ember-deep text-[#FFF8F2]'
+                : 'text-ink-soft hover:text-ink hover:bg-paper-deep'
             )}
           >
             <Icon size={16} />

@@ -16,7 +16,10 @@ import {
   X,
   Eye,
   DollarSign,
-  AlertTriangle,
+  Users,
+  Zap,
+  Repeat,
+  CreditCard,
   KanbanSquare,
   Tags,
   Briefcase,
@@ -29,9 +32,11 @@ import {
 const ROUTE_TO_ENDPOINT: Record<string, string> = {
   '/': '/api/metrics/pulse',
   '/revenue': '/api/rc/revenue-summary',
-  '/churn': '/api/rc/churn-intelligence',
+  '/conversion': '/api/metrics/monetization',
+  '/customers': '/api/rc/churn-intelligence',
   '/acquisition': '/api/metrics/acquisition',
-  '/marketing': '/api/metrics/marketing',
+  '/activation': '/api/metrics/activation',
+  '/retention': '/api/metrics/retention-cohorts',
   '/engagement': '/api/metrics/users',
   '/features': '/api/metrics/feature-overview',
   '/outreach': '/api/metrics/emails',
@@ -51,18 +56,28 @@ interface NavSection {
 
 const navSections: NavSection[] = [
   {
-    title: 'COMMAND CENTER',
+    title: 'TODAY',
+    items: [{ href: '/', label: 'Pulse', icon: Home }],
+  },
+  {
+    title: 'BUSINESS',
     items: [
-      { href: '/', label: 'Pulse', icon: Home },
       { href: '/revenue', label: 'Revenue', icon: DollarSign },
-      { href: '/churn', label: 'Churn & Retention', icon: AlertTriangle },
+      { href: '/conversion', label: 'Conversion', icon: CreditCard },
+      { href: '/customers', label: 'Customers', icon: Users },
+    ],
+  },
+  {
+    title: 'GROWTH',
+    items: [
+      { href: '/acquisition', label: 'Acquisition', icon: Rocket },
+      { href: '/activation', label: 'Activation', icon: Zap },
+      { href: '/retention', label: 'Retention', icon: Repeat },
     ],
   },
   {
     title: 'PRODUCT',
     items: [
-      { href: '/acquisition', label: 'Acquisition', icon: Rocket },
-      { href: '/marketing', label: 'Landing Pages', icon: Globe },
       { href: '/engagement', label: 'Engagement', icon: Activity },
       { href: '/features', label: 'Features', icon: LayoutGrid },
     ],
@@ -70,8 +85,8 @@ const navSections: NavSection[] = [
   {
     title: 'OPERATIONS',
     items: [
-      { href: '/outreach', label: 'Outreach', icon: Mail },
-      { href: '/health', label: 'System Health', icon: Bug },
+      { href: '/outreach', label: 'Email', icon: Mail },
+      { href: '/health', label: 'Health', icon: Bug },
     ],
   },
 ];
@@ -145,23 +160,23 @@ export default function Sidebar() {
   return (
     <>
       {/* Mobile header */}
-      <div className="lg:hidden fixed top-0 left-0 right-0 z-40 bg-black/60 backdrop-blur-md border-b border-white/5 px-4 py-3 flex items-center justify-between">
-        <div className="flex items-center justify-center">
-          <Image src="/chunk-logo-white.png" alt="Chunk Logo" width={100} height={28} className="w-auto h-7 object-contain" />
+      <div className="lg:hidden fixed top-0 left-0 right-0 z-40 bg-paper/85 backdrop-blur-[12px] border-b border-line px-4 py-3 flex items-center justify-between">
+        <div className="flex items-center text-ink">
+          <Image src="/chunk-logo.svg" alt="Chunk" width={100} height={24} className="w-auto h-6 object-contain" />
         </div>
         <button
           onClick={() => setIsOpen(!isOpen)}
-          className="p-2 text-zinc-500 hover:text-white transition-colors"
+          className="p-2 text-ink-soft hover:text-ink transition-colors"
           aria-label="Toggle menu"
         >
           {isOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
         </button>
       </div>
 
-      {/* Mobile overlay */}
+      {/* Mobile overlay — warm scrim, never black */}
       {isOpen && (
         <div
-          className="lg:hidden fixed inset-0 z-40 bg-black/50 backdrop-blur-sm"
+          className="lg:hidden fixed inset-0 z-40 bg-[rgba(45,36,24,0.35)] backdrop-blur-sm"
           onClick={() => setIsOpen(false)}
         />
       )}
@@ -169,15 +184,15 @@ export default function Sidebar() {
       {/* Sidebar */}
       <aside
         className={`
-          fixed left-0 top-0 h-screen w-64 bg-black/40 backdrop-blur-2xl border-r border-white/5 flex flex-col z-50
+          fixed left-0 top-0 h-screen w-64 bg-paper border-r border-line flex flex-col z-50
           transition-transform duration-300 ease-in-out
           lg:translate-x-0
           ${isOpen ? 'translate-x-0' : '-translate-x-full'}
         `}
       >
-        <div className="p-6 border-b border-white/5">
-          <div className="flex items-center justify-center py-2">
-            <Image src="/chunk-logo-white.png" alt="Chunk Logo" width={120} height={36} className="w-auto h-9 object-contain" />
+        <div className="p-6 border-b border-line">
+          <div className="flex items-center py-2 text-ink">
+            <Image src="/chunk-logo.svg" alt="Chunk" width={120} height={28} className="w-auto h-7 object-contain" />
           </div>
         </div>
 
@@ -185,9 +200,7 @@ export default function Sidebar() {
           {activeSections.map((section) => (
             <div key={section.title} className="mb-6">
               <div className="px-4 mb-2">
-                <span className="text-[10px] font-mono font-bold text-zinc-600 uppercase tracking-[0.15em]">
-                  {section.title}
-                </span>
+                <span className="eyebrow text-ink-faint">{section.title}</span>
               </div>
               <ul className="space-y-1">
                 {section.items.map((item) => {
@@ -198,13 +211,14 @@ export default function Sidebar() {
                     <li key={item.href}>
                       <Link
                         href={item.href}
-                        className={`flex items-center gap-3 px-4 py-2.5 rounded-[1rem] transition-all duration-300 btn-magnetic ${isActive
-                          ? 'bg-accent/10 border border-accent/30 text-accent font-medium shadow-[0_0_15px_var(--accent-glow)]'
-                          : 'text-zinc-500 hover:text-white hover:bg-white/5 font-medium border border-transparent'
-                          }`}
+                        className={`flex items-center gap-3 px-4 py-2.5 rounded-btn transition-all duration-200 ${
+                          isActive
+                            ? 'bg-ember-tint border border-ember/20 text-ember-deep font-semibold'
+                            : 'text-ink-soft hover:text-ink hover:bg-paper-deep font-medium border border-transparent'
+                        }`}
                       >
                         <Icon className="w-4 h-4" strokeWidth={isActive ? 2.5 : 2} />
-                        <span className="font-sans tracking-tight text-sm">{item.label}</span>
+                        <span className="tracking-tight text-sm">{item.label}</span>
                       </Link>
                     </li>
                   );
@@ -214,37 +228,38 @@ export default function Sidebar() {
           ))}
         </nav>
 
-        <div className="p-4 border-t border-white/5 space-y-3">
+        <div className="p-4 border-t border-line space-y-3">
           {isPmMode ? (
             <Link
               href="/"
-              className="flex items-center justify-center gap-3 px-4 py-3 rounded-[1rem] transition-all duration-300 bg-zinc-900 border border-white/10 text-white hover:bg-zinc-800 font-medium w-full"
+              className="flex items-center justify-center gap-3 px-4 py-3 rounded-btn transition-all duration-200 bg-card border border-line text-ink hover:bg-paper-deep font-medium w-full"
             >
               <BarChart2 className="w-4 h-4" />
-              <span className="font-sans tracking-tight text-sm">Exit PM Mode</span>
+              <span className="tracking-tight text-sm">Exit PM Mode</span>
             </Link>
           ) : (
             <>
               <Link
                 href="/emails/templates"
-                className={`flex items-center gap-3 px-4 py-3 rounded-[1rem] transition-all duration-300 btn-magnetic ${pathname === '/emails/templates'
-                    ? 'bg-accent/10 border border-accent/30 text-accent font-medium shadow-[0_0_15px_var(--accent-glow)]'
-                    : 'text-zinc-500 hover:text-white hover:bg-white/5 font-medium border border-transparent'
-                  }`}
+                className={`flex items-center gap-3 px-4 py-3 rounded-btn transition-all duration-200 ${
+                  pathname === '/emails/templates'
+                    ? 'bg-ember-tint border border-ember/20 text-ember-deep font-semibold'
+                    : 'text-ink-soft hover:text-ink hover:bg-paper-deep font-medium border border-transparent'
+                }`}
               >
                 <Eye className="w-4 h-4" strokeWidth={pathname === '/emails/templates' ? 2.5 : 2} />
-                <span className="font-sans tracking-tight text-sm">Email Templates</span>
+                <span className="tracking-tight text-sm">Email Templates</span>
               </Link>
               <Link
                 href="/pm"
-                className="flex items-center justify-center gap-3 px-4 py-3 rounded-[1rem] transition-all duration-300 bg-accent/20 border border-accent/30 text-accent hover:bg-accent/30 font-medium w-full mt-2"
+                className="flex items-center justify-center gap-3 px-4 py-3 rounded-btn transition-all duration-200 bg-card border border-line text-ink hover:bg-paper-deep font-medium w-full"
               >
                 <KanbanSquare className="w-4 h-4" />
-                <span className="font-sans tracking-tight text-sm">Enter PM Mode</span>
+                <span className="tracking-tight text-sm">Enter PM Mode</span>
               </Link>
             </>
           )}
-          <div className="text-xs font-mono text-zinc-600 text-center tracking-tight mt-4">
+          <div className="text-xs font-mono text-ink-faint text-center tracking-tight mt-4">
             {isPmMode ? 'PRODUCT MANAGEMENT' : 'CHUNK COMMAND CENTER'}
           </div>
         </div>

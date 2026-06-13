@@ -10,32 +10,49 @@ interface StatCardProps {
   icon?: React.ReactNode;
   prefix?: string;
   suffix?: string;
+  /** When true, a falling trend is "good" (e.g. churn rate, failure rate). */
+  invertTrend?: boolean;
 }
 
-export default function StatCard({ title, value, trend, format = 'number', subtitle, icon, prefix = '', suffix = '' }: StatCardProps) {
+export default function StatCard({
+  title,
+  value,
+  trend,
+  format = 'number',
+  subtitle,
+  icon,
+  prefix = '',
+  suffix = '',
+  invertTrend = false,
+}: StatCardProps) {
   const getFormattedValue = () => {
     if (format === 'text' || typeof value === 'string') return value;
-    if (format === 'currency') return '$' + (value as number).toFixed(2);
-    if (format === 'percentage') return formatPercentage(value as number);
-    if (format === 'ratio') return (value as number).toFixed(2);
-    if (format === 'decimal') return (value as number).toFixed(1);
-    return formatNumber(value as number);
+    // Guard against undefined/NaN (e.g. a backend field missing on a stale payload)
+    // so a KPI card degrades to 0 instead of crashing on .toFixed().
+    const num = typeof value === 'number' && Number.isFinite(value) ? value : 0;
+    if (format === 'currency') return '$' + num.toFixed(2);
+    if (format === 'percentage') return formatPercentage(num);
+    if (format === 'ratio') return num.toFixed(2);
+    if (format === 'decimal') return num.toFixed(1);
+    return formatNumber(num);
   };
 
   const formattedValue = getFormattedValue();
   const isNewTrend = trend === null;
-  const trendColor = isNewTrend ? 'text-accent' : (trend !== undefined && trend >= 0 ? 'text-[#34D399]' : 'text-accent');
-  const trendIcon = isNewTrend ? '' : (trend !== undefined && trend >= 0 ? '↑' : '↓');
+  const trendUp = trend !== undefined && trend !== null && trend >= 0;
+  // Direction the user cares about: up is good unless inverted.
+  const trendIsGood = invertTrend ? !trendUp : trendUp;
+  const trendIcon = trendUp ? '↑' : '↓';
 
   return (
-    <div className="card-animate rounded-[1.5rem] bg-primary/60 backdrop-blur-xl border border-white/5 p-5 sm:p-7 shadow-lg transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_8px_30px_rgba(0,0,0,0.4)] hover:border-white/10 group">
+    <div className="card-animate card-surface card-hover p-5 sm:p-7 group">
       <div className="flex items-center justify-between mb-4">
-        <span className="text-sm font-bold tracking-tight text-zinc-400 font-sans group-hover:text-zinc-300 transition-colors">{title}</span>
-        {icon && <div className="text-zinc-500 hidden sm:block opacity-60 group-hover:opacity-100 transition-opacity">{icon}</div>}
+        <span className="text-sm font-semibold tracking-tight text-ink-soft">{title}</span>
+        {icon && <div className="text-ink-faint hidden sm:block">{icon}</div>}
       </div>
       <div className="flex items-baseline gap-3">
-        <span className="text-3xl sm:text-4xl font-bold font-mono text-foreground tracking-tight">
-          {typeof value === 'number' && format !== 'text' ? (
+        <span className="text-3xl sm:text-4xl font-medium font-mono text-ink tracking-tight tabular-nums">
+          {typeof value === 'number' && Number.isFinite(value) && format !== 'text' ? (
             <AnimatedNumber value={value} format={format} prefix={prefix} suffix={suffix} />
           ) : (
             formattedValue
@@ -43,17 +60,25 @@ export default function StatCard({ title, value, trend, format = 'number', subti
         </span>
         <div className="flex flex-col justify-end pb-1">
           {isNewTrend && (
-            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-mono font-medium bg-accent/10 text-accent border border-accent/20`}>New</span>
+            <span className="sticker text-[0.7rem] !py-0.5 !px-2.5 bg-butter-tint border-butter/50 text-ink-soft -rotate-2">
+              New
+            </span>
           )}
           {trend !== undefined && trend !== null && (
-            <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-mono font-medium ${trend >= 0 ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-red-500/10 text-red-400 border border-red-500/20'}`}>
+            <span
+              className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-mono font-medium border ${
+                trendIsGood
+                  ? 'bg-sage-tint text-sage-deep border-sage/30'
+                  : 'bg-ember-tint text-ember-deep border-ember/30'
+              }`}
+            >
               {trendIcon} {Math.abs(trend).toFixed(1)}%
             </span>
           )}
         </div>
       </div>
       {subtitle && (
-        <div className="mt-2 text-xs font-mono text-zinc-500 uppercase tracking-widest">{subtitle}</div>
+        <div className="mt-2 text-xs font-mono text-ink-faint tracking-tight">{subtitle}</div>
       )}
     </div>
   );

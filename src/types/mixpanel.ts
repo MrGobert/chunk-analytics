@@ -134,6 +134,12 @@ export interface SearchMetrics {
   modelsUsed: { model: string; count: number }[];
   contextUsage: { hasContext: boolean; count: number }[];
   hourlyDistribution: { hour: number; count: number }[];
+  // model-mix + reliability extension
+  modelsOverTime?: { date: string; [model: string]: string | number }[];
+  topModels?: string[];
+  responseTimes?: { model: string; p50: number; p90: number; count: number }[];
+  searchFailRate?: number;
+  failedCount?: number;
 }
 
 export interface FunnelMetrics {
@@ -454,12 +460,47 @@ export interface AdvancedMetrics {
   lastUpdated: string;
 }
 
+export interface TopMover {
+  category: string;
+  current: number;
+  previous: number;
+  change: number | null;
+}
+
 export interface PulseMetrics {
   todayDAU: number;
   yesterdayDAU: number;
   todaySearches: number;
   dauTrend7d: { date: string; users: number }[];
+  // v2 fields
+  sameWeekdayDAU: number;
+  dauTrend14d: { date: string; users: number }[];
+  weeklyActiveCreators: number;
+  weeklyActiveCreatorsPrev: number;
+  wacChange: number | null;
+  todaySignups: number;
+  todayTrialStarts: number;
+  todayPurchases: number;
+  todayPurchaseFailures: number;
+  todayPaywallViews: number;
+  searchFailRateToday: number;
+  searchFailRate7d: number;
+  microFunnel: {
+    paywallViewed: number;
+    planSelected: number;
+    purchaseInitiated: number;
+    purchaseCompleted: number;
+  };
+  topMovers: { gainers: TopMover[]; decliners: TopMover[] };
   lastUpdated: string;
+}
+
+export interface SentryStats {
+  projects: { slug: string; label: string; platform: string; totalEvents: number; totalFiltered: number }[];
+  totalErrors: number;
+  errorTrend: { date: string; errors: number }[];
+  lastUpdated: string;
+  error?: string;
 }
 
 export interface FeatureOverviewMetrics {
@@ -468,6 +509,10 @@ export interface FeatureOverviewMetrics {
     totalEvents: number;
     uniqueUsers: number;
     trend: number | null;
+    /** DAU/MAU ratio for this feature (0–1) — added by the stickiness extension. */
+    stickiness?: number;
+    /** Share of active users who used this feature (0–1). */
+    adoptionRate?: number;
   }[];
   memoryEnabled: {
     uniqueUsers: number;
@@ -476,6 +521,157 @@ export interface FeatureOverviewMetrics {
   // True only on a genuine Mixpanel fetch failure (no fresh data and no stale
   // cache) — lets the UI show "data unavailable" instead of misleading zeros.
   dataUnavailable?: boolean;
+  lastUpdated: string;
+}
+
+export interface CustomerHealthFactors {
+  recency: number;
+  frequency: number;
+  featureDepth: number;
+  tenure: number;
+  emailEngagement: number;
+}
+
+export interface CustomerHealthEntry {
+  uid: string;
+  email: string;
+  name?: string;
+  platform: string;
+  healthScore: number;
+  healthStatus: 'healthy' | 'atRisk' | 'churning' | string;
+  subscriptionStatus: string;
+  subscribedDays: number;
+  lastActiveAt: string;
+  factors: CustomerHealthFactors;
+}
+
+export interface CustomerHealth {
+  distribution: { healthy: number; atRisk: number; churning: number };
+  customers: CustomerHealthEntry[];
+  averageHealthScore: number;
+  lastUpdated: string;
+  note?: string;
+}
+
+export interface CustomerDetail {
+  uid: string;
+  email: string;
+  name?: string;
+  platform: string;
+  healthScore: number;
+  healthFactors?: CustomerHealthFactors;
+  subscriptionStatus: string;
+  createdAt: string;
+  lastActiveAt: string;
+  usageStats: {
+    monthlySearches?: number;
+    monthlyDocuments?: number;
+    monthlyImages?: number;
+    monthlyNotes?: number;
+    monthlyCollections?: number;
+  };
+  emailHistory: {
+    emailType?: string;
+    sentAt?: string;
+    delivered?: boolean;
+    opened?: boolean;
+    clicked?: boolean;
+    converted?: boolean;
+  }[];
+  subscriptionHistory: {
+    event?: string;
+    status?: string;
+    date?: string;
+    timestamp?: string;
+    platform?: string;
+  }[];
+  lastUpdated: string;
+  error?: string;
+}
+
+export interface ActivationMetrics {
+  activationRate: number;
+  eligibleSignups: number;
+  activatedCount: number;
+  medianMinutesToFirstAction: number | null;
+  funnel: FunnelStep[];
+  firstActionMix: { name: string; value: number }[];
+  timeToFirstAction: { bucket: string; count: number }[];
+  byPlatform: { name: string; signups: number; activated: number; rate: number }[];
+  bySignupMethod: { name: string; signups: number; activated: number; rate: number }[];
+  onboarding: { completed: { signups: number; rate: number }; skipped: { signups: number; rate: number } };
+  weeklyTrend: { week: string; signups: number; rate: number }[];
+  dateRange: DateRange;
+  lastUpdated: string;
+}
+
+export interface RetentionCohortMetrics {
+  weeks: number;
+  cohorts: { week: string; size: number; retention: (number | null)[] }[];
+  curve: { week: number; retention: number }[];
+  totalSignups: number;
+  dateRange: DateRange;
+  lastUpdated: string;
+}
+
+export interface ViralityMetrics {
+  kpis: {
+    sharesCreated: number;
+    sharedViews: number;
+    saveClicks: number;
+    viralSignups: number;
+    viewsPerShare: number;
+    saveRate: number;
+  };
+  funnel: FunnelStep[];
+  byType: { type: string; shares: number; views: number; viewsPerShare: number }[];
+  dailyData: { date: string; shares: number; views: number; saves: number }[];
+  dateRange: DateRange;
+  lastUpdated: string;
+}
+
+export interface ReliabilityMetrics {
+  kpis: {
+    searchFailRate: number;
+    artifactFailRate: number;
+    imageFailRate: number;
+    purchaseFailures: number;
+    searchFailed: number;
+    artifactFailed: number;
+    imageFailed: number;
+  };
+  dailyData: { date: string; searchFailRate: number; errors: number }[];
+  topErrors: { error: string; count: number }[];
+  connectorDegradations: { connector: string; count: number }[];
+  dateRange: DateRange;
+  lastUpdated: string;
+}
+
+export interface PowerUserMetrics {
+  totalUsers: number;
+  segments: { segment: string; count: number; subscribers: number; description: string }[];
+  topUsers: { uid: string; activeDays: number; features: number; events: number; subscriber: boolean }[];
+  featureBreadth: { features: string; users: number }[];
+  dateRange: DateRange;
+  lastUpdated: string;
+}
+
+export interface MonetizationMetrics {
+  funnel: FunnelStep[];
+  kpis: {
+    paywallViews: number;
+    purchases: number;
+    overallConversion: number;
+    dismissalRate: number;
+    failures: number;
+    cancellations: number;
+  };
+  byPlatform: { platform: string; views: number; purchases: number; conversion: number }[];
+  planMix: { name: string; value: number }[];
+  paywallSources: { source: string; count: number }[];
+  featureLimits: { feature: string; count: number }[];
+  dailyData: { date: string; paywallViewed: number; planSelected: number; purchaseStarted: number; purchased: number }[];
+  dateRange: DateRange;
   lastUpdated: string;
 }
 

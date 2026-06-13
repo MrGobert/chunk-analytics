@@ -14,6 +14,7 @@ import BarChart from '@/components/charts/BarChart';
 import DataTable from '@/components/charts/DataTable';
 import { SkeletonPage } from '@/components/ui/Skeleton';
 import { useAnalytics } from '@/hooks/useAnalytics';
+import { chart } from '@/lib/chartTheme';
 import type { PushMetrics } from '@/types/mixpanel';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -185,8 +186,8 @@ export default function OutreachPage() {
   if (emailError) {
     return (
       <div className="text-center py-20">
-        <div className="text-red-400 mb-4">{emailError}</div>
-        <p className="text-zinc-500 text-sm">
+        <div className="text-ember-deep mb-4">{emailError}</div>
+        <p className="text-ink-faint text-sm">
           Make sure CEREBRAL_AUTH_TOKEN is configured in your environment.
         </p>
       </div>
@@ -194,6 +195,9 @@ export default function OutreachPage() {
   }
 
   const totals = emailStats?.totals ?? { sent: 0, converted: 0, overallConversionRate: 0 };
+  const aggDelivered = byTypeData.reduce((s, t) => s + t.delivered, 0);
+  const aggOpenRate = aggDelivered > 0 ? byTypeData.reduce((s, t) => s + t.opened, 0) / aggDelivered : 0;
+  const aggClickRate = aggDelivered > 0 ? byTypeData.reduce((s, t) => s + t.clicked, 0) / aggDelivered : 0;
 
   const tableData = byTypeData.map((item) => ({
     campaign: item.name,
@@ -222,11 +226,11 @@ export default function OutreachPage() {
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
           <Mail className="w-5 h-5 text-accent" />
-          <h2 className="text-lg font-semibold text-foreground">Email Campaigns</h2>
+          <h2 className="text-lg font-semibold text-ink">Email Campaigns</h2>
         </div>
         <Link
           href="/emails/templates"
-          className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium text-zinc-400 hover:text-accent border border-white/5 hover:border-accent/30 transition-all duration-200"
+          className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium text-ink-soft hover:text-accent border border-line hover:border-accent/30 transition-all duration-200"
         >
           <Eye className="w-4 h-4" />
           View Templates
@@ -234,11 +238,23 @@ export default function OutreachPage() {
       </div>
 
       {/* ── Email Stat Cards ─────────────────────────────────────────────── */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 mb-8">
         <StatCard
           title="Emails Sent"
           value={totals.sent}
           icon={<Send className="w-5 h-5" />}
+        />
+        <StatCard
+          title="Open Rate"
+          value={aggOpenRate}
+          format="percentage"
+          icon={<Eye className="w-5 h-5" />}
+        />
+        <StatCard
+          title="Click Rate"
+          value={aggClickRate}
+          format="percentage"
+          icon={<BarChart3 className="w-5 h-5" />}
         />
         <StatCard
           title="Conversions"
@@ -249,11 +265,6 @@ export default function OutreachPage() {
           title="Conversion Rate"
           value={(totals.overallConversionRate ?? 0) / 100}
           format="percentage"
-          icon={<BarChart3 className="w-5 h-5" />}
-        />
-        <StatCard
-          title="Campaign Types"
-          value={Object.keys(byEmailType).length}
           icon={<Megaphone className="w-5 h-5" />}
         />
       </div>
@@ -262,9 +273,9 @@ export default function OutreachPage() {
       <div className="grid grid-cols-1 gap-6 mb-8">
         <ChartCard title="Email Volume Over Time" subtitle="Daily sends across all campaigns">
           {dailyChartData.length > 0 ? (
-            <AreaChart data={dailyChartData} xKey="date" yKey="sent" color="#E63B2E" />
+            <AreaChart data={dailyChartData} xKey="date" yKey="sent" color={chart.primary} />
           ) : (
-            <div className="flex items-center justify-center h-full text-zinc-500">
+            <div className="empty-state h-full">
               No time-series data available
             </div>
           )}
@@ -279,18 +290,18 @@ export default function OutreachPage() {
               data={tableData}
               columns={[
                 { key: 'campaign', header: 'Campaign' },
-                { key: 'sent', header: 'Sent' },
-                { key: 'delivered', header: 'Delivered' },
-                { key: 'opened', header: 'Opened' },
-                { key: 'clicked', header: 'Clicked' },
-                { key: 'converted', header: 'Converted' },
-                { key: 'convRate', header: 'Conv Rate' },
-                { key: 'openRate', header: 'Open Rate' },
-                { key: 'clickRate', header: 'Click Rate' },
+                { key: 'sent', header: 'Sent', numeric: true },
+                { key: 'delivered', header: 'Delivered', numeric: true },
+                { key: 'opened', header: 'Opened', numeric: true },
+                { key: 'clicked', header: 'Clicked', numeric: true },
+                { key: 'converted', header: 'Converted', numeric: true },
+                { key: 'convRate', header: 'Conv Rate', numeric: true },
+                { key: 'openRate', header: 'Open Rate', numeric: true },
+                { key: 'clickRate', header: 'Click Rate', numeric: true },
               ]}
             />
           ) : (
-            <div className="flex items-center justify-center h-full text-zinc-500">
+            <div className="empty-state h-full">
               No campaign data available
             </div>
           )}
@@ -301,17 +312,17 @@ export default function OutreachPage() {
       <div className="mb-8">
         <div className="flex items-center gap-3 mb-4">
           <Radio className="w-5 h-5 text-accent" />
-          <h2 className="text-lg font-semibold text-foreground">Broadcasts</h2>
+          <h2 className="text-lg font-semibold text-ink">Broadcasts</h2>
           {broadcastData?.totals && (
             <div className="flex gap-2 ml-auto">
               {broadcastData.totals.sent > 0 && (
-                <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-400 text-xs font-medium">
+                <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-sage-tint text-sage-deep text-xs font-medium">
                   <Send className="w-3 h-3" />
                   {broadcastData.totals.sent} sent
                 </span>
               )}
               {broadcastData.totals.draft > 0 && (
-                <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-zinc-500/10 text-zinc-400 text-xs font-medium">
+                <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-paper-deep text-ink-soft text-xs font-medium">
                   <FileEdit className="w-3 h-3" />
                   {broadcastData.totals.draft} draft
                 </span>
@@ -321,11 +332,11 @@ export default function OutreachPage() {
         </div>
 
         {broadcastLoading ? (
-          <div className="p-8 bg-primary rounded-lg border border-zinc-800 text-center text-zinc-500">
+          <div className="p-8 card-surface text-center text-ink-faint">
             Loading broadcasts...
           </div>
         ) : broadcastTableData.length > 0 ? (
-          <div className="card-animate rounded-[1.5rem] bg-primary/60 backdrop-blur-xl border border-white/5 p-6 sm:p-8 shadow-lg">
+          <div className="card-animate card-surface p-6 sm:p-8">
             <DataTable
               data={broadcastTableData}
               columns={[
@@ -338,9 +349,9 @@ export default function OutreachPage() {
                     const s = String(val);
                     return (
                       <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-                        s === 'sent' ? 'bg-emerald-500/10 text-emerald-400' :
-                        s === 'queued' ? 'bg-amber-500/10 text-amber-400' :
-                        'bg-zinc-500/10 text-zinc-400'
+                        s === 'sent' ? 'bg-sage-tint text-sage-deep' :
+                        s === 'queued' ? 'bg-butter-tint text-[#C8922A]' :
+                        'bg-paper-deep text-ink-soft'
                       }`}>
                         {s}
                       </span>
@@ -352,13 +363,13 @@ export default function OutreachPage() {
             />
           </div>
         ) : (
-          <div className="p-6 bg-primary rounded-lg border border-zinc-800 text-center text-zinc-500 text-sm">
+          <div className="p-6 card-surface text-center text-ink-faint text-sm">
             No broadcasts found. Create one in the{' '}
             <a
               href="https://resend.com/broadcasts"
               target="_blank"
               rel="noopener noreferrer"
-              className="text-accent hover:underline"
+              className="text-ember-deep hover:underline"
             >
               Resend dashboard
             </a>
@@ -369,12 +380,12 @@ export default function OutreachPage() {
 
       {/* ── Push Notifications Section Divider ───────────────────────────── */}
       <div className="flex items-center gap-4 my-10">
-        <div className="flex-1 h-px bg-white/5" />
-        <div className="flex items-center gap-2 text-zinc-400">
+        <div className="flex-1 h-px bg-line" />
+        <div className="flex items-center gap-2 text-ink-soft">
           <Bell className="w-5 h-5" />
-          <span className="text-lg font-semibold text-foreground">Push Notifications</span>
+          <span className="text-lg font-semibold text-ink">Push Notifications</span>
         </div>
-        <div className="flex-1 h-px bg-white/5" />
+        <div className="flex-1 h-px bg-line" />
       </div>
 
       {/* ── Push Stat Cards ──────────────────────────────────────────────── */}
@@ -418,7 +429,7 @@ export default function OutreachPage() {
           {pushDestinationData.length > 0 ? (
             <BarChart data={pushDestinationData} xKey="destination" yKey="count" horizontal />
           ) : (
-            <div className="flex items-center justify-center h-full text-zinc-500">
+            <div className="empty-state h-full">
               No push destination data available
             </div>
           )}

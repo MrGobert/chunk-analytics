@@ -87,10 +87,56 @@ export async function GET(request: NextRequest) {
     }
     const hourlyDistribution = hourlyCount.map((count, hour) => ({ hour, count }));
 
+    // ── Model mix over time (top 5 models, daily share) ──
+    const topModels = modelsUsed.slice(0, 5).map((m) => m.model);
+    const modelsOverTime = days.map((date) => {
+      const row: Record<string, string | number> = { date };
+      for (const m of topModels) row[m] = 0;
+      for (const e of searchEvents) {
+        if (formatDate(new Date(e.properties.time * 1000)) !== date) continue;
+        const model = String(e.properties.model_used || 'Default');
+        if (topModels.includes(model)) row[model] = (row[model] as number) + 1;
+      }
+      return row;
+    });
+
+    // ── AI response time p50/p90 by model ──
+    const responseEvents = events.filter((e) => e.event === 'AI_Response_Time');
+    const byModel = new Map<string, number[]>();
+    for (const e of responseEvents) {
+      const model = String(e.properties.model || e.properties.model_used || 'Default');
+      const ms = Number(e.properties.duration_ms);
+      if (!Number.isFinite(ms) || ms <= 0) continue;
+      if (!byModel.has(model)) byModel.set(model, []);
+      byModel.get(model)!.push(ms);
+    }
+    const pct = (arr: number[], p: number) => {
+      if (arr.length === 0) return 0;
+      const sorted = [...arr].sort((a, b) => a - b);
+      // Nearest-rank: index = ceil(p/100 * n) - 1, clamped — avoids overstating p50/p90.
+      const idx = Math.min(sorted.length - 1, Math.max(0, Math.ceil((p / 100) * sorted.length) - 1));
+      return Math.round(sorted[idx]);
+    };
+    const responseTimes = Array.from(byModel.entries())
+      .map(([model, arr]) => ({ model, p50: pct(arr, 50), p90: pct(arr, 90), count: arr.length }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 8);
+
+    // ── Search reliability ──
+    const failedCount = events.filter((e) => e.event === 'Search_Failed').length;
+    const searchFailRate = searchEvents.length + failedCount > 0
+      ? failedCount / (searchEvents.length + failedCount)
+      : 0;
+
     const response = NextResponse.json({
       searchesOverTime,
       searchModes,
       modelsUsed,
+      modelsOverTime,
+      topModels,
+      responseTimes,
+      searchFailRate,
+      failedCount,
       contextUsage,
       hourlyDistribution,
       totalSearches: searchEvents.length,

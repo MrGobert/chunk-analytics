@@ -8,8 +8,8 @@ export default function PMBoardPage() {
         <div className="animate-in fade-in duration-300 h-full flex flex-col">
             <div className="flex items-center justify-between mb-8">
                 <div>
-                    <h1 className="text-3xl font-serif text-white mb-2">Kanban Board</h1>
-                    <p className="text-zinc-400 font-mono text-sm tracking-tight">Organize tasks and track progress</p>
+                    <h1 className="text-3xl font-serif text-ink mb-2">Kanban Board</h1>
+                    <p className="text-ink-soft font-mono text-sm tracking-tight">Organize tasks and track progress</p>
                 </div>
                 <ProjectSelector />
             </div>

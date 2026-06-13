@@ -1,115 +1,251 @@
 @import "tailwindcss";
 
+/* ============================================================
+   Chunk Analytics — "Paper & Ember" (light)
+   Design system: chunk-web/Chunk-Design-System-v2.md
+   Token parity with chunk-web/src/styles/landing-v2.css.
+   This app is light-only, so tokens live unscoped on :root.
+   ============================================================ */
+
 :root {
-  /* Premium Dark Mode - Command Center */
-  --background: #09090b; /* Zinc 950 / Deep Obsidian */
-  --foreground: #fafafa; /* Zinc 50 / Off-white */
-  --primary: #18181b; /* Zinc 900 / Surface 1 */
-  --primary-hover: #27272a; /* Zinc 800 */
-  --accent: #10b981; /* Premium Emerald/Signal Green */
-  --accent-glow: rgba(16, 185, 129, 0.4);
-  --surface-dark: #000000;
-  --muted: #a1a1aa; /* Zinc 400 for secondary text */
-  --border-color: rgba(255, 255, 255, 0.08); /* Glass border */
-  --glass-bg: rgba(24, 24, 27, 0.6); /* Semi-transparent surface */
+  /* --- Paper (light) palette --- */
+  --paper: #faf5ee;        /* page background */
+  --paper-deep: #f3eadc;   /* alternating sections, inputs, hover fills */
+  --card: #fffdf8;         /* card surfaces */
+  --ink: #2d2418;          /* primary text (AAA on paper) */
+  --ink-soft: #6b5d4f;     /* secondary text (AA) */
+  --ink-faint: #776550;    /* tertiary text & mono details — AA ≥13px */
+  --line: rgba(45, 36, 24, 0.1);
+
+  --ember: #e84d2b;        /* brand orange — CTAs, active states */
+  --ember-deep: #bd3717;   /* small orange text & links (AA) */
+  --ember-tint: #fce3d9;   /* orange wash fills, selection */
+  --butter: #f5be4f;       /* sticker badges, fills — never as text */
+  --butter-deep: #c8922a;  /* derived: butter darkened for icons/strokes only */
+  --butter-tint: #fbefd4;
+  --lake: #3e7cb1;         /* cool counterpoint — graph nodes, focus, charts */
+  --lake-tint: #dbeaf5;
+  --sage: #5b8a5e;         /* checkmark fills, large green accents */
+  --sage-deep: #477349;    /* small green text (AA) */
+  --sage-tint: #e2eddf;
+
+  /* --- Warm shadows (never gray) --- */
+  --shadow-card: 0 1px 2px rgba(45, 36, 24, 0.06), 0 8px 24px rgba(93, 64, 28, 0.08);
+  --shadow-lift: 0 2px 4px rgba(45, 36, 24, 0.08), 0 16px 40px rgba(93, 64, 28, 0.14);
+  --shadow-ember: 0 8px 28px rgba(232, 77, 43, 0.28);
+
+  color-scheme: light;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --color-primary: var(--primary);
-  --color-primary-hover: var(--primary-hover);
-  --color-accent: var(--accent);
-  --color-surface-dark: var(--surface-dark);
-  --color-muted: var(--muted);
-  --color-glass-border: var(--border-color);
+  /* --- Semantic Paper & Ember colors (bg-paper, text-ink-soft, border-line…) --- */
+  --color-paper: var(--paper);
+  --color-paper-deep: var(--paper-deep);
+  --color-card: var(--card);
+  --color-ink: var(--ink);
+  --color-ink-soft: var(--ink-soft);
+  --color-ink-faint: var(--ink-faint);
+  --color-line: var(--line);
+  --color-ember: var(--ember);
+  --color-ember-deep: var(--ember-deep);
+  --color-ember-tint: var(--ember-tint);
+  --color-butter: var(--butter);
+  --color-butter-deep: var(--butter-deep);
+  --color-butter-tint: var(--butter-tint);
+  --color-lake: var(--lake);
+  --color-lake-tint: var(--lake-tint);
+  --color-sage: var(--sage);
+  --color-sage-deep: var(--sage-deep);
+  --color-sage-tint: var(--sage-tint);
 
-  --font-sans: var(--font-space-grotesk);
-  --font-mono: var(--font-space-mono);
-  --font-serif: var(--font-dm-serif);
+  /* --- Compat aliases: existing classnames flip to light with zero churn --- */
+  --color-background: var(--paper);     /* bg-background */
+  --color-foreground: var(--ink);       /* text-foreground */
+  --color-primary: var(--card);         /* bg-primary */
+  --color-primary-hover: var(--paper-deep);
+  --color-accent: var(--ember);         /* text-accent / bg-accent */
+  --color-muted: var(--ink-soft);
+
+  /* --- Shadows → shadow-card / shadow-lift / shadow-ember --- */
+  --shadow-card: var(--shadow-card);
+  --shadow-lift: var(--shadow-lift);
+  --shadow-ember: var(--shadow-ember);
+
+  /* --- Radii → rounded-chip / rounded-btn / rounded-card / rounded-panel --- */
+  --radius-chip: 10px;
+  --radius-btn: 16px;
+  --radius-card: 24px;
+  --radius-panel: 32px;
+
+  /* --- Fonts --- */
+  --font-sans: var(--font-dm-sans);
+  --font-mono: var(--font-spline-mono);
+  --font-display: var(--font-fraunces);
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: var(--font-sans), Arial, Helvetica, sans-serif;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-dm-sans), system-ui, Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Custom scrollbar - Dark Mode */
+/* Editorial serif display — page titles & chart-card titles */
+.font-display {
+  font-family: var(--font-fraunces), Georgia, serif;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  font-variation-settings: 'opsz' 144, 'SOFT' 50, 'WONK' 0;
+}
+
+/* Selection — warm ember wash */
+::selection {
+  background: var(--ember-tint);
+  color: var(--ink);
+}
+
+/* Focus — cool lake (calm); orange stays for action */
+:focus-visible {
+  outline: 2px solid var(--lake);
+  outline-offset: 2px;
+}
+
+/* Scrollbar — warm light */
+html {
+  scrollbar-color: var(--ink-faint) var(--paper);
+}
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 8px;
+  height: 8px;
 }
-
 ::-webkit-scrollbar-track {
-  background: var(--background);
+  background: var(--paper);
 }
-
 ::-webkit-scrollbar-thumb {
-  background: #3f3f46; /* Zinc 700 */
+  background: rgba(45, 36, 24, 0.25);
   border-radius: 4px;
 }
-
 ::-webkit-scrollbar-thumb:hover {
-  background: #52525b; /* Zinc 600 */
+  background: rgba(45, 36, 24, 0.4);
 }
 
-/* Add noise overlay */
+/* Grain — paper tooth, not static */
 .noise-overlay {
   position: fixed;
   inset: 0;
   pointer-events: none;
   z-index: 50;
-  opacity: 0.05;
+  opacity: 0.035;
+  mix-blend-mode: multiply;
 }
 
-/* Base button micro-interactions */
-.btn-magnetic {
-  transition: transform 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+/* ============ Component utilities ============ */
+
+@utility card-surface {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+}
+
+@utility card-hover {
+  transition: transform 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94), box-shadow 0.3s;
+  &:hover {
+    transform: translateY(-4px);
+    box-shadow: var(--shadow-lift);
+  }
+}
+
+@utility input-paper {
+  background: var(--paper-deep);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-chip);
+  color: var(--ink);
+}
+
+@utility eyebrow {
+  font-family: var(--font-dm-sans), sans-serif;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+
+/* Sticker badge — straightens on hover ("sits up when you look at it") */
+@utility sticker {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 5px 12px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--ink-soft);
+  box-shadow: var(--shadow-card);
+  transition: transform 0.35s cubic-bezier(0.25, 0.46, 0.45, 0.94), rotate 0.35s;
+}
+
+.sticker-tilt:nth-child(odd) { rotate: -2deg; }
+.sticker-tilt:nth-child(even) { rotate: 2deg; }
+.sticker-tilt:hover { rotate: 0deg; transform: translateY(-1px); }
+
+/* Skeleton — paper-deep with a cream shimmer sweep */
+.skeleton {
   position: relative;
   overflow: hidden;
+  background: var(--paper-deep);
 }
-
-.btn-magnetic:hover {
-  transform: scale(1.03);
-}
-
-.btn-hover-slide {
-  position: relative;
-  overflow: hidden;
-  z-index: 1;
-}
-
-.btn-hover-slide::after {
+.skeleton::after {
   content: '';
   position: absolute;
   inset: 0;
-  background-color: var(--accent);
-  transform: translateY(100%);
-  transition: transform 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
-  z-index: -1;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 253, 248, 0.65),
+    transparent
+  );
+  animation: skeleton-shimmer 1.6s ease-in-out infinite;
+}
+@keyframes skeleton-shimmer {
+  100% { transform: translateX(100%); }
 }
 
-.btn-hover-slide:hover::after {
-  transform: translateY(0);
+/* Empty state — quiet mono on paper */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  font-family: var(--font-spline-mono), monospace;
+  font-size: 0.8125rem;
+  color: var(--ink-faint);
+  text-align: center;
 }
 
-.btn-hover-slide:hover {
-  color: #fff;
-}
-
-/* Lift effect for links/icons */
-.hover-lift {
-  transition: transform 0.2s ease-out;
-}
-
-.hover-lift:hover {
-  transform: translateY(-1px);
-}
-
-/* Chart tooltip fix */
+/* Chart tooltip stays above everything */
 .recharts-tooltip-wrapper {
   z-index: 100;
+}
+
+/* ============ Motion discipline ============ */
+@media (prefers-reduced-motion: reduce) {
+  .skeleton::after {
+    animation: none;
+  }
+  .card-hover {
+    transition: none;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+  }
 }

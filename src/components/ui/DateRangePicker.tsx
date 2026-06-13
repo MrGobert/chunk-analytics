@@ -1,7 +1,5 @@
 'use client';
 
-import { useState } from 'react';
-
 interface DateRangePickerProps {
   value: string;
   onChange: (range: string) => void;
@@ -17,15 +15,16 @@ const ranges = [
 
 export default function DateRangePicker({ value, onChange }: DateRangePickerProps) {
   return (
-    <div className="flex items-center gap-1 rounded-[1.5rem] bg-primary border border-zinc-300/50 p-1 shadow-sm">
+    <div className="flex items-center gap-1 rounded-full bg-card border border-line p-1 shadow-card">
       {ranges.map((range) => (
         <button
           key={range.value}
           onClick={() => onChange(range.value)}
-          className={`px-3 py-1.5 text-xs uppercase tracking-widest font-mono font-bold rounded-full transition-all duration-300 ${value === range.value
-              ? 'bg-accent text-white shadow-sm'
-              : 'text-zinc-500 hover:text-foreground hover:bg-zinc-200'
-            }`}
+          className={`px-3 py-1.5 text-xs font-semibold rounded-full transition-all duration-300 ${
+            value === range.value
+              ? 'bg-ember-deep text-[#FFF8F2]'
+              : 'text-ink-soft hover:text-ink hover:bg-paper-deep'
+          }`}
         >
           {range.label}
         </button>

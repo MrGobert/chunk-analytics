@@ -107,14 +107,14 @@ export default function Board() {
 
     if (!activeProjectId) {
         return (
-            <div className="flex-1 flex flex-col items-center justify-center p-12 text-center h-[60vh] border-2 border-dashed border-white/5 rounded-2xl mx-4">
-                <div className="w-16 h-16 bg-white/5 rounded-full flex items-center justify-center mb-4 text-zinc-500">
+            <div className="flex-1 flex flex-col items-center justify-center p-12 text-center h-[60vh] border-2 border-dashed border-line rounded-panel mx-4">
+                <div className="w-16 h-16 bg-paper-deep rounded-full flex items-center justify-center mb-4 text-ink-faint">
                     <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
                     </svg>
                 </div>
-                <h3 className="text-xl font-bold text-white mb-2">No Project Selected</h3>
-                <p className="text-zinc-400 max-w-sm">Create or select a project from the top menu to start organizing your tasks.</p>
+                <h3 className="font-display text-xl text-ink mb-2">No Project Selected</h3>
+                <p className="text-ink-soft max-w-sm">Create or select a project from the top menu to start organizing your tasks.</p>
             </div>
         );
     }

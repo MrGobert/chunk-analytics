@@ -7,6 +7,7 @@ import {
   UserType,
 } from '@/lib/mixpanel';
 import { getDateRange, getDaysInRange, formatDate, safeDiv } from '@/lib/utils';
+import { buildFunnel, uniqueUsersFor } from '@/lib/funnel';
 import { MixpanelEvent } from '@/types/mixpanel';
 
 // Required for Vercel — without this the function times out at 10s
@@ -55,44 +56,6 @@ const WEB_ONBOARDING_COMPLETE_EVENTS = ['First_Run_Onboarding_Completed'];
 const WEB_ONBOARDING_SKIP_EVENTS = ['First_Run_Onboarding_Skipped'];
 const WEB_ONBOARDING_INTENT_EVENTS = ['First_Run_Onboarding_Intent_Selected'];
 const WEB_ONBOARDING_STEP_EVENTS = ['First_Run_Onboarding_Step_Completed'];
-
-function uniqueUsersFor(
-  events: MixpanelEvent[],
-  eventNames: string[],
-): Set<string> {
-  return new Set(
-    events
-      .filter((e) => eventNames.includes(e.event))
-      .map((e) => e.properties.distinct_id),
-  );
-}
-
-/**
- * Build funnel with correct percentage math.
- * Percentages are relative to the FIRST step.
- * When the first step count is 0, all percentages are 0 — NOT 100%.
- */
-function buildFunnel(steps: { name: string; count: number }[]) {
-  const base = steps[0]?.count ?? 0;
-  return steps.map((step, i) => {
-    const prevCount = i > 0 ? steps[i - 1].count : step.count;
-    return {
-      name: step.name,
-      count: step.count,
-      percentage: base > 0
-        ? Math.round((step.count / base) * 1000) / 10
-        : 0,
-      dropoff:
-        i === 0
-          ? 0
-          : prevCount > 0
-            ? Math.round(
-                ((prevCount - step.count) / prevCount) * 1000,
-              ) / 10
-            : 0,
-    };
-  });
-}
 
 // ---------- Platform-specific funnel builders ----------
 

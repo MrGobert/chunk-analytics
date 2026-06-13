@@ -26,26 +26,26 @@ export default function ProjectSelector() {
         <div className="relative z-50">
             <button
                 onClick={() => setIsOpen(!isOpen)}
-                className="flex items-center gap-2 px-4 py-2 bg-primary border border-white/10 rounded-xl hover:bg-primary-hover transition-colors"
+                className="flex items-center gap-2 px-4 py-2 bg-card border border-line rounded-xl hover:bg-card-hover transition-colors"
             >
                 <FolderOpen className="w-4 h-4 text-accent" />
                 <span className="font-semibold text-sm">
                     {activeProject ? activeProject.name : 'Select a Project'}
                 </span>
-                <ChevronDown className={`w-4 h-4 text-zinc-400 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+                <ChevronDown className={`w-4 h-4 text-ink-soft transition-transform ${isOpen ? 'rotate-180' : ''}`} />
             </button>
 
             {isOpen && (
-                <div className="absolute top-full mt-2 right-0 w-64 bg-primary border border-white/10 rounded-xl shadow-2xl overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200">
+                <div className="absolute top-full mt-2 right-0 w-64 bg-card border border-line rounded-xl shadow-2xl overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200">
                     <div className="max-h-60 overflow-y-auto p-2 space-y-1">
                         {projects.length === 0 ? (
-                            <div className="px-3 py-4 text-center text-zinc-500 text-sm">No projects yet</div>
+                            <div className="px-3 py-4 text-center text-ink-faint text-sm">No projects yet</div>
                         ) : (
                             projects.map((p) => (
                                 <button
                                     key={p.id}
                                     onClick={() => { setActiveProject(p.id); setIsOpen(false); }}
-                                    className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${activeProjectId === p.id ? 'bg-white/10 text-white' : 'text-zinc-400 hover:bg-white/5 hover:text-white'
+                                    className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${activeProjectId === p.id ? 'bg-paper-deep text-ink' : 'text-ink-soft hover:bg-paper-deep hover:text-ink'
                                         }`}
                                 >
                                     {p.name}
@@ -54,7 +54,7 @@ export default function ProjectSelector() {
                         )}
                     </div>
 
-                    <div className="p-2 border-t border-white/10 bg-black/20">
+                    <div className="p-2 border-t border-line bg-paper-deep">
                         {isCreating ? (
                             <form onSubmit={handleCreate} className="flex flex-col gap-2">
                                 <input
@@ -63,11 +63,11 @@ export default function ProjectSelector() {
                                     placeholder="Project name..."
                                     value={newProjectName}
                                     onChange={(e) => setNewProjectName(e.target.value)}
-                                    className="w-full px-3 py-1.5 text-sm bg-black/40 border border-white/10 rounded-lg focus:outline-none focus:border-accent text-white"
+                                    className="w-full px-3 py-1.5 text-sm bg-paper-deep border border-line rounded-lg focus:outline-none focus:border-lake text-ink"
                                 />
                                 <div className="flex justify-end gap-2">
-                                    <button type="button" onClick={() => setIsCreating(false)} className="px-2 py-1 text-xs text-zinc-400 hover:text-white">Cancel</button>
-                                    <button type="submit" disabled={!newProjectName.trim()} className="px-2 py-1 text-xs bg-accent text-white rounded hover:bg-opacity-80 disabled:opacity-50">Create</button>
+                                    <button type="button" onClick={() => setIsCreating(false)} className="px-2 py-1 text-xs text-ink-soft hover:text-ink">Cancel</button>
+                                    <button type="submit" disabled={!newProjectName.trim()} className="px-2 py-1 text-xs bg-ember text-[#FFF8F2] rounded hover:bg-opacity-80 disabled:opacity-50">Create</button>
                                 </div>
                             </form>
                         ) : (

@@ -13,53 +13,9 @@ import {
   UserType,
 } from '@/lib/mixpanel';
 import { MixpanelEvent } from '@/types/mixpanel';
-import { getDateRange, formatDate } from '@/lib/utils';
+import { getDateRange, getDaysInRange, formatDate } from '@/lib/utils';
 import { subDays } from 'date-fns';
-
-// Map canonical event names to feature categories for cross-feature comparison.
-// All event names here must be canonical — legacy names are resolved via normalizeEventName().
-const FEATURE_CATEGORIES: Record<string, string[]> = {
-  Search: ['Search_Performed'],
-  Research: ['Research_Report_Initiated', 'Research_Report_Completed', 'Research_Report_Viewed', 'Research_Report_Exported', 'Research_Report_Shared', 'Research_Report_Deleted', 'Research_History_Viewed', 'Research_Settings_Changed', 'Research_Report_Added_To_Collection', 'Research_Report_Filtered', 'Research_Published'],
-  Notes: ['Note_Created', 'Note_Viewed', 'Note_Saved', 'Note_Shared', 'Note_Published', 'Note_Writing_Tool_Used', 'Note_Uploaded_To_Documents', 'Note_Deleted'],
-  Collections: ['Collection_Created', 'Collection_Viewed', 'Collection_Chat_Started', 'Collection_Exported', 'Collection_Shared', 'Collection_URL_Added', 'Collection_Updated', 'Collection_Deleted', 'Collection_URL_Removed'],
-  Artifacts: ['Artifact_Created', 'Artifact_Completed', 'Artifact_Viewed', 'Artifact_Saved_To_Notes', 'Artifact_File_Uploaded', 'Artifact_Failed', 'Artifact_Deleted', 'Artifact_Tab_Switched', 'Artifact_Visual_Generated', 'Artifact_Filtered', 'Artifact_Searched', 'Artifact_Onboarding_Viewed', 'Artifact_Onboarding_Completed', 'Artifact_Onboarding_Skipped', 'Artifact_Batch_Started', 'Artifact_Batch_Completed'],
-  Documents: ['Document_Uploaded', 'Document_Viewed', 'Document_Deleted', 'Document_Attached'],
-  'Image Gen': ['Image_Generation_Started', 'Image_Generation_Completed'],
-  Memory: ['Memory_Viewed', 'Memory_Toggled', 'Memory_Added', 'Memory_Deleted', 'Memory_Management_Viewed'],
-  Connectors: [
-    'Connector_Connect_Started',
-    'Connector_Connect_Succeeded',
-    'Connector_Connect_Failed',
-    'Connector_Disconnected',
-    'Connector_OAuth_Callback',
-    'Connector_Operation_Used',
-    'Connector_Disconnect_Failed',
-    'Connector_Status_Degraded',
-    'Connector_Settings_Viewed',
-    'Notion_Search_Used',
-    'Notion_Page_Created',
-    'Notion_Append_Performed',
-    'Gamma_Generation_Started',
-    'Gamma_Generation_Completed',
-    'Gamma_Generation_Failed',
-  ],
-};
-
-// Flatten all category events into a single set for efficient filtering
-const ALL_FEATURE_EVENTS = new Set(Object.values(FEATURE_CATEGORIES).flat());
-
-// Pre-built reverse lookup for O(1) categorization per event
-const EVENT_TO_CATEGORY = new Map<string, string>();
-for (const [category, events] of Object.entries(FEATURE_CATEGORIES)) {
-  for (const event of events) {
-    EVENT_TO_CATEGORY.set(event, category);
-  }
-}
-
-function categorizeEvent(eventName: string): string | null {
-  return EVENT_TO_CATEGORY.get(normalizeEventName(eventName)) ?? null;
-}
+import { FEATURE_CATEGORIES, ALL_FEATURE_EVENTS, categorizeEvent } from '@/lib/feature-categories';
 
 /** Compute the set of users whose latest Memory_Toggled state is ON (or who enabled via onboarding). */
 function getMemoryEnabledUsers(toggleEvents: MixpanelEvent[], allEvents: MixpanelEvent[]): Set<string> {
@@ -150,15 +106,41 @@ export async function GET(request: NextRequest) {
     const memoryEnabledUsers = getMemoryEnabledUsers(featureEvents, events);
     const prevMemoryEnabledUsers = getMemoryEnabledUsers(prevFeatureEvents, prevEvents);
 
+    // Stickiness (DAU/MAU) + adoption: per-category daily unique users.
+    const daysInWindow = getDaysInRange(dateRange.from, dateRange.to);
+    const numDays = Math.max(1, daysInWindow.length);
+    const totalActiveUsers = new Set(events.map((e) => e.properties.distinct_id)).size;
+    // category → day → Set(users)
+    const dailyCatUsers = new Map<string, Map<string, Set<string>>>();
+    for (const event of featureEvents) {
+      const category = categorizeEvent(event.event);
+      if (!category) continue;
+      const day = formatDate(new Date(event.properties.time * 1000));
+      if (!dailyCatUsers.has(category)) dailyCatUsers.set(category, new Map());
+      const dayMap = dailyCatUsers.get(category)!;
+      if (!dayMap.has(day)) dayMap.set(day, new Set());
+      dayMap.get(day)!.add(event.properties.distinct_id);
+    }
+
     // Build response
     const features = Object.keys(FEATURE_CATEGORIES).map(category => {
       const stats = categoryStats.get(category)!;
       const prevTotal = previousCategoryTotals.get(category) || 0;
+      const mau = stats.uniqueUsers.size;
+      const dayMap = dailyCatUsers.get(category);
+      let avgDau = 0;
+      if (dayMap) {
+        let sum = 0;
+        for (const set of dayMap.values()) sum += set.size;
+        avgDau = sum / numDays;
+      }
       return {
         name: category,
         totalEvents: stats.totalEvents,
-        uniqueUsers: stats.uniqueUsers.size,
+        uniqueUsers: mau,
         trend: calculateTrend(stats.totalEvents, prevTotal),
+        stickiness: mau > 0 ? avgDau / mau : 0,
+        adoptionRate: totalActiveUsers > 0 ? mau / totalActiveUsers : 0,
       };
     }).sort((a, b) => b.totalEvents - a.totalEvents);
 

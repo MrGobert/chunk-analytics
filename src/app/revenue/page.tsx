@@ -15,16 +15,16 @@ import { SkeletonPage } from '@/components/ui/Skeleton';
 import { useAnalytics } from '@/hooks/useAnalytics';
 import { RevenueSummary, SubscriberFunnel } from '@/types/mixpanel';
 import { getDaysFromRange } from '@/lib/utils';
+import { chart } from '@/lib/chartTheme';
+import { DollarSign, TrendingUp, Wallet, Users2, Repeat, Percent, Clock, AlertTriangle } from 'lucide-react';
 
 export default function RevenuePage() {
   const { dateRange, setDateRange } = useDashboardFilters();
   const containerRef = useRef<HTMLDivElement>(null);
-
   const days = getDaysFromRange(dateRange);
 
   const { data: revenue, isLoading: revenueLoading, isRefreshing: revenueRefreshing, error: revenueError, lastUpdated: revenueLastUpdated } =
     useAnalytics<RevenueSummary>('/api/rc/revenue-summary', { days });
-
   const { data: funnel, isLoading: funnelLoading, isRefreshing: funnelRefreshing, error: funnelError, lastUpdated: funnelLastUpdated } =
     useAnalytics<SubscriberFunnel>('/api/rc/subscriber-funnel', { days });
 
@@ -32,43 +32,43 @@ export default function RevenuePage() {
   const isRefreshing = revenueRefreshing || funnelRefreshing;
   const lastUpdated = revenueLastUpdated || funnelLastUpdated;
 
-  // Revenue chart data
-  const mrrChartData = useMemo(() =>
-    (revenue?.mrrTrend || []).map((d) => ({ date: d.date, mrr: d.mrr })),
-    [revenue?.mrrTrend]
-  );
+  const mrrChartData = useMemo(() => (revenue?.mrrTrend || []).map((d) => ({ date: d.date, mrr: d.mrr })), [revenue?.mrrTrend]);
 
   const platformData = useMemo(() =>
-    Object.entries(revenue?.byPlatform || {}).map(([name, value]) => ({
-      name: name.charAt(0).toUpperCase() + name.slice(1),
-      value,
-    })),
+    Object.entries(revenue?.byPlatform || {}).map(([name, value]) => ({ name: name.charAt(0).toUpperCase() + name.slice(1), value })),
     [revenue?.byPlatform]
   );
 
   const productData = useMemo(() =>
-    Object.entries(revenue?.byProduct || {}).map(([product, amount]) => ({
-      product: product.charAt(0).toUpperCase() + product.slice(1),
-      revenue: amount,
-    })),
+    Object.entries(revenue?.byProduct || {}).map(([product, amount]) => ({ product: product.charAt(0).toUpperCase() + product.slice(1), revenue: amount })),
     [revenue?.byProduct]
   );
+
+  // MRR movements: new vs churned vs net (estimated $ from counts × ARPU)
+  const arpu = revenue && revenue.totalSubscribers > 0 ? revenue.mrr / revenue.totalSubscribers : 0;
+  const movementsData = useMemo(() => {
+    if (!revenue) return [];
+    return [
+      { type: 'New', value: Math.round(revenue.newSubscribers * arpu) },
+      { type: 'Churned', value: -Math.round(revenue.churned * arpu) },
+      { type: 'Net New', value: Math.round(revenue.netNew * arpu) },
+    ];
+  }, [revenue, arpu]);
 
   const breakdownTableData = useMemo(() => {
     const totalSubs = revenue?.totalSubscribers || 0;
     return Object.entries(revenue?.byProduct || {}).map(([product, amount]) => {
       const estimatedSubs = totalSubs > 0 ? Math.round(totalSubs * (amount / (revenue?.mrr || 1))) : 0;
-      const arpu = estimatedSubs > 0 ? amount / estimatedSubs : 0;
+      const productArpu = estimatedSubs > 0 ? amount / estimatedSubs : 0;
       return {
         product: product.charAt(0).toUpperCase() + product.slice(1),
         mrr: `$${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
         subscribers: estimatedSubs.toString(),
-        arpu: `$${arpu.toFixed(2)}`,
+        arpu: `$${productArpu.toFixed(2)}`,
       };
     });
   }, [revenue?.byProduct, revenue?.totalSubscribers, revenue?.mrr]);
 
-  // Funnel chart data
   const funnelData = useMemo(() =>
     (funnel?.funnel || []).map((step, index, arr) => ({
       name: step.stage,
@@ -80,10 +80,7 @@ export default function RevenuePage() {
   );
 
   const platformConversionData = useMemo(() =>
-    Object.entries(funnel?.conversionByPlatform || {}).map(([platform, rate]) => ({
-      platform: platform.charAt(0).toUpperCase() + platform.slice(1),
-      rate,
-    })),
+    Object.entries(funnel?.conversionByPlatform || {}).map(([platform, rate]) => ({ platform: platform.charAt(0).toUpperCase() + platform.slice(1), rate })),
     [funnel?.conversionByPlatform]
   );
 
@@ -92,264 +89,170 @@ export default function RevenuePage() {
     if (hasAnimated.current || isLoading || (!revenue && !funnel)) return;
     hasAnimated.current = true;
     const ctx = gsap.context(() => {
-      gsap.fromTo('.card-animate',
-        { y: 30, opacity: 0 },
-        { y: 0, opacity: 1, duration: 0.8, stagger: 0.15, ease: 'power3.out' }
-      );
+      const mm = gsap.matchMedia();
+      mm.add('(prefers-reduced-motion: no-preference)', () => {
+        gsap.fromTo('.card-animate', { y: 28, opacity: 0 }, { y: 0, opacity: 1, duration: 0.8, stagger: 0.06, ease: 'power3.out' });
+      });
     }, containerRef);
     return () => ctx.revert();
   }, [isLoading, revenue, funnel]);
 
   if (isLoading) {
-    return <SkeletonPage statCards={5} statCardCols="grid-cols-1 md:grid-cols-2 lg:grid-cols-5" chartCards={3} />;
+    return <SkeletonPage statCards={6} statCardCols="grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6" chartCards={3} />;
   }
 
   if (revenueError && funnelError) {
     return (
       <div className="text-center py-20">
-        <div className="text-red-400 mb-4">{revenueError}</div>
-        <p className="text-zinc-500 text-sm">Make sure CEREBRAL_AUTH_TOKEN is configured.</p>
+        <div className="text-ember-deep mb-4">{revenueError}</div>
+        <p className="text-ink-faint text-sm font-mono">Make sure CEREBRAL_AUTH_TOKEN is configured.</p>
       </div>
     );
   }
 
   if (!revenue && !funnel) {
-    return (
-      <div className="text-center font-mono text-zinc-500 py-20 tracking-wide uppercase">
-        Failed to load data. Please try again.
-      </div>
-    );
+    return <div className="empty-state py-20">Failed to load data. Please try again.</div>;
   }
 
-  const netNewMrr = revenue ? revenue.netNew * (revenue.mrr / Math.max(revenue.totalSubscribers, 1)) : 0;
   const mrrGrowth = revenue?.mrrChange || 0;
-  const wow = funnel?.weekOverWeek || { trialStarts: 0, conversions: 0 };
+  // LTV ≈ ARPU ÷ monthly churn rate (churnRate is a percentage)
+  const monthlyChurn = (revenue?.churnRate ?? 0) / 100;
+  const ltv = monthlyChurn > 0 ? arpu / monthlyChurn : null;
 
   return (
     <div ref={containerRef} className="animate-in fade-in duration-300">
       <PageHeader
-        title="Revenue & Subscriptions"
-        subtitle="Revenue analytics, subscription metrics, and conversion funnel"
+        title="Revenue"
+        subtitle="MRR movements, plan mix, and unit economics"
         dateRange={dateRange}
         onDateRangeChange={setDateRange}
         lastUpdated={lastUpdated}
         isRefreshing={isRefreshing}
       />
 
-      {/* Warning banner */}
       {revenue?.note && (
-        <div className="mb-6 p-4 bg-yellow-900/20 border border-yellow-700/50 rounded-lg">
-          <div className="flex items-center gap-2 text-yellow-400 text-sm">
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-            </svg>
-            <span>{revenue.note}</span>
-          </div>
+        <div className="mb-6 p-4 bg-butter-tint border border-butter rounded-card flex items-center gap-2 text-sm text-ink">
+          <AlertTriangle className="w-5 h-5 text-[#C8922A] shrink-0" />
+          <span>{revenue.note}</span>
         </div>
       )}
 
-      {/* Revenue Stat Cards */}
+      {/* KPI row (6-up) */}
       {revenue && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 mb-8">
-          <StatCard
-            title="MRR"
-            value={revenue.mrr}
-            trend={mrrGrowth}
-            format="currency"
-            icon={
-              <svg className="w-5 h-5 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-            }
-          />
-          <StatCard
-            title="ARR"
-            value={revenue.arr}
-            format="currency"
-            icon={
-              <svg className="w-5 h-5 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-              </svg>
-            }
-          />
-          <StatCard
-            title="Today's Revenue"
-            value={revenue.todayRevenue}
-            format="currency"
-            icon={
-              <svg className="w-5 h-5 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
-              </svg>
-            }
-          />
-          <StatCard
-            title="Est. Net New MRR"
-            value={netNewMrr}
-            format="currency"
-            icon={
-              <svg className="w-5 h-5 text-[#34D399]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
-              </svg>
-            }
-          />
-          <StatCard
-            title="MRR Growth"
-            value={mrrGrowth / 100}
-            format="percentage"
-            icon={
-              <svg className="w-5 h-5 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z" />
-              </svg>
-            }
-          />
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-6 mb-8">
+          <div className="card-animate"><StatCard title="MRR" value={revenue.mrr} trend={mrrGrowth} format="currency" icon={<DollarSign className="w-5 h-5" />} /></div>
+          <div className="card-animate"><StatCard title="ARR" value={revenue.arr} format="currency" icon={<TrendingUp className="w-5 h-5" />} /></div>
+          <div className="card-animate"><StatCard title="ARPU" value={arpu} format="currency" icon={<Users2 className="w-5 h-5" />} /></div>
+          <div className="card-animate"><StatCard title="Est. LTV" value={ltv ?? '—'} format={ltv != null ? 'currency' : 'text'} subtitle="ARPU ÷ monthly churn" icon={<Repeat className="w-5 h-5" />} /></div>
+          <div className="card-animate"><StatCard title="Active Subscribers" value={revenue.totalSubscribers} icon={<Users2 className="w-5 h-5" />} /></div>
+          <div className="card-animate"><StatCard title="Today's Revenue" value={revenue.todayRevenue} format="currency" icon={<Wallet className="w-5 h-5" />} /></div>
         </div>
       )}
 
-      {/* MRR Trend Chart */}
+      {/* MRR trend (ember) */}
       <div className="grid grid-cols-1 gap-6 mb-8">
-        <ChartCard title="MRR Trend" subtitle={`Monthly recurring revenue — last ${days} days`}>
-          {mrrChartData.length > 0 ? (
-            <AreaChart data={mrrChartData} xKey="date" yKey="mrr" color="#10b981" />
-          ) : (
-            <div className="flex items-center justify-center h-full text-zinc-500 font-mono text-sm">
-              No MRR trend data available yet
-            </div>
-          )}
-        </ChartCard>
+        <div className="card-animate">
+          <ChartCard title="MRR Trend" subtitle={`Monthly recurring revenue — last ${days} days`}>
+            {mrrChartData.length > 0 ? (
+              <AreaChart data={mrrChartData} xKey="date" yKey="mrr" color={chart.primary} />
+            ) : (
+              <div className="empty-state h-full">No MRR trend data available yet</div>
+            )}
+          </ChartCard>
+        </div>
       </div>
 
-      {/* Two-column: Revenue by Platform + Revenue by Product */}
+      {/* MRR movements + platform mix */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-        <ChartCard title="Revenue by Platform" subtitle="MRR distribution across platforms">
-          {platformData.length > 0 ? (
-            <PieChart
-              data={platformData}
-              colors={['#10b981', '#3b82f6', '#8b5cf6', '#f43f5e', '#f59e0b']}
-            />
-          ) : (
-            <div className="flex items-center justify-center h-full text-zinc-500 font-mono text-sm">
-              No platform data available yet
-            </div>
-          )}
-        </ChartCard>
-
-        <ChartCard title="Revenue by Product" subtitle="MRR breakdown by subscription tier">
-          {productData.length > 0 ? (
-            <BarChart
-              data={productData}
-              xKey="product"
-              yKey="revenue"
-              color="#10b981"
-            />
-          ) : (
-            <div className="flex items-center justify-center h-full text-zinc-500 font-mono text-sm">
-              No product data available yet
-            </div>
-          )}
-        </ChartCard>
+        <div className="card-animate">
+          <ChartCard title="MRR Movements" subtitle="Estimated $ from new vs churned subscribers">
+            {movementsData.length > 0 ? (
+              <BarChart
+                data={movementsData}
+                xKey="type"
+                yKey="value"
+                colors={[chart.sage, chart.emberDeep, chart.lake]}
+              />
+            ) : (
+              <div className="empty-state h-full">No movement data</div>
+            )}
+          </ChartCard>
+        </div>
+        <div className="card-animate">
+          <ChartCard title="Revenue by Platform" subtitle="MRR distribution across platforms">
+            {platformData.length > 0 ? (
+              <PieChart data={platformData} />
+            ) : (
+              <div className="empty-state h-full">No platform data available yet</div>
+            )}
+          </ChartCard>
+        </div>
       </div>
 
-      {/* Revenue Breakdown Table */}
-      <div className="grid grid-cols-1 gap-6">
-        <ChartCard title="Revenue Breakdown" subtitle="Per-product metrics">
-          {breakdownTableData.length > 0 ? (
-            <DataTable
-              data={breakdownTableData}
-              columns={[
-                { key: 'product', header: 'Product' },
-                { key: 'mrr', header: 'MRR' },
-                { key: 'subscribers', header: 'Subscribers' },
-                { key: 'arpu', header: 'ARPU' },
-              ]}
-            />
-          ) : (
-            <div className="flex items-center justify-center h-full text-zinc-500 font-mono text-sm">
-              No revenue breakdown available yet
-            </div>
-          )}
-        </ChartCard>
+      {/* Product mix + breakdown table */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+        <div className="card-animate">
+          <ChartCard title="Revenue by Product" subtitle="MRR by subscription tier (Monthly vs Yearly)">
+            {productData.length > 0 ? (
+              <BarChart data={productData} xKey="product" yKey="revenue" color={chart.series[0]} />
+            ) : (
+              <div className="empty-state h-full">No product data available yet</div>
+            )}
+          </ChartCard>
+        </div>
+        <div className="card-animate">
+          <ChartCard title="Revenue Breakdown" subtitle="Per-product metrics">
+            {breakdownTableData.length > 0 ? (
+              <DataTable
+                data={breakdownTableData}
+                columns={[
+                  { key: 'product', header: 'Product' },
+                  { key: 'mrr', header: 'MRR', numeric: true },
+                  { key: 'subscribers', header: 'Subs', numeric: true },
+                  { key: 'arpu', header: 'ARPU', numeric: true },
+                ]}
+              />
+            ) : (
+              <div className="empty-state h-full">No revenue breakdown available yet</div>
+            )}
+          </ChartCard>
+        </div>
       </div>
 
-      {/* Section Divider — Conversion Funnel */}
-      <div className="mt-12 mb-8 border-t border-zinc-800 pt-8">
-        <h2 className="text-xl font-bold text-foreground tracking-tight">Conversion Funnel</h2>
-        <p className="text-sm text-zinc-500 mt-1">Trial → Paid conversion metrics</p>
+      {/* Subscriber funnel section */}
+      <div className="mt-12 mb-8 border-t border-line pt-8">
+        <h2 className="font-display text-2xl text-ink">Subscriber Funnel</h2>
+        <p className="text-sm text-ink-soft mt-1">Signup → trial → paid → active</p>
       </div>
 
-      {/* Funnel Stat Cards */}
       {funnel && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-          <StatCard
-            title="Trial → Paid Rate"
-            value={funnel.trialConversionRate / 100}
-            format="percentage"
-            icon={
-              <svg className="w-5 h-5 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
-              </svg>
-            }
-          />
-          <StatCard
-            title="Median Days to Convert"
-            value={funnel.medianDaysToConvert.toFixed(1)}
-            format="text"
-            icon={
-              <svg className="w-5 h-5 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-            }
-          />
-          <StatCard
-            title="Trial Starts WoW"
-            value={wow.trialStarts}
-            format="decimal"
-            subtitle={wow.trialStarts >= 0 ? 'Up from last week' : 'Down from last week'}
-            icon={
-              <svg className="w-5 h-5 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
-              </svg>
-            }
-          />
-          <StatCard
-            title="Conversions WoW"
-            value={wow.conversions}
-            format="decimal"
-            subtitle={wow.conversions >= 0 ? 'Up from last week' : 'Down from last week'}
-            icon={
-              <svg className="w-5 h-5 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-            }
-          />
+          <div className="card-animate"><StatCard title="Trial → Paid Rate" value={funnel.trialConversionRate / 100} format="percentage" icon={<Percent className="w-5 h-5" />} /></div>
+          <div className="card-animate"><StatCard title="Median Days to Convert" value={funnel.medianDaysToConvert.toFixed(1)} format="text" icon={<Clock className="w-5 h-5" />} /></div>
+          <div className="card-animate"><StatCard title="Trial Starts WoW" value={funnel.weekOverWeek.trialStarts} format="decimal" icon={<TrendingUp className="w-5 h-5" />} /></div>
+          <div className="card-animate"><StatCard title="Conversions WoW" value={funnel.weekOverWeek.conversions} format="decimal" icon={<TrendingUp className="w-5 h-5" />} /></div>
         </div>
       )}
 
-      {/* Two-column: Subscriber Funnel + Conversion by Platform */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <ChartCard title="Subscriber Funnel" subtitle={`Conversion funnel — last ${days} days`}>
-          {funnelData.length > 0 ? (
-            <FunnelChart data={funnelData} />
-          ) : (
-            <div className="flex items-center justify-center h-full text-zinc-500 font-mono text-sm">
-              No funnel data available yet
-            </div>
-          )}
-        </ChartCard>
-
-        <ChartCard title="Conversion by Platform" subtitle="Trial-to-paid conversion rate per platform">
-          {platformConversionData.length > 0 ? (
-            <BarChart
-              data={platformConversionData}
-              xKey="platform"
-              yKey="rate"
-              color="#10b981"
-            />
-          ) : (
-            <div className="flex items-center justify-center h-full text-zinc-500 font-mono text-sm">
-              No platform conversion data available yet
-            </div>
-          )}
-        </ChartCard>
+        <div className="card-animate">
+          <ChartCard title="Subscriber Funnel" subtitle={`Conversion funnel — last ${days} days`}>
+            {funnelData.length > 0 ? (
+              <FunnelChart data={funnelData} />
+            ) : (
+              <div className="empty-state h-full">No funnel data available yet</div>
+            )}
+          </ChartCard>
+        </div>
+        <div className="card-animate">
+          <ChartCard title="Conversion by Platform" subtitle="Trial-to-paid conversion rate per platform">
+            {platformConversionData.length > 0 ? (
+              <BarChart data={platformConversionData} xKey="platform" yKey="rate" color={chart.series[1]} />
+            ) : (
+              <div className="empty-state h-full">No platform conversion data available yet</div>
+            )}
+          </ChartCard>
+        </div>
       </div>
     </div>
   );

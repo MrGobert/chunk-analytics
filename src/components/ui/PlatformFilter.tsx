@@ -19,7 +19,7 @@ export default function PlatformFilter({ value, onChange }: PlatformFilterProps)
     <select
       value={value}
       onChange={(e) => onChange(e.target.value)}
-      className="bg-primary border border-zinc-300/50 text-foreground font-mono text-xs uppercase tracking-widest font-bold rounded-full px-4 py-2 hover:bg-zinc-200 transition-colors focus:ring-accent focus:border-accent cursor-pointer shadow-sm outline-none"
+      className="input-paper text-ink font-semibold text-xs rounded-full px-4 py-2 hover:border-ink/30 transition-colors cursor-pointer shadow-card outline-none"
     >
       {platforms.map((platform) => (
         <option key={platform.value} value={platform.value}>

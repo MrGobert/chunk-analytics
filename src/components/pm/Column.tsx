@@ -19,13 +19,13 @@ export default function Column({ column, onAddTicket, onEditTicket }: ColumnProp
     });
 
     return (
-        <div ref={setNodeRef} className="flex flex-col bg-black/40 border border-white/5 rounded-2xl w-80 min-w-[320px] max-h-full">
-            <div className="flex items-center justify-between p-4 border-b border-white/5 cursor-grab">
+        <div ref={setNodeRef} className="flex flex-col bg-paper-deep border border-line rounded-card w-80 min-w-[320px] max-h-full">
+            <div className="flex items-center justify-between p-4 border-b border-line cursor-grab">
                 <div className="flex items-center gap-2">
-                    <h2 className="font-semibold text-white tracking-wide">{column.title}</h2>
-                    <span className="bg-white/10 text-zinc-300 text-xs py-0.5 px-2 rounded-full font-mono">{column.tickets.length}</span>
+                    <h2 className="font-semibold text-ink tracking-wide">{column.title}</h2>
+                    <span className="bg-card border border-line text-ink-soft text-xs py-0.5 px-2 rounded-full font-mono">{column.tickets.length}</span>
                 </div>
-                <button onClick={onAddTicket} className="p-1.5 text-zinc-400 hover:text-white hover:bg-white/10 rounded-lg transition-colors">
+                <button onClick={onAddTicket} className="p-1.5 text-ink-soft hover:text-ink hover:bg-card rounded-chip transition-colors">
                     <Plus className="w-4 h-4" />
                 </button>
             </div>

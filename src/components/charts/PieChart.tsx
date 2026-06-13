@@ -8,6 +8,7 @@ import {
   ResponsiveContainer,
   Legend,
 } from 'recharts';
+import { chart } from '@/lib/chartTheme';
 
 interface PieChartProps {
   data: { name: string; value: number }[];
@@ -17,18 +18,7 @@ interface PieChartProps {
   outerRadius?: number;
 }
 
-const defaultColors = [
-  '#8b5cf6',
-  '#6366f1',
-  '#3b82f6',
-  '#0ea5e9',
-  '#14b8a6',
-  '#22c55e',
-  '#eab308',
-  '#f97316',
-  '#ef4444',
-  '#ec4899',
-];
+const defaultColors: string[] = [...chart.series];
 
 export default function PieChart({
   data,
@@ -42,9 +32,7 @@ export default function PieChart({
 
   if (filteredData.length === 0) {
     return (
-      <div className="flex items-center justify-center h-full text-zinc-500 font-mono text-sm">
-        No data available
-      </div>
+      <div className="empty-state h-full">No data available</div>
     );
   }
 
@@ -60,27 +48,24 @@ export default function PieChart({
           paddingAngle={2}
           dataKey="value"
           nameKey="name"
+          stroke={chart.cardStroke}
+          strokeWidth={2}
         >
           {filteredData.map((_, index) => (
             <Cell key={`cell-${index}`} fill={colors[index % colors.length]} />
           ))}
         </Pie>
         <Tooltip
-          contentStyle={{
-            backgroundColor: '#E8E4DD',
-            border: '1px solid #d4d4d8',
-            borderRadius: '0',
-            fontFamily: 'var(--font-mono)',
-          }}
-          labelStyle={{ color: '#71717a', fontWeight: 'bold' }}
-          itemStyle={{ color: '#111111' }}
+          contentStyle={chart.tooltip}
+          labelStyle={chart.tooltipLabelStyle}
+          itemStyle={chart.tooltipItemStyle}
         />
         {showLegend && (
           <Legend
             layout="vertical"
             align="right"
             verticalAlign="middle"
-            formatter={(value) => <span className="text-foreground tracking-tight font-sans text-sm">{value}</span>}
+            formatter={(value) => <span className="text-ink-soft tracking-tight font-sans text-sm">{value}</span>}
           />
         )}
       </RechartsPieChart>

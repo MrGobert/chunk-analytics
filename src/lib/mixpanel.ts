@@ -209,9 +209,21 @@ export function getUniqueUsersByType(
   return filteredUsers;
 }
 
+/**
+ * Whether a distinct_id is a real, identified user (not a guest/anonymous/device id).
+ * Shared by pulse (Weekly Active Creators) and power-users segmentation so the
+ * "active user" population is defined the same way everywhere.
+ */
+export function isRealUser(uid: string | undefined | null): boolean {
+  return !!uid && !uid.startsWith('guest-') && !uid.startsWith('$device:') && !uid.startsWith('anonymous');
+}
+
+const TEST_ACCOUNT_UID = 'I3JdK0ufgyN9So4rSOf4yxK1Drl1';
+
 async function fetchMixpanelEventsFromAPI(
   fromDate: string,
-  toDate: string
+  toDate: string,
+  eventNames?: string[]
 ): Promise<MixpanelEvent[]> {
   const MIXPANEL_API_SECRET = process.env.MIXPANEL_API_SECRET;
 
@@ -222,7 +234,12 @@ async function fetchMixpanelEventsFromAPI(
   // Use btoa for base64 encoding (works in Edge runtime)
   const auth = btoa(`${MIXPANEL_API_SECRET}:`);
 
-  const url = `https://data.mixpanel.com/api/2.0/export?from_date=${fromDate}&to_date=${toDate}`;
+  let url = `https://data.mixpanel.com/api/2.0/export?from_date=${fromDate}&to_date=${toDate}`;
+  if (eventNames && eventNames.length > 0) {
+    // Server-side event filtering — Mixpanel accepts a JSON-encoded array.
+    // Shrinks the export from ~39MB to kB–MB for funnel/cohort/activation work.
+    url += `&event=${encodeURIComponent(JSON.stringify(eventNames))}`;
+  }
 
   const response = await fetch(url, {
     headers: {
@@ -241,9 +258,92 @@ async function fetchMixpanelEventsFromAPI(
   const events: MixpanelEvent[] = lines.map((line) => JSON.parse(line));
 
   // Filter out the test account UID to prevent skewing analytics data
-  const filteredEvents = events.filter((e) => e.properties.distinct_id !== 'I3JdK0ufgyN9So4rSOf4yxK1Drl1');
+  const filteredEvents = events.filter((e) => e.properties.distinct_id !== TEST_ACCOUNT_UID);
 
   return filteredEvents;
+}
+
+/**
+ * Short stable hash of a sorted event-name list, used as the cache-key variant
+ * so each distinct filtered fetch gets its own cache entry.
+ */
+function hashEventNames(eventNames: string[]): string {
+  const joined = [...eventNames].sort().join('|');
+  let h = 5381;
+  for (let i = 0; i < joined.length; i++) {
+    h = ((h << 5) + h + joined.charCodeAt(i)) >>> 0;
+  }
+  return `ev${h.toString(36)}`;
+}
+
+/**
+ * Whether the window ends before today (LA time). Past windows are immutable, so
+ * their filtered exports can be cached far longer to spare the export rate limit.
+ */
+function isImmutablePast(toDate: string): boolean {
+  // A window is only immutable once its end day is comfortably in the past.
+  // Require it to end before *yesterday* so the final day's events have settled
+  // (and been re-fetched) before we cache it under the 24h TTL — otherwise a
+  // partial final-day export captured near midnight could be frozen for 24h.
+  const yesterday = formatDate(new Date(Date.now() - 24 * 60 * 60 * 1000));
+  return toDate < yesterday;
+}
+
+const IMMUTABLE_TTL = 24 * 60 * 60 * 1000; // 24h for closed historical windows
+const FRESH_TTL = 5 * 60 * 1000; // 5 min for windows that include today
+
+/**
+ * Fetch only the named events for a window, with the same lock/disk/stale
+ * machinery as the full export but a per-event-set cache key. Use this for any
+ * heavy metric (funnels, cohorts, activation) — never pull the full 39MB export
+ * when a handful of event names will do.
+ */
+export async function fetchMixpanelEventsFiltered(
+  fromDate: string,
+  toDate: string,
+  eventNames: string[]
+): Promise<MixpanelEvent[]> {
+  const variant = hashEventNames(eventNames);
+  const ttl = isImmutablePast(toDate) ? IMMUTABLE_TTL : FRESH_TTL;
+  const cacheKey = `${fromDate}:${toDate}:${variant}`;
+
+  // 1. Cache (memory → lock wait → disk), honouring the chosen TTL
+  const cached = await getCachedEventsAsync(fromDate, toDate, variant, ttl);
+  if (cached) return cached;
+
+  // 2. Acquire the per-variant fetch lock
+  const hasLock = acquireLock(fromDate, toDate, variant);
+  if (!hasLock) {
+    await new Promise((r) => setTimeout(r, 1000));
+    const retry = await getCachedEventsAsync(fromDate, toDate, variant, ttl);
+    if (retry) return retry;
+    console.warn(`Filtered Mixpanel fetch timed out waiting for lock ${cacheKey}, falling back to stale.`);
+  }
+
+  // 3. Fetch from Mixpanel under the lock
+  let events: MixpanelEvent[] | null = null;
+  if (hasLock) {
+    try {
+      events = await fetchMixpanelEventsFromAPI(fromDate, toDate, eventNames);
+      await setCachedEventsAsync(fromDate, toDate, events, variant);
+    } catch (err) {
+      console.error(`Filtered Mixpanel fetch failed for ${cacheKey}:`, err);
+    } finally {
+      releaseLock(fromDate, toDate, variant);
+    }
+  }
+  if (events) return events;
+
+  // 4. Stale fallback (ignore TTL) on rate-limit/timeout
+  const stale = await getStaleCachedEvents(fromDate, toDate, variant);
+  if (stale) {
+    console.warn(`Serving ${stale.length} stale filtered events for ${cacheKey}.`);
+    return stale;
+  }
+
+  // 5. Genuine total failure
+  console.warn(`No cache available for filtered fetch ${cacheKey}. Returning empty list.`);
+  return [];
 }
 
 export async function fetchMixpanelEventsWithStatus(

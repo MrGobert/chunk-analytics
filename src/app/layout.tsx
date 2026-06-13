@@ -1,30 +1,34 @@
-import type { Metadata } from "next";
-import { Space_Grotesk, DM_Serif_Display, Space_Mono } from "next/font/google";
+import type { Metadata, Viewport } from "next";
+import { Fraunces, DM_Sans, Spline_Sans_Mono } from "next/font/google";
 import "./globals.css";
 import Sidebar from "@/components/layout/Sidebar";
 import Providers from "@/components/layout/Providers";
 
-const spaceGrotesk = Space_Grotesk({
-  variable: "--font-space-grotesk",
+// "Paper & Ember" type system — Fraunces (display), DM Sans (UI), Spline Sans Mono (data)
+const fraunces = Fraunces({
+  variable: "--font-fraunces",
+  subsets: ["latin"],
+  axes: ["opsz", "SOFT", "WONK"],
+});
+
+const dmSans = DM_Sans({
+  variable: "--font-dm-sans",
   subsets: ["latin"],
 });
 
-const dmSerifDisplay = DM_Serif_Display({
-  weight: "400",
-  variable: "--font-dm-serif",
+const splineSansMono = Spline_Sans_Mono({
+  variable: "--font-spline-mono",
   subsets: ["latin"],
-  style: ["italic"],
-});
-
-const spaceMono = Space_Mono({
-  weight: ["400", "700"],
-  variable: "--font-space-mono",
-  subsets: ["latin"],
+  weight: ["400", "500"],
 });
 
 export const metadata: Metadata = {
   title: "Chunk Analytics",
   description: "Analytics dashboard for Chunk AI",
+};
+
+export const viewport: Viewport = {
+  themeColor: "#FAF5EE",
 };
 
 export default function RootLayout({
@@ -35,10 +39,10 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body
-        className={`${spaceGrotesk.variable} ${dmSerifDisplay.variable} ${spaceMono.variable} antialiased bg-background text-foreground selection:bg-accent selection:text-white`}
+        className={`${fraunces.variable} ${dmSans.variable} ${splineSansMono.variable} antialiased`}
       >
         <div className="noise-overlay">
-          <svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg" className="w-full h-full opacity-[0.05]">
+          <svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg" className="w-full h-full">
             <filter id="noiseFilter">
               <feTurbulence type="fractalNoise" baseFrequency="0.65" numOctaves="3" stitchTiles="stitch" />
             </filter>
