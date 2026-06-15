@@ -97,13 +97,30 @@ async function fetchOrgStats(
   return response.json();
 }
 
+// Degrade gracefully (200 + empty trend + error note) instead of a hard 500, so a
+// missing token or a Sentry API hiccup doesn't break the Pulse fetch. The SentryStats
+// type carries an optional `error` field for exactly this. With an empty errorTrend
+// the error-spike alert simply doesn't fire (correct when Sentry is unreachable).
+function emptyStats(error: string) {
+  return NextResponse.json({
+    projects: [],
+    totalErrors: 0,
+    errorTrend: [],
+    orgStats: [],
+    intervals: [],
+    lastUpdated: new Date().toISOString(),
+    error,
+  });
+}
+
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const statsPeriod = searchParams.get('statsPeriod') || '24h';
   const resolution = searchParams.get('resolution') || '1h';
 
   if (!SENTRY_AUTH_TOKEN) {
-    return NextResponse.json({ error: 'SENTRY_AUTH_TOKEN not configured' }, { status: 500 });
+    console.warn('SENTRY_AUTH_TOKEN not configured — returning empty Sentry stats');
+    return emptyStats('SENTRY_AUTH_TOKEN not configured');
   }
 
   try {
@@ -175,6 +192,6 @@ export async function GET(request: NextRequest) {
     });
   } catch (error) {
     console.error('Sentry stats fetch error:', error);
-    return NextResponse.json({ error: 'Failed to fetch Sentry stats' }, { status: 500 });
+    return emptyStats(`Failed to fetch Sentry stats - ${error instanceof Error ? error.message : 'Unknown error'}`);
   }
 }

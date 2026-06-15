@@ -94,7 +94,7 @@ export default function PulsePage() {
       list.push({ id: 'searchfail', level: 'warning', icon: Search, label: `Search failure rate ${fmtPct(pulse.searchFailRateToday)}`, detail: 'Above 2× the 7-day rate', href: '/health' });
     }
     if (churn && churn.atRiskCount > 0) {
-      list.push({ id: 'atrisk', level: 'warning', icon: AlertTriangle, label: `${churn.atRiskCount} at-risk customer${churn.atRiskCount > 1 ? 's' : ''}`, detail: 'Health score below 30', href: '/customers' });
+      list.push({ id: 'atrisk', level: 'warning', icon: AlertTriangle, label: `${churn.atRiskCount} at-risk customer${churn.atRiskCount > 1 ? 's' : ''}`, detail: 'Inactive 7+ days or trial ending soon', href: '/customers' });
     }
     return list;
   }, [churn, pulse, sentryDerived]);
@@ -109,6 +109,11 @@ export default function PulsePage() {
         lastUpdated={revenueUpdated}
         isRefreshing={revenueRefreshing}
       />
+
+      <p className="text-xs text-ink-faint -mt-2 mb-6">
+        Revenue &amp; funnel cards follow the date range above; activity metrics (DAU, Weekly Active
+        Creators, Top Movers) use fixed 7/14-day windows.
+      </p>
 
       {revenue?.note && (
         <div className="mb-6 p-4 bg-butter-tint border border-butter rounded-card flex items-center gap-2 text-sm text-ink">

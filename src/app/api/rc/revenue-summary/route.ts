@@ -56,6 +56,7 @@ export async function GET(request: NextRequest) {
       churnRate: data.churnRate ?? 0,
       byPlatform: data.byPlatform ?? {},
       byProduct: data.byProduct ?? {},
+      subscribersByProduct: data.subscribersByProduct ?? {},
       mrrTrend: data.mrrTrend ?? [],
       newSubscribers: data.newSubscribers ?? 0,
       churned: data.churned ?? 0,
@@ -71,7 +72,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({
         mrr: 0, mrrChange: 0, arr: 0, todayRevenue: 0,
         totalSubscribers: 0, trialUsers: 0, churnRate: 0,
-        byPlatform: {}, byProduct: {}, mrrTrend: [],
+        byPlatform: {}, byProduct: {}, subscribersByProduct: {}, mrrTrend: [],
         newSubscribers: 0, churned: 0, netNew: 0,
         lastUpdated: new Date().toISOString(),
         note: 'Data unavailable - Cerebral server timeout. Try refreshing.',

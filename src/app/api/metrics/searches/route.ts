@@ -4,6 +4,7 @@ export const maxDuration = 60;
 import { NextRequest, NextResponse } from 'next/server';
 import {
   fetchMixpanelEvents,
+  fetchMixpanelEventsWithStatus,
   filterByPlatform,
   filterByUserType,
   filterEventsByType,
@@ -25,7 +26,7 @@ export async function GET(request: NextRequest) {
     const userType = (searchParams.get('userType') || 'all') as UserType;
 
     const dateRange = from && to ? { from, to } : getDateRange(range);
-    const allEvents = await fetchMixpanelEvents(dateRange.from, dateRange.to);
+    const { events: allEvents, dataUnavailable } = await fetchMixpanelEventsWithStatus(dateRange.from, dateRange.to);
     const platformFilteredEvents = filterByPlatform(allEvents, platform);
     const events = filterByUserType(platformFilteredEvents, userType);
 
@@ -129,6 +130,7 @@ export async function GET(request: NextRequest) {
       : 0;
 
     const response = NextResponse.json({
+      dataUnavailable,
       searchesOverTime,
       searchModes,
       modelsUsed,

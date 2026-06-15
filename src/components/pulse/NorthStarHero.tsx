@@ -47,8 +47,10 @@ export default function NorthStarHero({ value, change, trend }: NorthStarHeroPro
         collection in the last 7 days — the heartbeat of the product.
       </p>
 
-      {/* Activity sparkline (14-day DAU) */}
-      <div className="mt-6 h-16 -mx-2">
+      {/* Supporting daily-activity context (14-day DAU) — distinct from the WAC
+          headline above. Labeled explicitly so it doesn't read as the headline metric. */}
+      <p className="mt-6 eyebrow text-ink-faint">Daily activity (context)</p>
+      <div className="mt-1 h-16 -mx-2">
         <ResponsiveContainer width="100%" height="100%">
           <AreaChart data={trend} margin={{ top: 4, right: 8, left: 8, bottom: 0 }}>
             <defs>
@@ -67,7 +69,7 @@ export default function NorthStarHero({ value, change, trend }: NorthStarHeroPro
           </AreaChart>
         </ResponsiveContainer>
       </div>
-      <p className="mt-1 text-xs font-mono text-ink-faint">Daily active users · 14 days</p>
+      <p className="mt-1 text-xs font-mono text-ink-faint">Daily active users · last 14 days</p>
     </div>
   );
 }

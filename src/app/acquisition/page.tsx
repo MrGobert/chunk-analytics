@@ -30,13 +30,16 @@ const PLATFORM_TABS = [
 type PlatformKey = (typeof PLATFORM_TABS)[number]['key'];
 
 export default function AcquisitionPage() {
-  const { userType, setUserType } = useDashboardFilters();
-  const [dateRange, setDateRange] = useState('7d');
+  const { dateRange, setDateRange, userType, setUserType } = useDashboardFilters();
   const [view, setView] = useState<ViewKey>('funnel');
   const [platformGroup, setPlatformGroup] = useState<PlatformKey>('web');
 
   const { data: metrics, isLoading, isRefreshing, error, lastUpdated } =
     useAnalytics<AcquisitionFunnelMetrics>('/api/metrics/acquisition', { range: dateRange, platform: platformGroup, userType });
+  // Website view's "Top Pages" comes from web Page_Viewed data — fetch it for the
+  // web platform explicitly so it doesn't disappear when the Funnel tab is on iOS/macOS.
+  const { data: webAcq } =
+    useAnalytics<AcquisitionFunnelMetrics>('/api/metrics/acquisition', { range: dateRange, platform: 'web', userType });
   const { data: marketing, isLoading: marketingLoading } =
     useAnalytics<MarketingMetrics>('/api/metrics/marketing', { range: dateRange, platform: 'all', userType: 'all' });
   const { data: advanced, isLoading: advancedLoading } =
@@ -170,7 +173,7 @@ export default function AcquisitionPage() {
       {/* ═══ WEBSITE VIEW ══════════════════════════════════════════════════ */}
       {view === 'website' && (
         <>
-          {metrics?.topPages && metrics.topPages.length > 0 && (
+          {webAcq?.topPages && webAcq.topPages.length > 0 && (
             <>
               <div className="mb-6">
                 <h2 className="font-display text-2xl text-ink">Top Pages</h2>
@@ -178,10 +181,10 @@ export default function AcquisitionPage() {
               </div>
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-12">
                 <ChartCard title="Page Visit Distribution" subtitle="Feature and marketing pages by visit count">
-                  <BarChart data={metrics.topPages.map((d) => ({ page: d.page.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()), visits: d.visits }))} xKey="page" yKey="visits" horizontal />
+                  <BarChart data={webAcq.topPages.map((d) => ({ page: d.page.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()), visits: d.visits }))} xKey="page" yKey="visits" horizontal />
                 </ChartCard>
                 <ChartCard title="Page Visits" subtitle="Ranked by total visits">
-                  <DataTable data={metrics.topPages.map((d) => ({ page: d.page.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()), visits: d.visits }))} columns={[{ key: 'page', header: 'Page' }, { key: 'visits', header: 'Visits', numeric: true }]} />
+                  <DataTable data={webAcq.topPages.map((d) => ({ page: d.page.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()), visits: d.visits }))} columns={[{ key: 'page', header: 'Page' }, { key: 'visits', header: 'Visits', numeric: true }]} />
                 </ChartCard>
               </div>
             </>

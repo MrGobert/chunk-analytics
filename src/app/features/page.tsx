@@ -85,6 +85,8 @@ function SearchSection({ dateRange, platform, userType }: FilterProps) {
   const peakHour = metrics.hourlyDistribution.length > 0
     ? metrics.hourlyDistribution.reduce((max, curr) => (curr.count > max.count ? curr : max)).hour
     : 0;
+  // 12-hour label (0 → "12am", 13 → "1pm") so the card reads naturally.
+  const peakHourLabel = `${((peakHour + 11) % 12) + 1}${peakHour < 12 ? 'am' : 'pm'}`;
 
   const searchModeData = metrics.searchModes.map((m) => ({ name: m.mode, value: m.count }));
   const modelLines = (metrics.topModels || []).map((m, i) => ({
@@ -100,10 +102,11 @@ function SearchSection({ dateRange, platform, userType }: FilterProps) {
 
   return (
     <div className="mt-8">
+      {metrics.dataUnavailable && <DataUnavailableBanner />}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
         <StatCard title="Total Searches" value={metrics.totalSearches} trend={metrics.searchTrend} />
         <StatCard title="Avg Daily Searches" value={avgDaily} />
-        <StatCard title="Peak Hour" value={`${peakHour}:00`} format="text" />
+        <StatCard title="Peak Hour" value={peakHourLabel} format="text" />
         <StatCard title="Search Failure Rate" value={metrics.searchFailRate ?? 0} format="percentage" invertTrend />
       </div>
 
@@ -158,6 +161,7 @@ function ResearchSection({ dateRange, platform, userType }: FilterProps) {
 
   return (
     <div className="mt-8">
+      {metrics.dataUnavailable && <DataUnavailableBanner />}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
         <StatCard title="Reports Created" value={metrics.totalReportsInitiated} trend={metrics.initiatedTrend} />
         <StatCard title="Completion Rate" value={metrics.completionRate} format="percentage" />
@@ -212,6 +216,7 @@ function NotesSection({ dateRange, platform, userType }: FilterProps) {
 
   return (
     <div className="mt-8">
+      {metrics.dataUnavailable && <DataUnavailableBanner />}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
         <StatCard title="Notes Created" value={metrics.totalNotesCreated} trend={metrics.createdTrend} />
         <StatCard title="Notes Viewed" value={metrics.totalNotesViewed} trend={metrics.viewedTrend} />
@@ -260,6 +265,7 @@ function CollectionsSection({ dateRange, platform, userType }: FilterProps) {
 
   return (
     <div className="mt-8">
+      {metrics.dataUnavailable && <DataUnavailableBanner />}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
         <StatCard title="Created" value={metrics.totalCreated} trend={metrics.createdTrend} />
         <StatCard title="Viewed" value={metrics.totalViewed} trend={metrics.viewedTrend} />
@@ -310,6 +316,7 @@ function ArtifactsSection({ dateRange, platform, userType }: FilterProps) {
 
   return (
     <div className="mt-8">
+      {metrics.dataUnavailable && <DataUnavailableBanner />}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
         <StatCard title="Created" value={metrics.totalCreated} trend={metrics.createdTrend} />
         <StatCard title="Completed" value={metrics.totalCompleted} trend={metrics.completedTrend} />
@@ -375,6 +382,7 @@ function SharingSection({ dateRange, platform, userType }: FilterProps) {
 
   return (
     <div className="mt-8">
+      {metrics.dataUnavailable && <DataUnavailableBanner />}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
         <StatCard title="Total Shares" value={totalSharesCreated} trend={metrics.totalSharesTrend} />
         <StatCard title="Total Views" value={totalSharedViews} trend={metrics.sharedViewsTrend} />

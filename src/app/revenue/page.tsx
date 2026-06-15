@@ -57,25 +57,40 @@ export default function RevenuePage() {
 
   const breakdownTableData = useMemo(() => {
     const totalSubs = revenue?.totalSubscribers || 0;
+    const subsByProduct = revenue?.subscribersByProduct;
     return Object.entries(revenue?.byProduct || {}).map(([product, amount]) => {
-      const estimatedSubs = totalSubs > 0 ? Math.round(totalSubs * (amount / (revenue?.mrr || 1))) : 0;
-      const productArpu = estimatedSubs > 0 ? amount / estimatedSubs : 0;
+      // Prefer real per-plan counts from the backend; only fall back to apportioning
+      // total subscribers by MRR share when they're unavailable.
+      const realSubs = subsByProduct?.[product];
+      const subs = realSubs != null
+        ? realSubs
+        : (totalSubs > 0 ? Math.round(totalSubs * (amount / (revenue?.mrr || 1))) : 0);
+      const productArpu = subs > 0 ? amount / subs : 0;
       return {
         product: product.charAt(0).toUpperCase() + product.slice(1),
         mrr: `$${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
-        subscribers: estimatedSubs.toString(),
+        subscribers: subs.toString(),
         arpu: `$${productArpu.toFixed(2)}`,
       };
     });
-  }, [revenue?.byProduct, revenue?.totalSubscribers, revenue?.mrr]);
+  }, [revenue?.byProduct, revenue?.totalSubscribers, revenue?.mrr, revenue?.subscribersByProduct]);
 
+  // The backend funnel ends with a "Churned" stage, which isn't a continuation of
+  // the signup → active flow. Keep it out of the funnel chart (whose dropoff math
+  // assumes a monotonic descent) and surface it separately.
+  const churnedStage = useMemo(
+    () => (funnel?.funnel || []).find((s) => s.stage === 'Churned'),
+    [funnel?.funnel]
+  );
   const funnelData = useMemo(() =>
-    (funnel?.funnel || []).map((step, index, arr) => ({
-      name: step.stage,
-      count: step.count,
-      percentage: step.rate,
-      dropoff: index > 0 ? arr[index - 1].rate - step.rate : 0,
-    })),
+    (funnel?.funnel || [])
+      .filter((s) => s.stage !== 'Churned')
+      .map((step, index, arr) => ({
+        name: step.stage,
+        count: step.count,
+        percentage: step.rate,
+        dropoff: index > 0 ? arr[index - 1].rate - step.rate : 0,
+      })),
     [funnel?.funnel]
   );
 
@@ -115,8 +130,12 @@ export default function RevenuePage() {
   }
 
   const mrrGrowth = revenue?.mrrChange || 0;
-  // LTV ≈ ARPU ÷ monthly churn rate (churnRate is a percentage)
-  const monthlyChurn = (revenue?.churnRate ?? 0) / 100;
+  // LTV ≈ ARPU ÷ monthly churn rate. churnRate is computed over the selected window
+  // (`days`), so normalize it to a 30-day (monthly) rate first — otherwise a 90-day
+  // range would understate churn and massively inflate LTV.
+  const periodChurn = (revenue?.churnRate ?? 0) / 100;
+  const daysNum = Number(days) || 30;
+  const monthlyChurn = daysNum > 0 ? periodChurn * (30 / daysNum) : periodChurn;
   const ltv = monthlyChurn > 0 ? arpu / monthlyChurn : null;
 
   return (
@@ -145,7 +164,7 @@ export default function RevenuePage() {
           <div className="card-animate"><StatCard title="ARPU" value={arpu} format="currency" icon={<Users2 className="w-5 h-5" />} /></div>
           <div className="card-animate"><StatCard title="Est. LTV" value={ltv ?? '—'} format={ltv != null ? 'currency' : 'text'} subtitle="ARPU ÷ monthly churn" icon={<Repeat className="w-5 h-5" />} /></div>
           <div className="card-animate"><StatCard title="Active Subscribers" value={revenue.totalSubscribers} icon={<Users2 className="w-5 h-5" />} /></div>
-          <div className="card-animate"><StatCard title="Today's Revenue" value={revenue.todayRevenue} format="currency" icon={<Wallet className="w-5 h-5" />} /></div>
+          <div className="card-animate"><StatCard title="Today's Revenue" value={revenue.todayRevenue} format="currency" subtitle="Est. from tracked conversions" icon={<Wallet className="w-5 h-5" />} /></div>
         </div>
       )}
 
@@ -236,7 +255,7 @@ export default function RevenuePage() {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="card-animate">
-          <ChartCard title="Subscriber Funnel" subtitle={`Conversion funnel — last ${days} days`}>
+          <ChartCard title="Subscriber Funnel" subtitle={`Signup → active — last ${days} days${churnedStage ? ` · ${churnedStage.count} churned` : ''}`}>
             {funnelData.length > 0 ? (
               <FunnelChart data={funnelData} />
             ) : (

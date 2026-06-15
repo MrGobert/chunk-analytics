@@ -75,12 +75,14 @@ export async function GET(request: NextRequest) {
 
     if (error instanceof Error && error.name === 'AbortError') {
       console.error('Cerebral API timeout for churn-intelligence');
+      // Degrade like /api/rc/revenue-summary: 200 + dataUnavailable + note so the
+      // UI shows a graceful "data unavailable" state instead of a hard error.
       return NextResponse.json({
         ...EMPTY_RESPONSE,
         lastUpdated: new Date().toISOString(),
         dataUnavailable: true,
         note: 'Data unavailable - Cerebral server timeout. Try refreshing.',
-      }, { status: 504 });
+      });
     }
 
     console.error('Failed to fetch churn intelligence:', error);
@@ -89,6 +91,6 @@ export async function GET(request: NextRequest) {
       lastUpdated: new Date().toISOString(),
       dataUnavailable: true,
       note: `Data unavailable - ${error instanceof Error ? error.message : 'Unknown error'}`,
-    }, { status: 502 });
+    });
   }
 }

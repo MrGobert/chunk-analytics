@@ -154,13 +154,25 @@ function buildWebOnboardingMetrics(events: MixpanelEvent[]) {
     ? Math.round(completionTimes.reduce((a, b) => a + b, 0) / completionTimes.length)
     : null;
 
-  // Skip step distribution
+  // Step labels: prefer a `step_name` property emitted by the client; fall back to
+  // the known defaults, then a generic "Step N" — so adding or reordering onboarding
+  // steps doesn't silently mislabel the charts.
   const stepLabels: Record<number, string> = {
     0: 'Welcome',
     1: 'Guided Action',
     2: 'Aha Moment',
     3: "What's Next",
   };
+  const stepNames: Record<number, string> = {};
+  for (const e of [...stepEvents, ...skipped]) {
+    const step = Number(e.properties.step);
+    const name = e.properties.step_name;
+    if (!isNaN(step) && typeof name === 'string' && name && !stepNames[step]) {
+      stepNames[step] = name;
+    }
+  }
+  const stepLabel = (n: number) => stepNames[n] || stepLabels[n] || `Step ${n}`;
+
   const skipStepCounts: Record<number, number> = {};
   for (const e of skipped) {
     const step = Number(e.properties.step);
@@ -171,7 +183,7 @@ function buildWebOnboardingMetrics(events: MixpanelEvent[]) {
   const skipStepDistribution = Object.entries(skipStepCounts)
     .map(([stepKey, count]) => {
       const step = Number(stepKey);
-      return { step: stepLabels[step] || `Step ${step}`, count };
+      return { step: stepLabel(step), count };
     })
     .sort((a, b) => b.count - a.count);
 
@@ -186,10 +198,10 @@ function buildWebOnboardingMetrics(events: MixpanelEvent[]) {
   }
   const stepCompletionFunnel = buildFunnel([
     { name: 'Started', count: startedCount },
-    { name: stepLabels[0] || 'Step 0', count: stepUserCounts[0]?.size || 0 },
-    { name: stepLabels[1] || 'Step 1', count: stepUserCounts[1]?.size || 0 },
-    { name: stepLabels[2] || 'Step 2', count: stepUserCounts[2]?.size || 0 },
-    { name: stepLabels[3] || 'Step 3', count: stepUserCounts[3]?.size || 0 },
+    { name: stepLabel(0), count: stepUserCounts[0]?.size || 0 },
+    { name: stepLabel(1), count: stepUserCounts[1]?.size || 0 },
+    { name: stepLabel(2), count: stepUserCounts[2]?.size || 0 },
+    { name: stepLabel(3), count: stepUserCounts[3]?.size || 0 },
     { name: 'Completed', count: completedCount },
   ]);
 

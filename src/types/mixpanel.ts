@@ -140,6 +140,7 @@ export interface SearchMetrics {
   responseTimes?: { model: string; p50: number; p90: number; count: number }[];
   searchFailRate?: number;
   failedCount?: number;
+  dataUnavailable?: boolean;
 }
 
 export interface FunnelMetrics {
@@ -233,6 +234,7 @@ export interface ResearchMetrics {
   exportFormatDistribution: { name: string; value: number }[];
   averageSourceCount: number;
   averageWordCount: number;
+  dataUnavailable?: boolean;
   lastUpdated: string;
 }
 
@@ -259,6 +261,7 @@ export interface NotesMetrics {
   featureAdoption: { name: string; value: number }[];
   retentionRate: number;
   documentUploadRate: number;
+  dataUnavailable?: boolean;
   lastUpdated: string;
 }
 
@@ -285,6 +288,7 @@ export interface SharingMetrics {
   sharingFunnel: FunnelStep[];
   contentTypeDistribution: { name: string; value: number }[];
   viewToShareByType: { type: string; shares: number; views: number; ratio: number }[];
+  dataUnavailable?: boolean;
   lastUpdated: string;
 }
 
@@ -335,6 +339,7 @@ export interface CollectionsMetrics {
   collectionsFunnel: FunnelStep[];
   dailyData: { date: string; created: number; viewed: number; chatStarted: number; exported: number }[];
   urlManagement: { date: string; added: number; removed: number }[];
+  dataUnavailable?: boolean;
   lastUpdated: string;
 }
 
@@ -363,6 +368,7 @@ export interface ArtifactsMetrics {
   savedContentTypeDistribution: { name: string; value: number }[];
   fileTypeDistribution: { name: string; value: number }[];
   onboardingFunnel: FunnelStep[];
+  dataUnavailable?: boolean;
   lastUpdated: string;
 }
 
@@ -380,6 +386,8 @@ export interface RevenueSummary {
   churnRate: number;
   byPlatform: Record<string, number>;
   byProduct: Record<string, number>;
+  /** Real active-subscriber head-count per plan type (monthly/annual). */
+  subscribersByProduct?: Record<string, number>;
   mrrTrend: { date: string; mrr: number }[];
   newSubscribers: number;
   churned: number;

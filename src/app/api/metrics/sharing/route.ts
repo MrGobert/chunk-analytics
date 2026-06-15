@@ -4,6 +4,7 @@ export const maxDuration = 60;
 import { NextRequest, NextResponse } from 'next/server';
 import {
   fetchMixpanelEvents,
+  fetchMixpanelEventsWithStatus,
   filterByPlatform,
   filterByUserType,
   filterEventsByType,
@@ -56,10 +57,12 @@ export async function GET(request: NextRequest) {
     const previousFrom = formatDate(subDays(new Date(dateRange.from), rangeDays));
     const previousTo = formatDate(subDays(new Date(dateRange.to), rangeDays));
 
-    const [allEvents, allPreviousEvents] = await Promise.all([
-      fetchMixpanelEvents(dateRange.from, dateRange.to),
+    const [current, allPreviousEvents] = await Promise.all([
+      fetchMixpanelEventsWithStatus(dateRange.from, dateRange.to),
       fetchMixpanelEvents(previousFrom, previousTo).catch(() => []),
     ]);
+    const allEvents = current.events;
+    const dataUnavailable = current.dataUnavailable;
 
     const platformFilteredEvents = filterByPlatform(allEvents, platform);
     const events = filterByUserType(platformFilteredEvents, userType);
@@ -212,6 +215,7 @@ export async function GET(request: NextRequest) {
     ];
 
     const response = NextResponse.json({
+      dataUnavailable,
       totalNotesShared,
       totalConversationsShared,
       totalResearchShared,
