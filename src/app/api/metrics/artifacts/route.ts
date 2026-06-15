@@ -16,6 +16,7 @@ import {
   UserType,
 } from '@/lib/mixpanel';
 import { getDateRange, getDaysInRange, formatDate } from '@/lib/utils';
+import { FEATURE_CATEGORIES } from '@/lib/feature-categories';
 import { subDays } from 'date-fns';
 
 const ARTIFACT_EVENTS = [
@@ -63,7 +64,11 @@ export async function GET(request: NextRequest) {
     const totalVisualsGenerated = countEvents(artifactEvents, 'Artifact_Visual_Generated');
     const totalBatchStarted = countEvents(artifactEvents, 'Artifact_Batch_Started');
     const totalFileUploads = countEvents(artifactEvents, 'Artifact_File_Uploaded');
-    const uniqueArtifactUsers = getUniqueUsers(artifactEvents).size;
+    // Count unique users by genuine artifact actions only — onboarding/navigation
+    // viewers are not "artifact users". Uses the same curated genuine-usage set as
+    // "Users by feature" so the detail KPI and the overview stay consistent.
+    const usageArtifactEvents = filterEventsByType(events, FEATURE_CATEGORIES.Artifacts);
+    const uniqueArtifactUsers = getUniqueUsers(usageArtifactEvents).size;
     const completionRate = totalCreated > 0 ? Math.min(1, Math.max(0, totalCompleted / totalCreated)) : 0;
 
     // Previous period for trends
