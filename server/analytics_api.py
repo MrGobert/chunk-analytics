@@ -233,7 +233,7 @@ def _compute_health_score(user_data: dict, now: datetime) -> dict:
 @safe_analytics({
     "mrr": 0, "mrrChange": 0, "arr": 0, "todayRevenue": 0,
     "totalSubscribers": 0, "trialUsers": 0, "churnRate": 0,
-    "byPlatform": {}, "byProduct": {}, "mrrTrend": [],
+    "byPlatform": {}, "byProduct": {}, "subscribersByProduct": {}, "mrrTrend": [],
     "newSubscribers": 0, "churned": 0, "netNew": 0,
 })
 def revenue_summary():
@@ -272,6 +272,7 @@ def _compute_revenue_summary(days: int) -> dict:
     # MRR calculation from active subscribers
     by_platform = {}
     by_product = {}
+    subs_by_product = {}
     mrr = 0.0
 
     for doc in active_docs:
@@ -287,11 +288,12 @@ def _compute_revenue_summary(days: int) -> dict:
         # byPlatform contains MRR per platform (dollar amounts, not counts)
         by_platform[platform] = round(by_platform.get(platform, 0) + monthly_price, 2)
 
-        # byProduct contains MRR per product type (dollar amounts, not counts)
-        if is_annual:
-            by_product["annual"] = round(by_product.get("annual", 0) + monthly_price, 2)
-        else:
-            by_product["monthly"] = round(by_product.get("monthly", 0) + monthly_price, 2)
+        # byProduct holds MRR per product type (dollar amounts); subscribersByProduct
+        # holds the matching head-count so the dashboard shows real per-plan subs/ARPU
+        # rather than estimating from MRR share.
+        product = "annual" if is_annual else "monthly"
+        by_product[product] = round(by_product.get(product, 0) + monthly_price, 2)
+        subs_by_product[product] = subs_by_product.get(product, 0) + 1
 
     arr = mrr * 12
 
@@ -313,9 +315,11 @@ def _compute_revenue_summary(days: int) -> dict:
 
     net_new = new_subscribers - churned
 
-    # Churn rate: churned in period / (total active at start of period)
-    # Approximate: total active now + churned in period = active at start
-    start_active = total_subscribers + churned
+    # Churn rate: churned in period / active-at-start of period.
+    # active-at-start ≈ (actives that already existed before the window) + churned
+    # = (total_subscribers - new_subscribers) + churned. Excluding in-period new
+    # signups from the denominator avoids understating churn when acquisition is high.
+    start_active = (total_subscribers - new_subscribers) + churned
     churn_rate = round((churned / start_active * 100) if start_active > 0 else 0, 1)
 
     # MRR trend + change: load daily MRR snapshots from Redis (populated by snapshot_daily_mrr task)
@@ -372,6 +376,7 @@ def _compute_revenue_summary(days: int) -> dict:
         "churnRate": churn_rate,
         "byPlatform": by_platform,
         "byProduct": by_product,
+        "subscribersByProduct": subs_by_product,
         "mrrTrend": mrr_trend,
         "newSubscribers": new_subscribers,
         "churned": churned,
@@ -653,9 +658,17 @@ def _compute_churn_intelligence(days: int) -> dict:
         else:
             subscriber_churned.append(data)
 
-    # Churn rate: only paying subscribers who churned (not trial expirations)
+    # Churn rate: only paying subscribers who churned (not trial expirations),
+    # over active-at-start. Exclude in-period new actives from the denominator so a
+    # burst of new signups doesn't understate churn.
     total_subscriber_churned = len(subscriber_churned)
-    start_active = len(active_docs) + total_subscriber_churned
+    new_active_in_period = 0
+    for doc in active_docs:
+        created = _get_creation_date(doc.to_dict())
+        if created and created >= cutoff:
+            new_active_in_period += 1
+    existing_active_at_start = len(active_docs) - new_active_in_period
+    start_active = existing_active_at_start + total_subscriber_churned
     churn_rate = round((total_subscriber_churned / start_active * 100) if start_active > 0 else 0, 1)
 
     # Single pass: classify active + trial users as at-risk or engaged
