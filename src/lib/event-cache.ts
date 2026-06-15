@@ -6,6 +6,15 @@ import path from 'path';
 const TTL = 5 * 60 * 1000; // 5 minutes (default — fresh windows)
 const LOCK_MAX_AGE = 5 * 60 * 1000; // 5 minutes — stale locks are auto-cleaned
 
+// How long a concurrent caller waits for the lock-holder's fetch before giving up.
+// A cold full export (~39MB over 30+ days) can take 30-45s; the wait MUST exceed
+// that so simultaneous callers (e.g. the Engagement page's 4 full-export requests)
+// share the single in-flight fetch instead of timing out to an empty "no data"
+// response. Kept under the routes' 60s maxDuration. Stuck locks are still cleared
+// by LOCK_MAX_AGE, so a longer wait can't hang on a crashed worker.
+const LOCK_WAIT_MS = 50 * 1000;
+const LOCK_POLL_INTERVAL = 500;
+
 // In addition to memory cache (for same worker), use temp directory cache
 const eventCache = new Map<string, { events: MixpanelEvent[]; timestamp: number }>();
 
@@ -59,8 +68,9 @@ export async function getCachedEventsAsync(
     } catch { /* lock was already removed */ }
   }
   let trys = 0;
-  while (fs.existsSync(lockFile) && trys < 60) {
-    await sleep(500); // Poll every 500ms
+  const maxTrys = Math.ceil(LOCK_WAIT_MS / LOCK_POLL_INTERVAL);
+  while (fs.existsSync(lockFile) && trys < maxTrys) {
+    await sleep(LOCK_POLL_INTERVAL); // Poll while the lock-holder fetches
     trys++;
   }
 
