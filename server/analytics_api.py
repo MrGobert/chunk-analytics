@@ -1201,6 +1201,13 @@ def get_broadcasts():
 
 # Template metadata (no HTML — lightweight list)
 _EMAIL_TEMPLATES = {
+    "welcome": {
+        "name": "Welcome (Instant)",
+        "category": "Welcome Sequence",
+        "description": "Instant welcome email introducing the core value props, sent shortly after signup.",
+        "trigger": "beat",
+        "schedule": "Hourly (check_welcome_instant)",
+    },
     "trial_started": {
         "name": "Trial Started",
         "category": "Trial & Subscription",
@@ -1299,6 +1306,13 @@ _EMAIL_TEMPLATES = {
         "trigger": "manual",
         "schedule": "On demand",
     },
+    "memory_2_announcement": {
+        "name": "Memory 2.0 Announcement",
+        "category": "Announcements",
+        "description": "Rich custom broadcast announcing Memory 2.0 — kept for reference and reuse.",
+        "trigger": "manual",
+        "schedule": "On demand",
+    },
 }
 
 
@@ -1307,6 +1321,8 @@ def _render_email_template(key: str) -> dict | None:
     import email_service
 
     renderers = {
+        "welcome": lambda: email_service.get_welcome_email("James"),
+        "memory_2_announcement": lambda: email_service.get_memory_2_announcement_email("James"),
         "trial_started": lambda: email_service.get_trial_started_email("James"),
         "trial_ending": lambda: email_service.get_trial_ending_email("James", hours_remaining=12),
         "subscription_expired": lambda: email_service.get_subscription_expired_email("James"),
@@ -1334,11 +1350,11 @@ def _render_email_template(key: str) -> dict | None:
 
     subject, html, text = renderer()
 
-    # Replace unsubscribe placeholder with a safe preview link
+    # Replace unsubscribe placeholder with a safe preview link (cream-soft on night footer)
     html = html.replace(
         "{UNSUBSCRIBE_LINK_PLACEHOLDER}",
-        '<a href="#" style="color:#D9D9D9;text-decoration:none">Unsubscribe</a>'
-        '<span style="color:#D9D9D9;opacity:0.3"> · </span>',
+        '<a href="#" style="color:#C9B89F;text-decoration:none">Unsubscribe</a>'
+        '<span style="color:rgba(246,239,228,0.45)"> · </span>',
     )
 
     return {"subject": subject, "html": html, "text": text}

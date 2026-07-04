@@ -215,7 +215,7 @@ export default function EmailTemplatesPage() {
             </div>
 
             {/* Modal Body — iframe preview */}
-            <div className="flex-1 overflow-hidden bg-[#EAEAEA]" style={{ minHeight: '70vh' }}>
+            <div className="flex-1 overflow-hidden bg-[#FAF5EE]" style={{ minHeight: '70vh' }}>
               {previewLoading ? (
                 <div className="flex items-center justify-center h-full">
                   <div className="flex flex-col items-center gap-3">

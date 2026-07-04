@@ -1,3 +1,5 @@
+# NOTE: Historical one-shot broadcast — its inline HTML predates the Paper & Ember
+# design system (July 2026). Restyle before reusing.
 import os
 import sys
 import json
