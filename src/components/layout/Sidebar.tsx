@@ -39,6 +39,7 @@ const ROUTE_TO_ENDPOINT: Record<string, string> = {
   '/retention': '/api/metrics/retention-cohorts',
   '/engagement': '/api/metrics/users',
   '/features': '/api/metrics/feature-overview',
+  '/capture-monitors': '/api/metrics/capture-monitors',
   '/outreach': '/api/metrics/emails',
   '/health': '/api/sentry/stats',
 };
@@ -80,6 +81,7 @@ const navSections: NavSection[] = [
     items: [
       { href: '/engagement', label: 'Engagement', icon: Activity },
       { href: '/features', label: 'Features', icon: LayoutGrid },
+      { href: '/capture-monitors', label: 'Capture & Monitors', icon: Eye },
     ],
   },
   {

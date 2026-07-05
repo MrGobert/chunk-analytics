@@ -613,6 +613,24 @@ export interface ActivationMetrics {
   lastUpdated: string;
 }
 
+export interface CaptureMonitorsMetrics {
+  monitorsCreated: number;
+  capturesTotal: number;
+  keepRate: number;
+  activeSources: number;
+  cadenceMix: { name: string; value: number }[];
+  reportTypeMix: { name: string; value: number }[];
+  topTopics: { topic: string; count: number }[];
+  monitorsByPlatform: { name: string; value: number }[];
+  capturesBySource: { name: string; value: number }[];
+  capturesByContentType: { name: string; value: number }[];
+  triageFunnel: FunnelStep[];
+  triageOutcomes: { name: string; value: number }[];
+  dailyTrend: { date: string; monitors: number; captures: number }[];
+  dateRange: DateRange;
+  lastUpdated: string;
+}
+
 export interface RetentionCohortMetrics {
   weeks: number;
   cohorts: { week: string; size: number; retention: (number | null)[] }[];
