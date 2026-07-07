@@ -81,7 +81,7 @@ const navSections: NavSection[] = [
     items: [
       { href: '/engagement', label: 'Engagement', icon: Activity },
       { href: '/features', label: 'Features', icon: LayoutGrid },
-      { href: '/capture-monitors', label: 'Capture & Monitors', icon: Eye },
+      { href: '/capture-monitors', label: 'Capture & Automations', icon: Eye },
     ],
   },
   {

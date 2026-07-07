@@ -627,6 +627,24 @@ export interface CaptureMonitorsMetrics {
   triageFunnel: FunnelStep[];
   triageOutcomes: { name: string; value: number }[];
   dailyTrend: { date: string; monitors: number; captures: number }[];
+  // Automation lifecycle + funnel
+  kindMix: { name: string; value: number }[];
+  lifecycleActions: { name: string; value: number }[];
+  runStatusMix: { name: string; value: number }[];
+  kindSelectSource: { name: string; value: number }[];
+  planStepMix: { name: string; value: number }[];
+  topRecipes: { recipe: string; count: number }[];
+  suggestionFunnel: FunnelStep[];
+  suggestionOutcomes: { name: string; value: number }[];
+  suggestionAcceptRate: number;
+  runsViewed: number;
+  limitHits: number;
+  paywallsShown: number;
+  deletedCount: number;
+  avgRunsBeforeDelete: number;
+  // Capture setup + engagement
+  captureSetup: { name: string; value: number }[];
+  inboxViews: number;
   dateRange: DateRange;
   lastUpdated: string;
 }

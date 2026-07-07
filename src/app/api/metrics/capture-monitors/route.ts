@@ -14,12 +14,37 @@ import { MixpanelEvent } from '@/types/mixpanel';
 
 // inbox_capture_created is emitted server-side by cerebral for EVERY capture
 // source; the Monitor_* + inbox triage events are client-side (web + Apple).
+// Event names are frozen as Monitor_* / Automation_* (shipped to production) even
+// though the feature is now surfaced as "Automations" in the UI.
 const CAPTURE_MONITOR_EVENTS = [
+  // Automation lifecycle
   'Monitor_Created',
+  'Monitor_Edited',
+  'Monitor_Paused',
+  'Monitor_Resumed',
+  'Monitor_Deleted',
+  'Monitor_RunNow',
+  'Monitor_Run_Viewed',
+  // Automation friction + funnel
+  'Monitor_Limit_Hit',
+  'Monitor_Paywall_Shown',
+  'Monitor_Suggestion_Shown',
+  'Monitor_Suggestion_Accepted',
+  'Monitor_Suggestion_Dismissed',
+  'Automation_Kind_Selected',
+  'Automation_Recipe_Selected',
+  'Automation_Plan_Previewed',
+  // Capture + inbox triage
   'inbox_capture_created',
   'inbox_item_accepted',
   'inbox_item_discarded',
   'inbox_item_to_collection',
+  // Capture setup + engagement
+  'inbox_clipper_token_generated',
+  'inbox_clipper_token_revoked',
+  'inbox_email_alias_generated',
+  'inbox_email_alias_disabled',
+  'inbox_viewed',
 ];
 
 function platformOf(e: MixpanelEvent): string {
@@ -59,12 +84,37 @@ export async function GET(request: NextRequest) {
     const source = new Map<string, number>();
     const contentType = new Map<string, number>();
     const daily = new Map<string, { monitors: number; captures: number }>();
+    const kindMix = new Map<string, number>();
+    const runStatusMix = new Map<string, number>();
+    const kindSelectSource = new Map<string, number>();
+    const planStepMix = new Map<string, number>();
+    const recipes = new Map<string, number>();
 
     let monitorsCreated = 0;
     let capturesTotal = 0;
     let accepted = 0;
     let discarded = 0;
     let toCollection = 0;
+    // Automation lifecycle
+    let editedCount = 0;
+    let pausedCount = 0;
+    let resumedCount = 0;
+    let deletedCount = 0;
+    let runNowCount = 0;
+    let runsBeforeDelete = 0;
+    let runsViewed = 0;
+    // Automation friction + suggestion funnel
+    let limitHits = 0;
+    let paywallsShown = 0;
+    let suggestionShown = 0;
+    let suggestionAccepted = 0;
+    let suggestionDismissed = 0;
+    // Capture setup + engagement
+    let clipperGenerated = 0;
+    let clipperRevoked = 0;
+    let aliasGenerated = 0;
+    let aliasDisabled = 0;
+    let inboxViews = 0;
 
     const bump = (m: Map<string, number>, k: string) => m.set(k, (m.get(k) || 0) + 1);
     const dayOf = (t: number) => formatDate(new Date(t * 1000));
@@ -79,6 +129,7 @@ export async function GET(request: NextRequest) {
       switch (e.event) {
         case 'Monitor_Created': {
           monitorsCreated++;
+          bump(kindMix, String(p.kind ?? 'unknown'));
           bump(cadence, String(p.cadence ?? 'unknown'));
           bump(reportType, String(p.report_type ?? 'unknown'));
           const topic = String(p.query_truncated ?? '').trim();
@@ -87,6 +138,67 @@ export async function GET(request: NextRequest) {
           ensureDay(dayOf(t)).monitors++;
           break;
         }
+        case 'Monitor_Edited':
+          editedCount++;
+          break;
+        case 'Monitor_Paused':
+          pausedCount++;
+          break;
+        case 'Monitor_Resumed':
+          resumedCount++;
+          break;
+        case 'Monitor_Deleted':
+          deletedCount++;
+          runsBeforeDelete += Number(p.run_count ?? 0);
+          break;
+        case 'Monitor_RunNow':
+          runNowCount++;
+          break;
+        case 'Monitor_Run_Viewed':
+          runsViewed++;
+          bump(runStatusMix, String(p.run_status ?? 'unknown'));
+          break;
+        case 'Monitor_Limit_Hit':
+          limitHits++;
+          break;
+        case 'Monitor_Paywall_Shown':
+          paywallsShown++;
+          break;
+        case 'Monitor_Suggestion_Shown':
+          suggestionShown++;
+          break;
+        case 'Monitor_Suggestion_Accepted':
+          suggestionAccepted++;
+          break;
+        case 'Monitor_Suggestion_Dismissed':
+          suggestionDismissed++;
+          break;
+        case 'Automation_Kind_Selected':
+          bump(kindSelectSource, String(p.source ?? 'unknown'));
+          break;
+        case 'Automation_Recipe_Selected': {
+          const recipe = String(p.recipe_id ?? '').trim();
+          if (recipe) bump(recipes, recipe);
+          break;
+        }
+        case 'Automation_Plan_Previewed':
+          bump(planStepMix, String(p.step_count ?? 'unknown'));
+          break;
+        case 'inbox_clipper_token_generated':
+          clipperGenerated++;
+          break;
+        case 'inbox_clipper_token_revoked':
+          clipperRevoked++;
+          break;
+        case 'inbox_email_alias_generated':
+          aliasGenerated++;
+          break;
+        case 'inbox_email_alias_disabled':
+          aliasDisabled++;
+          break;
+        case 'inbox_viewed':
+          inboxViews++;
+          break;
         case 'inbox_capture_created': {
           capturesTotal++;
           bump(source, String(p.source ?? 'unknown'));
@@ -115,6 +227,40 @@ export async function GET(request: NextRequest) {
       .map(([topic, count]) => ({ topic, count }))
       .sort((a, b) => b.count - a.count)
       .slice(0, 15);
+
+    const topRecipes = Array.from(recipes)
+      .map(([recipe, count]) => ({ recipe, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 15);
+
+    const lifecycleActions = [
+      { name: 'Created', value: monitorsCreated },
+      { name: 'Edited', value: editedCount },
+      { name: 'Paused', value: pausedCount },
+      { name: 'Resumed', value: resumedCount },
+      { name: 'Run Now', value: runNowCount },
+      { name: 'Deleted', value: deletedCount },
+    ].filter((a) => a.value > 0);
+
+    const suggestionFunnel = buildFunnel([
+      { name: 'Shown', count: suggestionShown },
+      { name: 'Accepted', count: suggestionAccepted },
+    ]);
+
+    const suggestionOutcomes = [
+      { name: 'Accepted', value: suggestionAccepted },
+      { name: 'Dismissed', value: suggestionDismissed },
+    ].filter((o) => o.value > 0);
+
+    const captureSetup = [
+      { name: 'Clipper connected', value: clipperGenerated },
+      { name: 'Clipper revoked', value: clipperRevoked },
+      { name: 'Email alias created', value: aliasGenerated },
+      { name: 'Email alias disabled', value: aliasDisabled },
+    ].filter((a) => a.value > 0);
+
+    const suggestionAcceptRate = suggestionShown > 0 ? suggestionAccepted / suggestionShown : 0;
+    const avgRunsBeforeDelete = deletedCount > 0 ? runsBeforeDelete / deletedCount : 0;
 
     const dailyTrend = Array.from(daily)
       .map(([date, o]) => ({ date, monitors: o.monitors, captures: o.captures }))
@@ -152,6 +298,24 @@ export async function GET(request: NextRequest) {
         triageFunnel,
         triageOutcomes,
         dailyTrend,
+        // Automation lifecycle + funnel
+        kindMix: toArr(kindMix),
+        lifecycleActions,
+        runStatusMix: toArr(runStatusMix),
+        kindSelectSource: toArr(kindSelectSource),
+        planStepMix: toArr(planStepMix),
+        topRecipes,
+        suggestionFunnel,
+        suggestionOutcomes,
+        suggestionAcceptRate,
+        runsViewed,
+        limitHits,
+        paywallsShown,
+        deletedCount,
+        avgRunsBeforeDelete,
+        // Capture setup + engagement
+        captureSetup,
+        inboxViews,
         dateRange,
         lastUpdated: getLastUpdated(),
       },
