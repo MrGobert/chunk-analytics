@@ -7,11 +7,11 @@ import {
   filterByPlatform,
   getLastUpdated,
   normalizeEventName,
+  platformOf,
 } from '@/lib/mixpanel';
 import { getDateRange, formatDate } from '@/lib/utils';
 import { buildFunnel } from '@/lib/funnel';
 import { KEY_ACTION_EVENTS } from '@/lib/feature-categories';
-import { MixpanelEvent } from '@/types/mixpanel';
 
 const SIGNUP = ['Signup_Completed', 'SignUp', 'Account Created'];
 // What counts as activation — single source of truth (canonical names), shared
@@ -19,7 +19,7 @@ const SIGNUP = ['Signup_Completed', 'SignUp', 'Account Created'];
 const KEY_ACTIONS = new Set<string>(KEY_ACTION_EVENTS);
 // Raw event names (incl. legacy aliases) the filtered export must request so all
 // key actions are actually pulled from Mixpanel.
-const KEY_ACTION_FETCH = ['Search_Performed', 'Search Performed', 'Search', 'Note_Created', 'Artifact_Created', 'Research_Report_Initiated', 'Collection_Created'];
+const KEY_ACTION_FETCH = ['Search_Performed', 'Search Performed', 'Search', 'Note_Created', 'Artifact_Created', 'Research_Report_Initiated', 'Collection_Created', 'Monitor_Created', 'inbox_capture_created'];
 const SESSION = ['App_Session_Started', '$ae_session'];
 
 const ACTIVATION_EVENTS = [
@@ -39,19 +39,9 @@ const ACTION_LABEL: Record<string, string> = {
   Artifact_Created: 'Artifact',
   Research_Report_Initiated: 'Research',
   Collection_Created: 'Collection',
+  Monitor_Created: 'Automation',
+  inbox_capture_created: 'Capture',
 };
-
-function platformOf(e: MixpanelEvent): string {
-  const os = (e.properties.$os as string) || '';
-  const mpLib = (e.properties.mp_lib as string) || '';
-  const platform = (e.properties.platform as string) || '';
-  if (mpLib === 'web' || platform === 'web') return 'Web';
-  if (os === 'macOS' || platform === 'macOS') return 'macOS';
-  if (os === 'iPadOS') return 'iPadOS';
-  if (os === 'iOS' || platform === 'iOS') return 'iOS';
-  if (os === 'visionOS' || platform === 'visionOS') return 'visionOS';
-  return 'Other';
-}
 
 function startOfWeek(dateStr: string): string {
   // dateStr is YYYY-MM-DD (LA). Bucket to the Monday of that week.

@@ -20,7 +20,17 @@ import { normalizeEventName } from '@/lib/mixpanel';
  *   Artifact_Tab_Switched, Artifact_Filtered, Artifact_Searched,
  *   Artifact_Onboarding_Viewed/Completed/Skipped, Research_History_Viewed,
  *   Research_Settings_Changed, Research_Report_Filtered,
- *   Memory_Management_Viewed, Connector_Settings_Viewed.
+ *   Memory_Management_Viewed, Connector_Settings_Viewed,
+ *   Monitor_Limit_Hit, Monitor_Paywall_Shown,
+ *   Monitor_Suggestion_Shown/Accepted/Dismissed, Automation_Kind_Selected,
+ *   Automation_Recipe_Selected, Automation_Plan_Previewed, inbox_viewed,
+ *   inbox_clipper_token_generated/revoked,
+ *   inbox_email_alias_generated/disabled (friction/paywall/composer/passive
+ *   events — all still on the capture-monitors detail route).
+ *
+ * Note: Capture events are intentionally snake_case — those are the frozen
+ * production names (emitted server-side by cerebral / client triage), no
+ * normalization applies.
  */
 export const FEATURE_CATEGORIES: Record<string, string[]> = {
   Search: ['Search_Performed'],
@@ -47,6 +57,21 @@ export const FEATURE_CATEGORIES: Record<string, string[]> = {
     'Gamma_Generation_Completed',
     'Gamma_Generation_Failed',
   ],
+  Automations: [
+    'Monitor_Created',
+    'Monitor_Edited',
+    'Monitor_Paused',
+    'Monitor_Resumed',
+    'Monitor_Deleted',
+    'Monitor_RunNow',
+    'Monitor_Run_Viewed',
+  ],
+  Capture: [
+    'inbox_capture_created',
+    'inbox_item_accepted',
+    'inbox_item_discarded',
+    'inbox_item_to_collection',
+  ],
 };
 
 /** Flattened set of every category event (for fast membership tests). */
@@ -65,11 +90,17 @@ export function categorizeEvent(eventName: string): string | null {
   return EVENT_TO_CATEGORY.get(normalizeEventName(eventName)) ?? null;
 }
 
-/** The "key creator actions" that define an Active Creator / activation. */
+/**
+ * The "key creator actions" that define an Active Creator / activation.
+ * Monitor_Created + inbox_capture_created added July 2026 — expect a
+ * step-change in Weekly Active Creators / activation rate from that date.
+ */
 export const KEY_ACTION_EVENTS = [
   'Search_Performed',
   'Note_Created',
   'Artifact_Created',
   'Research_Report_Initiated',
   'Collection_Created',
+  'Monitor_Created',
+  'inbox_capture_created',
 ];

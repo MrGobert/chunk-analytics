@@ -7,10 +7,10 @@ import {
   fetchMixpanelEventsFiltered,
   filterByPlatform,
   getLastUpdated,
+  platformOf,
 } from '@/lib/mixpanel';
 import { getDateRange, formatDate } from '@/lib/utils';
 import { buildFunnel } from '@/lib/funnel';
-import { MixpanelEvent } from '@/types/mixpanel';
 
 // inbox_capture_created is emitted server-side by cerebral for EVERY capture
 // source; the Monitor_* + inbox triage events are client-side (web + Apple).
@@ -46,20 +46,6 @@ const CAPTURE_MONITOR_EVENTS = [
   'inbox_email_alias_disabled',
   'inbox_viewed',
 ];
-
-function platformOf(e: MixpanelEvent): string {
-  const os = (e.properties.$os as string) || '';
-  const mpLib = (e.properties.mp_lib as string) || '';
-  const platform = (e.properties.platform as string) || '';
-  if (mpLib === 'web' || platform === 'web') return 'Web';
-  if (os === 'macOS' || platform === 'macOS') return 'macOS';
-  if (os === 'iPadOS') return 'iPadOS';
-  if (os === 'iOS' || platform === 'iOS') return 'iOS';
-  if (os === 'visionOS' || platform === 'visionOS') return 'visionOS';
-  // Captures land server-side with platform "server" — surface the origin app
-  // via the event's own source when the transport platform is opaque.
-  return 'Other';
-}
 
 export async function GET(request: NextRequest) {
   try {

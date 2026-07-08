@@ -205,6 +205,8 @@ export async function GET(request: NextRequest) {
       { events: ['Research_Report_Initiated', 'Research_Report_Completed'], name: 'Research Reports' },
       { events: ['Note_Writing_Tool_Used'], name: 'Writing Tools' },
       { events: ['Search_Performed'], name: 'Searches' },
+      { events: ['Monitor_Created'], name: 'Automations' },
+      { events: ['inbox_capture_created'], name: 'Captures' },
     ];
 
     featureEvents.forEach(({ events: eventNames, name }) => {

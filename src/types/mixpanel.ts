@@ -679,6 +679,9 @@ export interface ReliabilityMetrics {
     searchFailRate: number;
     artifactFailRate: number;
     imageFailRate: number;
+    /** Failure rate of VIEWED automation runs (Monitor_Run_Viewed proxy). */
+    monitorRunFailRate: number;
+    monitorRunsViewed: number;
     purchaseFailures: number;
     searchFailed: number;
     artifactFailed: number;

@@ -18,6 +18,10 @@ const RELIABILITY_EVENTS = [
   'Purchase_Failed',
   'Error_Encountered',
   'Connector_Status_Degraded',
+  // Automation runs have no server-side failure event yet; Monitor_Run_Viewed
+  // carries run_status, so failure rate is measured over VIEWED runs only
+  // (biased proxy — replace once cerebral emits a run-completion event).
+  'Monitor_Run_Viewed',
 ];
 
 export async function GET(request: NextRequest) {
@@ -42,12 +46,20 @@ export async function GET(request: NextRequest) {
     const imgFailed = count('Image_Generation_Failed');
     const purchaseFailed = count('Purchase_Failed');
 
+    const monitorRunsViewed = events.filter((e) => e.event === 'Monitor_Run_Viewed');
+    const monitorRunsFailed = monitorRunsViewed.filter((e) =>
+      ['failed', 'error'].includes(String(e.properties.run_status ?? ''))
+    ).length;
+
     const rate = (fail: number, total: number) => (total > 0 ? fail / total : 0);
 
     const kpis = {
       searchFailRate: rate(searchFailed, searchOk + searchFailed),
       artifactFailRate: rate(artifactFailed, artifactCreated + artifactFailed),
       imageFailRate: rate(imgFailed, imgCompleted + imgFailed),
+      // Of viewed runs only — see RELIABILITY_EVENTS comment.
+      monitorRunFailRate: rate(monitorRunsFailed, monitorRunsViewed.length),
+      monitorRunsViewed: monitorRunsViewed.length,
       purchaseFailures: purchaseFailed,
       searchFailed,
       artifactFailed,

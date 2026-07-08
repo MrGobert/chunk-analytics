@@ -232,6 +232,7 @@ export default function SystemHealthPage() {
                 <div className="card-animate"><StatCard title="Search Failure Rate" value={reliability.kpis.searchFailRate} format="percentage" invertTrend icon={<Search className="w-5 h-5" />} /></div>
                 <div className="card-animate"><StatCard title="Artifact Failure Rate" value={reliability.kpis.artifactFailRate} format="percentage" invertTrend icon={<Sparkles className="w-5 h-5" />} /></div>
                 <div className="card-animate"><StatCard title="Image Gen Failure Rate" value={reliability.kpis.imageFailRate} format="percentage" invertTrend icon={<Sparkles className="w-5 h-5" />} /></div>
+                <div className="card-animate"><StatCard title="Automation Run Failure Rate" value={reliability.kpis.monitorRunFailRate} format="percentage" subtitle="of viewed runs" invertTrend icon={<Sparkles className="w-5 h-5" />} /></div>
                 <div className="card-animate"><StatCard title="Purchase Failures" value={reliability.kpis.purchaseFailures} icon={<CreditCard className="w-5 h-5" />} /></div>
               </div>
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

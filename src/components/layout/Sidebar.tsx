@@ -28,20 +28,21 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 
-// Map sidebar href to the API endpoint each page fetches (for prefetching)
-const ROUTE_TO_ENDPOINT: Record<string, string> = {
-  '/': '/api/metrics/pulse',
-  '/revenue': '/api/rc/revenue-summary',
-  '/conversion': '/api/metrics/monetization',
-  '/customers': '/api/rc/churn-intelligence',
-  '/acquisition': '/api/metrics/acquisition',
-  '/activation': '/api/metrics/activation',
-  '/retention': '/api/metrics/retention-cohorts',
-  '/engagement': '/api/metrics/users',
-  '/features': '/api/metrics/feature-overview',
-  '/capture-monitors': '/api/metrics/capture-monitors',
-  '/outreach': '/api/metrics/emails',
-  '/health': '/api/sentry/stats',
+// Map sidebar href to the API endpoint(s) each page fetches first
+// (for prefetching) — the page's primary data source(s), not every call.
+const ROUTE_TO_ENDPOINTS: Record<string, string[]> = {
+  '/': ['/api/metrics/pulse'],
+  '/revenue': ['/api/rc/revenue-summary'],
+  '/conversion': ['/api/metrics/monetization'],
+  '/customers': ['/api/rc/customer-health', '/api/rc/churn-intelligence'],
+  '/acquisition': ['/api/metrics/acquisition'],
+  '/activation': ['/api/metrics/activation'],
+  '/retention': ['/api/metrics/retention-cohorts'],
+  '/engagement': ['/api/metrics/users', '/api/metrics/advanced'],
+  '/features': ['/api/metrics/feature-overview', '/api/metrics/searches'],
+  '/capture-monitors': ['/api/metrics/capture-monitors'],
+  '/outreach': ['/api/metrics/emails'],
+  '/health': ['/api/sentry/stats'],
 };
 
 interface NavItem {
@@ -140,15 +141,12 @@ export default function Sidebar() {
 
       for (const idx of adjacentIndices) {
         const route = allNavItems[idx].href;
-        const endpoint = ROUTE_TO_ENDPOINT[route];
-        if (!endpoint) continue;
-
-        if (route === '/outreach') {
-          prefetch(endpoint, { days: '30' });
-        } else if (endpoint.startsWith('/api/rc/')) {
-          prefetch(endpoint, { days: '30' });
-        } else {
-          prefetch(endpoint, { range: '30d', platform: 'all', userType: 'all' });
+        for (const endpoint of ROUTE_TO_ENDPOINTS[route] ?? []) {
+          if (route === '/outreach' || endpoint.startsWith('/api/rc/')) {
+            prefetch(endpoint, { days: '30' });
+          } else {
+            prefetch(endpoint, { range: '30d', platform: 'all', userType: 'all' });
+          }
         }
       }
     }, 2000);

@@ -78,19 +78,23 @@ export function categorizeUsers(events: MixpanelEvent[]): Map<string, 'visitor' 
     if (
       SUBSCRIBER_EVENTS.includes(event.event) ||
       event.properties.$plan === 'Subscribed' ||
-      event.properties.subscription_status === 'active'
+      event.properties.subscription_status === 'active' ||
+      event.properties.is_pro === true
     ) {
       userCategories.set(userId, 'subscriber');
       continue;
     }
 
-    // Check for authenticated user indicators (if not already subscriber)
+    // Check for authenticated user indicators (if not already subscriber).
+    // Server-side events (cerebral) only fire for authenticated Firebase
+    // uids, so their presence alone is auth evidence.
     if (currentCategory !== 'subscriber') {
       if (
         AUTH_EVENTS.includes(event.event) ||
         event.properties.$user_id !== undefined ||
         event.properties.user_id !== undefined ||
-        event.properties.is_authenticated === true
+        event.properties.is_authenticated === true ||
+        isServerEvent(event.properties)
       ) {
         userCategories.set(userId, 'authenticated');
         continue;
@@ -417,6 +421,60 @@ export function filterEventsByType(
   return events.filter((e) => eventTypes.includes(normalizeEventName(e.event)));
 }
 
+// ============================================
+// Server-Side Event Platform Attribution
+// ============================================
+
+/**
+ * Server-emitted events (cerebral's python Mixpanel lib, e.g.
+ * inbox_capture_created) carry platform: 'server' / mp_lib: 'python'
+ * instead of a client platform.
+ */
+export function isServerEvent(props: MixpanelEvent['properties']): boolean {
+  return props.platform === 'server' || props.mp_lib === 'python';
+}
+
+/**
+ * Map a server-side capture's `source` prop back to the client platform that
+ * originated it. `email` and `app_intent` are deliberately unmapped —
+ * app_intent fires from iOS AND macOS, email from anywhere — so those
+ * captures only appear under the "all" platform filter.
+ */
+const SERVER_SOURCE_PLATFORM: Record<string, string> = {
+  web: 'web',
+  clipper: 'web', // Chrome extension = browser
+  share_ios: 'iOS',
+  share_mac: 'macOS',
+};
+
+export function serverEventPlatform(
+  props: MixpanelEvent['properties']
+): string | null {
+  return SERVER_SOURCE_PLATFORM[String(props.source ?? '')] ?? null;
+}
+
+/**
+ * Display platform for an event, folding server-side captures back to the
+ * originating client platform via their `source` prop.
+ */
+export function platformOf(e: MixpanelEvent): string {
+  const props = e.properties;
+  if (isServerEvent(props)) {
+    const derived = serverEventPlatform(props);
+    if (derived === 'web') return 'Web';
+    return derived ?? 'Other';
+  }
+  const os = (props.$os as string) || '';
+  const mpLib = (props.mp_lib as string) || '';
+  const platform = (props.platform as string) || '';
+  if (mpLib === 'web' || platform === 'web') return 'Web';
+  if (os === 'macOS' || platform === 'macOS') return 'macOS';
+  if (os === 'iPadOS') return 'iPadOS';
+  if (os === 'iOS' || platform === 'iOS') return 'iOS';
+  if (os === 'visionOS' || platform === 'visionOS') return 'visionOS';
+  return 'Other';
+}
+
 export function filterByPlatform(
   events: MixpanelEvent[],
   platform: string
@@ -425,6 +483,16 @@ export function filterByPlatform(
 
   return events.filter((e) => {
     const props = e.properties;
+
+    // Server-side events (captures) are attributed to the client platform
+    // that originated them; unattributable sources (email, app_intent) are
+    // excluded from any single-platform view.
+    if (isServerEvent(props)) {
+      const derived = serverEventPlatform(props);
+      if (platform === 'iOS') return derived === 'iOS';
+      return derived === platform;
+    }
+
     // Check various platform indicators
     const eventPlatform = props.platform || props.$os || '';
     const mpLib = props.mp_lib || '';
