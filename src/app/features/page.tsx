@@ -25,6 +25,7 @@ import type {
   ArtifactsMetrics,
   SharingMetrics,
   ConnectorsMetrics,
+  ConnectionsMetrics,
 } from '@/types/mixpanel';
 
 // ─── Color palette ──────────────────────────────────────────────────────────
@@ -418,6 +419,130 @@ function SharingSection({ dateRange, platform, userType }: FilterProps) {
 
 // ─── Connectors Tab ─────────────────────────────────────────────────────────
 
+function ConnectionsSection({ dateRange, platform, userType }: FilterProps) {
+  const { data: metrics, isLoading } = useAnalytics<ConnectionsMetrics>(
+    '/api/metrics/connections',
+    { range: dateRange, platform, userType },
+  );
+
+  if (isLoading || !metrics) return <TabSkeleton />;
+
+  return (
+    <div className="mt-8">
+      {metrics.dataUnavailable && <DataUnavailableBanner />}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+        <StatCard
+          title="Items Previewed"
+          value={metrics.itemsPreviewed}
+          subtitle="Connection cards opened for preview"
+        />
+        <StatCard
+          title="Pins Added"
+          value={metrics.pinsAdded}
+          subtitle={`${metrics.pinsToggled} pin toggles total`}
+        />
+        <StatCard
+          title="References Sent"
+          value={metrics.referencesSentItems}
+          subtitle={`${metrics.referencesSentEvents} sends carried pinned context`}
+        />
+        <StatCard
+          title="Active Users"
+          value={metrics.uniqueUsers}
+          subtitle="Unique users engaging Connections"
+        />
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+        <StatCard title="Mentions Used" value={metrics.mentionsUsed} subtitle="@-mention pinned an object" />
+        <StatCard title="Card Actions" value={metrics.actionsUsed} subtitle="Open / collection / note / inbox" />
+        <StatCard
+          title="Collections Created"
+          value={metrics.collectionsCreated}
+          subtitle={`${metrics.collectionsWithConversation} included the conversation`}
+        />
+        <StatCard
+          title="Recall Accept Rate"
+          value={metrics.recallAcceptRate}
+          format="percentage"
+          subtitle={`${metrics.recallShown} shown · ${metrics.recallAccepted} accepted`}
+        />
+      </div>
+
+      <div className="grid grid-cols-1 gap-6 mb-8">
+        <ChartCard
+          title="Ambient Recall Funnel"
+          subtitle="Suggestions shown → accepted (pinned)"
+        >
+          {metrics.recallShown > 0 ? (
+            <FunnelChart data={metrics.recallFunnel} />
+          ) : (
+            <div className="empty-state h-64">No recall data yet</div>
+          )}
+        </ChartCard>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+        <ChartCard title="What Users Connect" subtitle="Engagements by object type">
+          {metrics.objectTypeMix.length > 0 ? (
+            <PieChart data={metrics.objectTypeMix} colors={[...chart.series]} />
+          ) : (
+            <div className="empty-state h-64">No object-type data yet</div>
+          )}
+        </ChartCard>
+        <ChartCard title="Card Actions" subtitle="Which actions run from a connection card">
+          {metrics.actionMix.length > 0 ? (
+            <BarChart
+              data={metrics.actionMix}
+              xKey="name"
+              yKey="value"
+              horizontal
+              color={chart.series[4]}
+            />
+          ) : (
+            <div className="empty-state h-64">No action data yet</div>
+          )}
+        </ChartCard>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+        <ChartCard title="Pin Outcomes" subtitle="Pinned vs unpinned">
+          {metrics.pinOutcomes.length > 0 ? (
+            <PieChart data={metrics.pinOutcomes} colors={[chart.sage, chart.emberDeep]} />
+          ) : (
+            <div className="empty-state h-64">No pin data yet</div>
+          )}
+        </ChartCard>
+        <ChartCard title="Web vs Apple" subtitle="Connections engagements by platform">
+          {metrics.connectionsByPlatform.length > 0 ? (
+            <PieChart data={metrics.connectionsByPlatform} colors={[...chart.series]} />
+          ) : (
+            <div className="empty-state h-64">No platform data yet</div>
+          )}
+        </ChartCard>
+      </div>
+
+      <div className="grid grid-cols-1 gap-6">
+        <ChartCard title="Daily Activity" subtitle="Engagements and previews per day">
+          {metrics.dailyTrend.some((d) => d.engagements > 0 || d.previews > 0) ? (
+            <LineChart
+              data={metrics.dailyTrend}
+              xKey="date"
+              lines={[
+                { key: 'engagements', color: chart.sage, name: 'Engagements' },
+                { key: 'previews', color: chart.series[0], name: 'Previews' },
+              ]}
+              showLegend
+            />
+          ) : (
+            <div className="empty-state h-64">No activity yet</div>
+          )}
+        </ChartCard>
+      </div>
+    </div>
+  );
+}
+
 function ConnectorsSection({ dateRange, platform, userType }: FilterProps) {
   const { data: metrics, isLoading } = useAnalytics<ConnectorsMetrics>(
     '/api/metrics/connectors',
@@ -601,6 +726,8 @@ function TabContent({ activeTab, dateRange, platform, userType }: FilterProps & 
       return <ArtifactsSection dateRange={dateRange} platform={platform} userType={userType} />;
     case 'sharing':
       return <SharingSection dateRange={dateRange} platform={platform} userType={userType} />;
+    case 'connections':
+      return <ConnectionsSection dateRange={dateRange} platform={platform} userType={userType} />;
     case 'connectors':
       return <ConnectorsSection dateRange={dateRange} platform={platform} userType={userType} />;
     default:

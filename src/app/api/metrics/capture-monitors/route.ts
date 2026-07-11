@@ -7,17 +7,39 @@ import {
   fetchMixpanelEventsFiltered,
   filterByPlatform,
   getLastUpdated,
+  normalizeEventName,
   platformOf,
 } from '@/lib/mixpanel';
 import { getDateRange, formatDate } from '@/lib/utils';
 import { buildFunnel } from '@/lib/funnel';
 
 // inbox_capture_created is emitted server-side by cerebral for EVERY capture
-// source; the Monitor_* + inbox triage events are client-side (web + Apple).
-// Event names are frozen as Monitor_* / Automation_* (shipped to production) even
-// though the feature is now surfaced as "Automations" in the UI.
+// source; the Automation_* + inbox triage events are client-side (web + Apple).
+// The feature was renamed from "Monitors" to "Automations" and the events
+// rebased to Automation_*. Legacy Monitor_* names are kept in the FETCH list so
+// older Apple clients (not yet updated) are still pulled from the export API;
+// normalizeEventName() folds them into the new Automation_* names before the
+// switch below, so old + new roll up together.
 const CAPTURE_MONITOR_EVENTS = [
-  // Automation lifecycle
+  // Automation lifecycle (current names)
+  'Automation_Created',
+  'Automation_Edited',
+  'Automation_Paused',
+  'Automation_Resumed',
+  'Automation_Deleted',
+  'Automation_Run_Now',
+  'Automation_Run_Viewed',
+  // Automation friction + funnel
+  'Automation_Limit_Hit',
+  'Automation_Paywall_Shown',
+  'Automation_Suggestion_Shown',
+  'Automation_Suggestion_Accepted',
+  'Automation_Suggestion_Dismissed',
+  'Automation_Kind_Selected',
+  'Automation_Recipe_Selected',
+  'Automation_Plan_Previewed',
+  // Legacy Monitor_* names — still emitted by un-updated Apple clients; folded
+  // into the Automation_* names via normalizeEventName().
   'Monitor_Created',
   'Monitor_Edited',
   'Monitor_Paused',
@@ -25,15 +47,11 @@ const CAPTURE_MONITOR_EVENTS = [
   'Monitor_Deleted',
   'Monitor_RunNow',
   'Monitor_Run_Viewed',
-  // Automation friction + funnel
   'Monitor_Limit_Hit',
   'Monitor_Paywall_Shown',
   'Monitor_Suggestion_Shown',
   'Monitor_Suggestion_Accepted',
   'Monitor_Suggestion_Dismissed',
-  'Automation_Kind_Selected',
-  'Automation_Recipe_Selected',
-  'Automation_Plan_Previewed',
   // Capture + inbox triage
   'inbox_capture_created',
   'inbox_item_accepted',
@@ -112,8 +130,10 @@ export async function GET(request: NextRequest) {
     for (const e of events) {
       const t = e.properties.time as number;
       const p = e.properties as Record<string, unknown>;
-      switch (e.event) {
-        case 'Monitor_Created': {
+      // Fold legacy Monitor_* names into the canonical Automation_* names so old
+      // (un-updated) Apple clients and new clients are counted together.
+      switch (normalizeEventName(e.event)) {
+        case 'Automation_Created': {
           monitorsCreated++;
           bump(kindMix, String(p.kind ?? 'unknown'));
           bump(cadence, String(p.cadence ?? 'unknown'));
@@ -124,39 +144,39 @@ export async function GET(request: NextRequest) {
           ensureDay(dayOf(t)).monitors++;
           break;
         }
-        case 'Monitor_Edited':
+        case 'Automation_Edited':
           editedCount++;
           break;
-        case 'Monitor_Paused':
+        case 'Automation_Paused':
           pausedCount++;
           break;
-        case 'Monitor_Resumed':
+        case 'Automation_Resumed':
           resumedCount++;
           break;
-        case 'Monitor_Deleted':
+        case 'Automation_Deleted':
           deletedCount++;
           runsBeforeDelete += Number(p.run_count ?? 0);
           break;
-        case 'Monitor_RunNow':
+        case 'Automation_Run_Now':
           runNowCount++;
           break;
-        case 'Monitor_Run_Viewed':
+        case 'Automation_Run_Viewed':
           runsViewed++;
           bump(runStatusMix, String(p.run_status ?? 'unknown'));
           break;
-        case 'Monitor_Limit_Hit':
+        case 'Automation_Limit_Hit':
           limitHits++;
           break;
-        case 'Monitor_Paywall_Shown':
+        case 'Automation_Paywall_Shown':
           paywallsShown++;
           break;
-        case 'Monitor_Suggestion_Shown':
+        case 'Automation_Suggestion_Shown':
           suggestionShown++;
           break;
-        case 'Monitor_Suggestion_Accepted':
+        case 'Automation_Suggestion_Accepted':
           suggestionAccepted++;
           break;
-        case 'Monitor_Suggestion_Dismissed':
+        case 'Automation_Suggestion_Dismissed':
           suggestionDismissed++;
           break;
         case 'Automation_Kind_Selected':

@@ -31,6 +31,22 @@ const EVENT_NAME_MAP: Record<string, string> = {
   // Coach mark legacy names → canonical
   'collection_coach_mark_shown': 'Collection_Coach_Mark_Shown',
   'collection_coach_mark_tapped': 'Collection_Coach_Mark_Tapped',
+  // Automations (formerly "Monitors") — the feature was renamed and the event
+  // strings rebased to Automation_*. Older Apple clients (pre-rename builds that
+  // users haven't updated yet) still emit the legacy Monitor_* names, so alias
+  // them to the new canonical names to keep counts unified across app versions.
+  'Monitor_Created': 'Automation_Created',
+  'Monitor_Edited': 'Automation_Edited',
+  'Monitor_Paused': 'Automation_Paused',
+  'Monitor_Resumed': 'Automation_Resumed',
+  'Monitor_Deleted': 'Automation_Deleted',
+  'Monitor_RunNow': 'Automation_Run_Now',
+  'Monitor_Run_Viewed': 'Automation_Run_Viewed',
+  'Monitor_Limit_Hit': 'Automation_Limit_Hit',
+  'Monitor_Paywall_Shown': 'Automation_Paywall_Shown',
+  'Monitor_Suggestion_Shown': 'Automation_Suggestion_Shown',
+  'Monitor_Suggestion_Accepted': 'Automation_Suggestion_Accepted',
+  'Monitor_Suggestion_Dismissed': 'Automation_Suggestion_Dismissed',
 };
 
 /**

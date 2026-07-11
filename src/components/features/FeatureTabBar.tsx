@@ -1,6 +1,6 @@
 'use client';
 
-import { Search, FileText, StickyNote, FolderOpen, Sparkles, Share2, Plug } from 'lucide-react';
+import { Search, FileText, StickyNote, FolderOpen, Sparkles, Share2, Plug, Link2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { LucideIcon } from 'lucide-react';
 
@@ -17,6 +17,7 @@ export const FEATURE_TABS: FeatureTab[] = [
   { id: 'collections', label: 'Collections', icon: FolderOpen },
   { id: 'artifacts', label: 'Artifacts', icon: Sparkles },
   { id: 'sharing', label: 'Sharing', icon: Share2 },
+  { id: 'connections', label: 'Connections', icon: Link2 },
   { id: 'connectors', label: 'Connectors', icon: Plug },
 ];
 

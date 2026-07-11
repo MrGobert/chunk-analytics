@@ -21,8 +21,8 @@ import { normalizeEventName } from '@/lib/mixpanel';
  *   Artifact_Onboarding_Viewed/Completed/Skipped, Research_History_Viewed,
  *   Research_Settings_Changed, Research_Report_Filtered,
  *   Memory_Management_Viewed, Connector_Settings_Viewed,
- *   Monitor_Limit_Hit, Monitor_Paywall_Shown,
- *   Monitor_Suggestion_Shown/Accepted/Dismissed, Automation_Kind_Selected,
+ *   Automation_Limit_Hit, Automation_Paywall_Shown,
+ *   Automation_Suggestion_Shown/Accepted/Dismissed, Automation_Kind_Selected,
  *   Automation_Recipe_Selected, Automation_Plan_Previewed, inbox_viewed,
  *   inbox_clipper_token_generated/revoked,
  *   inbox_email_alias_generated/disabled (friction/paywall/composer/passive
@@ -57,14 +57,25 @@ export const FEATURE_CATEGORIES: Record<string, string[]> = {
     'Gamma_Generation_Completed',
     'Gamma_Generation_Failed',
   ],
+  // The in-chat "Connections" sidebar (NOT the Connectors OAuth feature above).
+  // Genuine-usage events only — passive Preview_Opened / Recall_Shown /
+  // Recall_Dismissed stay out of the registry and live in the detail route.
+  Connections: [
+    'Connections_Pin_Toggled',
+    'Connections_Action_Used',
+    'Connections_Mention_Used',
+    'Connections_Collection_Created',
+    'Connections_References_Sent',
+    'Connections_Recall_Accepted',
+  ],
   Automations: [
-    'Monitor_Created',
-    'Monitor_Edited',
-    'Monitor_Paused',
-    'Monitor_Resumed',
-    'Monitor_Deleted',
-    'Monitor_RunNow',
-    'Monitor_Run_Viewed',
+    'Automation_Created',
+    'Automation_Edited',
+    'Automation_Paused',
+    'Automation_Resumed',
+    'Automation_Deleted',
+    'Automation_Run_Now',
+    'Automation_Run_Viewed',
   ],
   Capture: [
     'inbox_capture_created',
@@ -92,7 +103,7 @@ export function categorizeEvent(eventName: string): string | null {
 
 /**
  * The "key creator actions" that define an Active Creator / activation.
- * Monitor_Created + inbox_capture_created added July 2026 — expect a
+ * Automation_Created + inbox_capture_created added July 2026 — expect a
  * step-change in Weekly Active Creators / activation rate from that date.
  */
 export const KEY_ACTION_EVENTS = [
@@ -101,6 +112,6 @@ export const KEY_ACTION_EVENTS = [
   'Artifact_Created',
   'Research_Report_Initiated',
   'Collection_Created',
-  'Monitor_Created',
+  'Automation_Created',
   'inbox_capture_created',
 ];

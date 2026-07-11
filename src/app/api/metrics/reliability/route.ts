@@ -18,9 +18,11 @@ const RELIABILITY_EVENTS = [
   'Purchase_Failed',
   'Error_Encountered',
   'Connector_Status_Degraded',
-  // Automation runs have no server-side failure event yet; Monitor_Run_Viewed
+  // Automation runs have no server-side failure event yet; Automation_Run_Viewed
   // carries run_status, so failure rate is measured over VIEWED runs only
   // (biased proxy — replace once cerebral emits a run-completion event).
+  // Legacy Monitor_Run_Viewed kept for un-updated Apple clients; normalized below.
+  'Automation_Run_Viewed',
   'Monitor_Run_Viewed',
 ];
 
@@ -46,7 +48,7 @@ export async function GET(request: NextRequest) {
     const imgFailed = count('Image_Generation_Failed');
     const purchaseFailed = count('Purchase_Failed');
 
-    const monitorRunsViewed = events.filter((e) => e.event === 'Monitor_Run_Viewed');
+    const monitorRunsViewed = events.filter((e) => normalizeEventName(e.event) === 'Automation_Run_Viewed');
     const monitorRunsFailed = monitorRunsViewed.filter((e) =>
       ['failed', 'error'].includes(String(e.properties.run_status ?? ''))
     ).length;

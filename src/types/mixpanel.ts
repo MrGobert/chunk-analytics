@@ -325,6 +325,37 @@ export interface ConnectorsMetrics {
   lastUpdated: string;
 }
 
+export interface ConnectionsMetrics {
+  itemsPreviewed: number;
+  pinsToggled: number;
+  pinsAdded: number;
+  pinsRemoved: number;
+  actionsUsed: number;
+  mentionsUsed: number;
+  referencesSentEvents: number;
+  referencesSentItems: number;
+  collectionsCreated: number;
+  collectionItems: number;
+  collectionsWithConversation: number;
+  recallShown: number;
+  recallAccepted: number;
+  recallDismissed: number;
+  recallItemsShown: number;
+  recallItemsAccepted: number;
+  recallAcceptRate: number;
+  uniqueUsers: number;
+  actionMix: { name: string; value: number }[];
+  objectTypeMix: { name: string; value: number }[];
+  pinOutcomes: { name: string; value: number }[];
+  connectionsByPlatform: { name: string; value: number }[];
+  recallFunnel: FunnelStep[];
+  dailyTrend: { date: string; engagements: number; previews: number }[];
+  // True only on a genuine Mixpanel fetch failure (no fresh data and no stale
+  // cache) — lets the UI show "data unavailable" instead of misleading zeros.
+  dataUnavailable?: boolean;
+  lastUpdated: string;
+}
+
 export interface CollectionsMetrics {
   totalCreated: number;
   totalViewed: number;
@@ -684,7 +715,7 @@ export interface ReliabilityMetrics {
     searchFailRate: number;
     artifactFailRate: number;
     imageFailRate: number;
-    /** Failure rate of VIEWED automation runs (Monitor_Run_Viewed proxy). */
+    /** Failure rate of VIEWED automation runs (Automation_Run_Viewed proxy). */
     monitorRunFailRate: number;
     monitorRunsViewed: number;
     purchaseFailures: number;

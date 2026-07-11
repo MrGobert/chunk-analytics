@@ -66,7 +66,7 @@ BRAND = {
     "web_url": "https://chunkapp.com",
     "notes_url": "https://chunkapp.com/features/notes",
     "collections_url": "https://chunkapp.com/features/collections",
-    "monitors_url": "https://chunkapp.com/features/monitors",
+    "monitors_url": "https://chunkapp.com/features/automations",
     "guide_url": "https://chunkapp.com/help",
 }
 
@@ -548,7 +548,7 @@ def get_welcome_email(user_name: str = "there") -> tuple[str, str, str]:
          "Turn audio lectures, podcasts, YouTube videos, and PDFs into searchable transcripts, study guides, and more."),
         (BRAND["color_notes"], "NOTES", "📝", "Connected Notes + Graph",
          "Wiki-link your ideas with [[brackets]] and watch a living knowledge graph reveal how they connect."),
-        (BRAND["color_urls"], "MONITORS", "📡", "Research Monitors",
+        (BRAND["color_urls"], "AUTOMATIONS", "📡", "Automations",
          "Research on autopilot. Standing agents re-run your query on a schedule and deliver a cited what's-new digest."),
         (BRAND["accent_blue"], "CAPTURE", "📥", "Share to Chunk",
          "Save anything from anywhere — the share sheet on iPhone, iPad & Mac, the browser clipper, or forward any email. AI files it in your Inbox."),
@@ -609,7 +609,7 @@ def get_welcome_email(user_name: str = "there") -> tuple[str, str, str]:
     return (
         subject,
         html,
-        f"Welcome to Chunk! Your AI research workspace is ready. Every top AI model, connected notes, collections, artifacts, research monitors, and Share to Chunk capture — all in one app. Get started: {BRAND['login_url']}",
+        f"Welcome to Chunk! Your AI research workspace is ready. Every top AI model, connected notes, collections, artifacts, Automations, and Share to Chunk capture — all in one app. Get started: {BRAND['login_url']}",
     )
 
 
@@ -627,7 +627,7 @@ def get_trial_started_email(user_name: str = "there") -> tuple[str, str, str]:
     {_feature_card("🔬", "Deep Research", "Ask any complex question — get a comprehensive, multi-source report with citations. Hours of research, compressed into minutes.", BRAND['color_reports'], "RESEARCH MODE")}
     {_feature_card("📚", "Research in Collections", "Gather notes, documents, URLs, and past chats into one Collection — then run AI research across all of it. Your sources, one workspace.", BRAND['color_documents'], "COLLECTIONS")}
     {_feature_card("📝", "Connected Notes", "Wiki-link your ideas with [[brackets]]. Watch your knowledge graph grow. AI writing tools help you think — not think for you.", BRAND['color_notes'], "NOTES")}
-    {_feature_card("📡", "Research Monitors", "Put research on autopilot — run up to 5 standing Monitors on a daily cadence. Each run diffs against the last and emails you a cited what's-new digest.", BRAND['color_urls'], "MONITORS")}
+    {_feature_card("📡", "Automations", "Put research on autopilot — run up to 5 standing Automations on a daily cadence. Each run diffs against the last and emails you a cited what's-new digest.", BRAND['color_urls'], "AUTOMATIONS")}
     {_feature_card("🧠", "Every AI Model", "GPT-5, Claude, Gemini — switch models per conversation. The right tool for every task, one subscription.", BRAND['color_conversations'], "MULTI-MODEL")}
     <p style="margin:20px 0 0 0;font-family:{FONT_SANS};font-size:16px;color:{BRAND['text_primary']};line-height:1.6" class="text-dark">
         <strong>Start here:</strong> Create a Collection, drop in a few sources, and ask Chunk to research across them. That's the moment it clicks.
@@ -670,7 +670,7 @@ def get_trial_ending_email(
     <p style="margin:0;font-family:{FONT_MONO};font-size:13px;color:{BRAND['text_inverse']};line-height:2.2">
         <span style="color:{BRAND['color_reports']}">✕</span>&nbsp; Deep Research reports with citations<br>
         <span style="color:{BRAND['color_documents']}">✕</span>&nbsp; Research in Collections across all your sources<br>
-        <span style="color:#A9C8A4">✕</span>&nbsp; Daily-cadence research Monitors (5 active)<br>
+        <span style="color:#A9C8A4">✕</span>&nbsp; Daily-cadence Automations (5 active)<br>
         <span style="color:{BRAND['primary_light']}">✕</span>&nbsp; AI-powered writing tools in Notes<br>
         <span style="color:{BRAND['signal_green']}">✕</span>&nbsp; GPT-5, Claude, Gemini model access<br>
         <span style="color:{BRAND['text_inverse']}">✕</span>&nbsp; Knowledge graph visualization
@@ -761,7 +761,7 @@ def get_winback_7day_email(user_name: str = "there") -> tuple[str, str, str]:
     {_serif_statement("One app. Every model. All your research, connected.", "connected.")}
     {_feature_card("📚", "Research in Collections", "The feature that turns Chunk from a chat app into a research powerhouse. Gather all your sources, then synthesize across everything at once.", BRAND['color_documents'])}
     {_feature_card("📝", "Connected Notes + Knowledge Graph", "Wiki-links, backlinks, cluster detection — your ideas form a living map of connections that grows with you.", BRAND['color_notes'])}
-    {_feature_card("📡", "Research Monitors", "New since you left: standing research agents that re-run your query on a schedule and email you a cited digest of what changed.", BRAND['color_urls'], "NEW")}
+    {_feature_card("📡", "Automations", "New since you left: standing research agents that re-run your query on a schedule and email you a cited digest of what changed.", BRAND['color_urls'], "NEW")}
     {_gradient_banner(
         "Come Back to Chunk",
         "All AI models, one research workspace — just <strong style='color:#FF6A42'>$5.83/month</strong>",
@@ -797,7 +797,7 @@ def get_winback_30day_email(user_name: str = "there") -> tuple[str, str, str]:
     <p style="margin:0 0 24px 0;font-family:{FONT_SANS};font-size:16px;color:{BRAND['text_primary']};line-height:1.6" class="text-dark">
         It's been a month since you left Chunk, and we've been building. Here's what's new:
     </p>
-    {_feature_card("📡", "Research Monitors", "Standing research agents that re-run your query on a schedule, spot what changed, and deliver a cited what's-new digest — every report filed into your knowledge base.", BRAND['color_urls'], "NEW")}
+    {_feature_card("📡", "Automations", "Standing research agents that re-run your query on a schedule, spot what changed, and deliver a cited what's-new digest — every report filed into your knowledge base.", BRAND['color_urls'], "NEW")}
     {_feature_card("📥", "Share to Chunk", "Save anything from anywhere — the share sheet on iPhone, iPad & Mac, the Chunk Clipper in your browser, or forward any email to your private @in.chunkapp.com address. AI titles and files every capture.", BRAND['color_documents'], "NEW")}
     {_feature_card("🧠", "Memory 2.0", "Chunk now remembers you — your work, preferences, and goals — so every conversation starts smarter. Opt-in, encrypted, and fully editable.", BRAND['color_notes'], "NEW")}
     {_feature_card("⚡", "Smarter AI Models", "The latest GPT-5, Claude, and Gemini models — faster, more accurate, and more capable. Switch per conversation.", BRAND['color_reports'], "UPDATED")}
@@ -809,7 +809,7 @@ def get_winback_30day_email(user_name: str = "there") -> tuple[str, str, str]:
     """
 
     html = _base_email_template(
-        preheader="Research Monitors, Share to Chunk, Memory 2.0 — Chunk has changed since you left.",
+        preheader="Automations, Share to Chunk, Memory 2.0 — Chunk has changed since you left.",
         hero_title="A Lot Has Changed",
         hero_subtitle="Here's what you've been missing.",
         body_content=body,
@@ -822,7 +822,7 @@ def get_winback_30day_email(user_name: str = "there") -> tuple[str, str, str]:
     return (
         subject,
         html,
-        f"Chunk has new features: Research Monitors, Share to Chunk capture, Memory 2.0, and smarter models. Come see what's new: {BRAND['web_url']}",
+        f"Chunk has new features: Automations, Share to Chunk capture, Memory 2.0, and smarter models. Come see what's new: {BRAND['web_url']}",
     )
 
 
@@ -902,7 +902,7 @@ def get_monthly_recap_email(
         body_content=body,
         cta_text="Continue Researching",
         cta_url=BRAND["web_url"],
-        footer_tip="Set up a research Monitor — Chunk re-runs your query on a schedule and emails you a cited digest of what changed.",
+        footer_tip="Set up an Automation — Chunk re-runs your query on a schedule and emails you a cited digest of what changed.",
         hero_dark=True,
         hero_label="MONTHLY RECAP",
     )
@@ -1196,7 +1196,7 @@ def get_reengagement_14day_email(user_name: str = "there") -> tuple[str, str, st
     {_feature_card("📚", "Research in Collections", "Gather documents, notes, URLs, and chats into one workspace — then ask AI questions across all of it. Like having a research team that's read everything.", BRAND['color_documents'], "TRY THIS")}
     {_feature_card("📝", "Connected Notes + Knowledge Graph", "Write wiki-linked notes ([[like this]]) and watch a visual knowledge graph reveal how your ideas connect. Spot patterns, find gaps, build deeper understanding.", BRAND['color_notes'], "TRY THIS")}
     {_feature_card("🔬", "Deep Research Mode", "Ask any complex question and get a comprehensive report with sources. Multi-source synthesis in minutes, not hours.", BRAND['color_reports'], "TRY THIS")}
-    {_feature_card("📡", "Research Monitors", "Set a query once and let Chunk re-run it on a schedule — you get a cited digest of what changed, without lifting a finger.", BRAND['color_urls'], "TRY THIS")}
+    {_feature_card("📡", "Automations", "Set a query once and let Chunk re-run it on a schedule — you get a cited digest of what changed, without lifting a finger.", BRAND['color_urls'], "TRY THIS")}
     {_feature_card("📥", "Share to Chunk", "Share from any app on iPhone, iPad & Mac, clip pages in your browser, or forward emails to your private Chunk address — everything lands in your Inbox, titled and filed by AI.", BRAND['color_documents'], "TRY THIS")}
 
     {_serif_statement("Your workspace is ready and waiting.", "ready and waiting.")}
@@ -1443,7 +1443,7 @@ def get_signup_no_trial_nudge_email(user_name: str = "there") -> tuple[str, str,
     {_protocol_step("01", "Research in Collections", "Gather all your sources in one workspace and chat with AI that's read everything. Documents, notes, URLs — cross-referenced and searchable.")}
     {_protocol_step("02", "Connected Notes + Knowledge Graph", "Wiki-linked notes that form a living visual map of your ideas. Cluster detection, orphan surfacing, backlinks — all automatic.")}
     {_protocol_step("03", "Deep Research + Every AI Model", "Comprehensive research reports with citations, plus GPT-5, Claude, and Gemini — all in one app.")}
-    {_protocol_step("04", "Research Monitors", "Standing agents that re-run your research on a schedule and email you a cited digest of what changed.")}
+    {_protocol_step("04", "Automations", "Standing agents that re-run your research on a schedule and email you a cited digest of what changed.")}
 
     <!-- Trial CTA Card -->
     <table width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation" style="margin:24px 0 0 0;background-color:#E2EDDF;border-radius:16px;border-left:6px solid {BRAND['signal_green']};overflow:hidden" class="green-card">

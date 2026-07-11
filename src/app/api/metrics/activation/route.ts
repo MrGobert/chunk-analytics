@@ -19,7 +19,7 @@ const SIGNUP = ['Signup_Completed', 'SignUp', 'Account Created'];
 const KEY_ACTIONS = new Set<string>(KEY_ACTION_EVENTS);
 // Raw event names (incl. legacy aliases) the filtered export must request so all
 // key actions are actually pulled from Mixpanel.
-const KEY_ACTION_FETCH = ['Search_Performed', 'Search Performed', 'Search', 'Note_Created', 'Artifact_Created', 'Research_Report_Initiated', 'Collection_Created', 'Monitor_Created', 'inbox_capture_created'];
+const KEY_ACTION_FETCH = ['Search_Performed', 'Search Performed', 'Search', 'Note_Created', 'Artifact_Created', 'Research_Report_Initiated', 'Collection_Created', 'Automation_Created', 'Monitor_Created', 'inbox_capture_created'];
 const SESSION = ['App_Session_Started', '$ae_session'];
 
 const ACTIVATION_EVENTS = [
@@ -39,7 +39,7 @@ const ACTION_LABEL: Record<string, string> = {
   Artifact_Created: 'Artifact',
   Research_Report_Initiated: 'Research',
   Collection_Created: 'Collection',
-  Monitor_Created: 'Automation',
+  Automation_Created: 'Automation',
   inbox_capture_created: 'Capture',
 };
 
