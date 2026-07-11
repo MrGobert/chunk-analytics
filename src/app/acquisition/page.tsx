@@ -12,7 +12,7 @@ import DataTable from '@/components/charts/DataTable';
 import { SkeletonPage, SkeletonChartCard } from '@/components/ui/Skeleton';
 import { useAnalytics } from '@/hooks/useAnalytics';
 import { chart } from '@/lib/chartTheme';
-import { Rocket, Globe, Share2, Monitor, Smartphone, Laptop, MousePointerClick, FileText, UserPlus, Lock } from 'lucide-react';
+import { Rocket, Globe, Share2, Monitor, Smartphone, Tablet, Laptop, Glasses, MousePointerClick, FileText, UserPlus, Lock } from 'lucide-react';
 import type { AcquisitionFunnelMetrics, MarketingMetrics, AdvancedMetrics, ViralityMetrics } from '@/types/mixpanel';
 
 const VIEW_TABS = [
@@ -24,8 +24,10 @@ type ViewKey = (typeof VIEW_TABS)[number]['key'];
 
 const PLATFORM_TABS = [
   { key: 'web', label: 'Web', description: 'Marketing site', icon: Monitor },
-  { key: 'ios', label: 'iOS', description: 'iPhone / iPad / Vision Pro', icon: Smartphone },
-  { key: 'macOS', label: 'macOS', description: 'No onboarding', icon: Laptop },
+  { key: 'iOS', label: 'iOS', description: 'iPhone', icon: Smartphone },
+  { key: 'iPadOS', label: 'iPadOS', description: 'iPad', icon: Tablet },
+  { key: 'macOS', label: 'macOS', description: 'Mac', icon: Laptop },
+  { key: 'visionOS', label: 'visionOS', description: 'Vision Pro', icon: Glasses },
 ] as const;
 type PlatformKey = (typeof PLATFORM_TABS)[number]['key'];
 
@@ -118,7 +120,7 @@ export default function AcquisitionPage() {
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
             {metrics.statCards.map((card) => (
-              <StatCard key={card.label} title={card.label} value={card.value} format="percentage" icon={<Rocket className="w-5 h-5" />} />
+              <StatCard key={card.label} title={card.label} value={card.value} format={card.format ?? 'percentage'} icon={<Rocket className="w-5 h-5" />} />
             ))}
           </div>
 
@@ -134,31 +136,50 @@ export default function AcquisitionPage() {
             </ChartCard>
           </div>
 
-          {metrics.webOnboarding && (
+          {metrics.webPageAttribution && (
             <>
               <div className="mt-12 mb-8 border-t border-line pt-8">
-                <h2 className="font-display text-2xl text-ink">First-Run Onboarding</h2>
-                <p className="text-sm text-ink-soft mt-1">How new users engage with the onboarding flow</p>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-                <StatCard title="Onboarding Started" value={metrics.webOnboarding.started} format="number" />
-                <StatCard title="Completion Rate" value={metrics.webOnboarding.completionRate} format="percentage" />
-                <StatCard title="Skip Rate" value={metrics.webOnboarding.skipRate} format="percentage" invertTrend />
-                <StatCard title="Avg. Completion Time" value={metrics.webOnboarding.avgCompletionTime != null ? `${metrics.webOnboarding.avgCompletionTime}s` : '—'} format="text" />
+                <h2 className="font-display text-2xl text-ink">Signup Page Attribution</h2>
+                <p className="text-sm text-ink-soft mt-1">Which marketing page a visitor last viewed before creating an account</p>
               </div>
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <ChartCard title="User Intent Selection" subtitle="What users chose in onboarding step 1">
-                  {metrics.webOnboarding.intentDistribution.length > 0 ? (
-                    <BarChart data={metrics.webOnboarding.intentDistribution.map((d) => ({ ...d, intent: d.intent.charAt(0).toUpperCase() + d.intent.slice(1) }))} xKey="intent" yKey="count" horizontal />
-                  ) : <div className="empty-state h-64">No intent data yet</div>}
+                <ChartCard title="Signups by Source Page" subtitle="Last marketing page viewed before signup">
+                  {metrics.webPageAttribution.some((row) => row.signups > 0) ? (
+                    <BarChart data={metrics.webPageAttribution.filter((row) => row.signups > 0)} xKey="page" yKey="signups" horizontal />
+                  ) : <div className="empty-state h-64">Attribution begins with newly tracked signups</div>}
                 </ChartCard>
-                <ChartCard title="Skip Step Distribution" subtitle="Where users bail out of onboarding">
-                  {metrics.webOnboarding.skipStepDistribution.length > 0 ? <BarChart data={metrics.webOnboarding.skipStepDistribution} xKey="step" yKey="count" horizontal color={chart.emberDeep} /> : <div className="empty-state h-64">No skip data yet</div>}
+                <ChartCard title="Page Conversion" subtitle="Visits, signups, and resulting subscriptions">
+                  <DataTable
+                    data={metrics.webPageAttribution}
+                    columns={[
+                      { key: 'page', header: 'Marketing page' },
+                      { key: 'visits', header: 'Visits', numeric: true },
+                      { key: 'signups', header: 'Signups', numeric: true },
+                      { key: 'subscriptions', header: 'Subs', numeric: true },
+                    ]}
+                  />
                 </ChartCard>
               </div>
-              <div className="grid grid-cols-1 gap-6 mt-6">
-                <ChartCard title="Step-by-Step Progression" subtitle="How users progress through each onboarding step">
-                  {metrics.webOnboarding.stepCompletionFunnel.some((s) => s.count > 0) ? <FunnelChart data={metrics.webOnboarding.stepCompletionFunnel} /> : <div className="empty-state h-64">No step completion data yet</div>}
+            </>
+          )}
+
+          {metrics.appleOnboarding && (
+            <>
+              <div className="mt-12 mb-8 border-t border-line pt-8">
+                <h2 className="font-display text-2xl text-ink">Paper Onboarding Detail</h2>
+                <p className="text-sm text-ink-soft mt-1">Per-screen reach and explicit skip points on {PLATFORM_TABS.find((tab) => tab.key === platformGroup)?.label}</p>
+              </div>
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <ChartCard title="Screen Progression" subtitle="Unique users reaching each PaperOnboarding screen">
+                  {metrics.appleOnboarding.screenFunnel.some((step) => step.count > 0) ? <FunnelChart data={metrics.appleOnboarding.screenFunnel} /> : <div className="empty-state h-64">No PaperOnboarding events yet</div>}
+                </ChartCard>
+                <ChartCard title="Skip Points" subtitle="Screens where users explicitly skipped ahead">
+                  {metrics.appleOnboarding.skipPoints.length > 0 ? <BarChart data={metrics.appleOnboarding.skipPoints} xKey="screen" yKey="users" horizontal color={chart.emberDeep} /> : <div className="empty-state h-64">No skips recorded</div>}
+                </ChartCard>
+              </div>
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
+                <ChartCard title="Authentication Method" subtitle="Apple vs. email at the onboarding gate">
+                  {metrics.appleOnboarding.authMethods.length > 0 ? <BarChart data={metrics.appleOnboarding.authMethods} xKey="method" yKey="users" horizontal /> : <div className="empty-state h-64">No completed authentication events yet</div>}
                 </ChartCard>
               </div>
             </>

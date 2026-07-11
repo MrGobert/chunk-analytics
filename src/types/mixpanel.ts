@@ -64,27 +64,32 @@ export interface DailyDataPoint {
   [key: string]: string | number;
 }
 
-export interface WebOnboardingMetrics {
+export interface AppleOnboardingMetrics {
   started: number;
   completed: number;
   skipped: number;
   completionRate: number;
-  skipRate: number;
-  avgCompletionTime: number | null;
-  intentDistribution: { intent: string; count: number }[];
-  skipStepDistribution: { step: string; count: number }[];
-  stepCompletionFunnel: FunnelStep[];
+  screenFunnel: FunnelStep[];
+  skipPoints: { screen: string; users: number }[];
+  authMethods: { method: string; users: number }[];
 }
 
 export interface AcquisitionFunnelMetrics {
-  platform: 'web' | 'ios' | 'macOS';
+  platform: 'web' | 'iOS' | 'iPadOS' | 'macOS' | 'visionOS';
   subtitle: string;
   funnel: FunnelStep[];
-  statCards: { label: string; value: number }[];
+  statCards: { label: string; value: number; format?: 'number' | 'percentage' }[];
   dailyData: Record<string, string | number>[];
   dailyLines: { key: string; color: string; name: string }[];
-  webOnboarding?: WebOnboardingMetrics;
+  appleOnboarding?: AppleOnboardingMetrics;
   topPages?: { page: string; visits: number }[];
+  webPageAttribution?: {
+    page: string;
+    visits: number;
+    signups: number;
+    subscriptions: number;
+    signupRate: number;
+  }[];
   lastUpdated: string;
 }
 
