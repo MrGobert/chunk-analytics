@@ -9,11 +9,14 @@ interface NorthStarHeroProps {
   value: number;
   change: number | null;
   trend: { date: string; users: number }[];
+  rangeDays?: number;
 }
 
-export default function NorthStarHero({ value, change, trend }: NorthStarHeroProps) {
+export default function NorthStarHero({ value, change, trend, rangeDays = 7 }: NorthStarHeroProps) {
   const isNew = change === null;
   const up = (change ?? 0) >= 0;
+  const periodLabel = rangeDays === 1 ? 'today' : `in the last ${rangeDays} days`;
+  const comparisonLabel = rangeDays === 1 ? 'vs yesterday' : `vs prior ${rangeDays}d`;
 
   return (
     <div className="card-surface p-6 sm:p-8 relative overflow-hidden">
@@ -21,7 +24,9 @@ export default function NorthStarHero({ value, change, trend }: NorthStarHeroPro
         <div className="flex items-center justify-center w-8 h-8 rounded-chip bg-ember-tint text-ember-deep">
           <Sparkles className="w-4 h-4" />
         </div>
-        <span className="eyebrow text-ember-deep">North Star · Weekly Active Creators</span>
+        <span className="eyebrow text-ember-deep">
+          North Star · {rangeDays === 7 ? 'Weekly Active Creators' : 'Active Creators'}
+        </span>
       </div>
 
       <div className="flex flex-wrap items-end gap-4">
@@ -34,7 +39,7 @@ export default function NorthStarHero({ value, change, trend }: NorthStarHeroPro
               up ? 'bg-sage-tint text-sage-deep border-sage/30' : 'bg-ember-tint text-ember-deep border-ember/30'
             }`}
           >
-            {up ? '↑' : '↓'} {Math.abs(change ?? 0).toFixed(1)}% WoW
+            {up ? '↑' : '↓'} {Math.abs(change ?? 0).toFixed(1)}% {comparisonLabel}
           </span>
         )}
         {isNew && (
@@ -44,7 +49,7 @@ export default function NorthStarHero({ value, change, trend }: NorthStarHeroPro
 
       <p className="mt-3 text-sm text-ink-soft max-w-md">
         Unique people who searched, took notes, created an artifact, ran research, or built a
-        collection in the last 7 days — the heartbeat of the product.
+        collection {periodLabel} — the heartbeat of the product.
       </p>
 
       {/* Supporting daily-activity context (14-day DAU) — distinct from the WAC
@@ -65,11 +70,14 @@ export default function NorthStarHero({ value, change, trend }: NorthStarHeroPro
               stroke={chart.primary}
               strokeWidth={2}
               fill="url(#northStarSpark)"
+              dot={trend.length === 1 ? { fill: chart.primary, strokeWidth: 0, r: 3 } : false}
             />
           </AreaChart>
         </ResponsiveContainer>
       </div>
-      <p className="mt-1 text-xs font-mono text-ink-faint">Daily active users · last 14 days</p>
+      <p className="mt-1 text-xs font-mono text-ink-faint">
+        Daily active users · {rangeDays === 1 ? 'today' : `last ${rangeDays} days`}
+      </p>
     </div>
   );
 }

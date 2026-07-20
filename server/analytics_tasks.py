@@ -18,8 +18,9 @@ logging.basicConfig(level=logging.INFO)
 # Redis cache TTL (20 minutes - slightly longer than 15-min schedule)
 CACHE_TTL = 1200
 
-# History TTL (25 hours - refreshed daily, shared by MRR + churn snapshots)
-HISTORY_TTL = 90000
+# History is also persisted to Firestore, but a longer Redis TTL keeps charts
+# intact if one daily beat run is delayed or skipped.
+HISTORY_TTL = 8 * 24 * 60 * 60
 
 
 def _get_redis():
@@ -124,7 +125,7 @@ def compute_analytics_snapshot_task(self):
 def snapshot_daily_mrr_task(self):
     """
     Daily task: Snapshot today's MRR into a Redis list for mrrTrend chart.
-    Keeps 90 days of history.
+    Keeps 366 days of history.
 
     Schedule: Daily at 23:55 UTC via Celery Beat
     """
@@ -139,6 +140,7 @@ def snapshot_daily_mrr_task(self):
         mrr_point = {"date": today, "mrr": revenue.get("mrr", 0)}
 
         redis = _get_redis()
+        history = []
         if redis:
             # Load existing history
             try:
@@ -147,13 +149,24 @@ def snapshot_daily_mrr_task(self):
             except Exception:
                 history = []
 
-            # Append or update today's entry
-            history = [p for p in history if p.get("date") != today]
-            history.append(mrr_point)
+        # Redis is an acceleration layer, not the source of truth. Recover
+        # from Firestore before appending when the key expired or Redis is down;
+        # otherwise a cache miss would collapse the chart to a single point.
+        if not history:
+            try:
+                from firebase_setup import db
+                history_doc = db.collection("analytics_cache").document("mrr_history").get()
+                if history_doc.exists:
+                    history = (history_doc.to_dict() or {}).get("history", []) or []
+            except Exception as e:
+                logging.warning(f"[ANALYTICS_TASKS] Failed to restore MRR history from Firestore: {e}")
 
-            # Keep only last 90 days
-            history = history[-90:]
+        # Append or update today's entry and retain the dashboard's 12-month scope.
+        history = [p for p in history if p.get("date") != today]
+        history.append(mrr_point)
+        history = sorted(history, key=lambda p: p.get("date", ""))[-366:]
 
+        if redis:
             _cache_result(redis, "analytics_cache:mrr_history", history, HISTORY_TTL)
             logging.info(f"[ANALYTICS_TASKS] MRR snapshot: ${mrr_point['mrr']:.2f} on {today} ({len(history)} days of history)")
         else:
@@ -163,7 +176,7 @@ def snapshot_daily_mrr_task(self):
         try:
             from firebase_setup import db
             db.collection("analytics_cache").document("mrr_history").set({
-                "history": history if redis else [mrr_point],
+                "history": history,
                 "_updated_at": datetime.now(timezone.utc),
             })
         except Exception as e:

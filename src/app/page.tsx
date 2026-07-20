@@ -29,9 +29,9 @@ export default function PulsePage() {
     useAnalytics<RevenueSummary>('/api/rc/revenue-summary', { days });
   const { data: churn } =
     useAnalytics<ChurnIntelligence>('/api/rc/churn-intelligence', { days });
-  const { data: pulse, isLoading: pulseLoading } =
-    useAnalytics<PulseMetrics>('/api/metrics/pulse', {});
-  const { data: funnel } =
+  const { data: pulse, isLoading: pulseLoading, error: pulseError } =
+    useAnalytics<PulseMetrics>('/api/metrics/pulse', { range: dateRange, platform: 'all', userType: 'all' });
+  const { data: funnel, isLoading: funnelLoading } =
     useAnalytics<SubscriberFunnel>('/api/rc/subscriber-funnel', { days });
   const { data: sentry } =
     useAnalytics<SentryStats>('/api/sentry/stats', { statsPeriod: '7d', resolution: '1h' });
@@ -53,7 +53,12 @@ export default function PulsePage() {
   }, [revenueLoading, revenue]);
 
   const mrrChartData = useMemo(() => (revenue?.mrrTrend || []).map((d) => ({ date: d.date, mrr: d.mrr })), [revenue?.mrrTrend]);
-  const dauChartData = useMemo(() => (pulse?.dauTrend14d || pulse?.dauTrend7d || []).map((d) => ({ date: d.date, users: d.users })), [pulse?.dauTrend14d, pulse?.dauTrend7d]);
+  const dauChartData = useMemo(
+    () => (pulse?.dauTrend || pulse?.dauTrend14d || pulse?.dauTrend7d || []).map((d) => ({ date: d.date, users: d.users })),
+    [pulse?.dauTrend, pulse?.dauTrend14d, pulse?.dauTrend7d],
+  );
+  const rangeDays = pulse?.rangeDays ?? Number(days);
+  const rangeLabel = dateRange === '1d' ? 'Today so far' : `Last ${days} days`;
 
   // ── Sentry 24h vs prior-6-day daily average ──────────────────────────────
   const sentryDerived = useMemo(() => {
@@ -111,8 +116,8 @@ export default function PulsePage() {
       />
 
       <p className="text-xs text-ink-faint -mt-2 mb-6">
-        Revenue &amp; funnel cards follow the date range above; activity metrics (DAU, Weekly Active
-        Creators, Top Movers) use fixed 7/14-day windows.
+        Revenue, conversion, product activity, funnels, and charts all follow the selected range.
+        DAU is today&apos;s unique product users and compares with the same weekday last week.
       </p>
 
       {revenue?.note && (
@@ -122,44 +127,71 @@ export default function PulsePage() {
         </div>
       )}
 
+      {funnel?.dataUnavailable && funnel.note && (
+        <div className="mb-6 p-4 bg-butter-tint border border-butter rounded-card flex items-center gap-2 text-sm text-ink">
+          <AlertTriangle className="w-5 h-5 text-[#C8922A] shrink-0" />
+          <span>{funnel.note}</span>
+        </div>
+      )}
+
+      {(pulse?.dataUnavailable || pulseError) && (
+        <div className="mb-6 p-4 bg-butter-tint border border-butter rounded-card flex items-center gap-2 text-sm text-ink">
+          <AlertTriangle className="w-5 h-5 text-[#C8922A] shrink-0" />
+          <span>{pulse?.note || pulseError || 'Mixpanel activity is temporarily unavailable.'}</span>
+        </div>
+      )}
+
       {/* ── Alert strip (renders "all clear" when empty) ───────────────────── */}
       {(pulse || churn) && <AlertStrip alerts={alerts} />}
 
       {/* ── North-star hero + today snapshot ───────────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
         <div className="card-animate lg:col-span-2">
-          {pulseLoading || !pulse ? (
+          {pulseLoading ? (
             <SkeletonChartCard />
+          ) : !pulse ? (
+            <div className="card-surface p-8 h-full flex items-center justify-center text-sm text-ember-deep">
+              {pulseError || 'Pulse activity could not be loaded.'}
+            </div>
           ) : (
-            <NorthStarHero value={pulse.weeklyActiveCreators} change={pulse.wacChange} trend={dauChartData} />
+            <NorthStarHero
+              value={pulse.activeCreators ?? pulse.weeklyActiveCreators}
+              change={pulse.activeCreatorsChange ?? pulse.wacChange}
+              trend={dauChartData}
+              rangeDays={rangeDays}
+            />
           )}
         </div>
-        <div className="card-animate card-surface p-6 sm:p-8">
-          <span className="eyebrow text-ink-faint">Today so far</span>
-          <div className="mt-4 space-y-4">
-            {[
-              { label: 'New signups', value: pulse?.todaySignups ?? 0, icon: UserPlus },
-              { label: 'Trials started', value: pulse?.todayTrialStarts ?? 0, icon: Clock },
-              { label: 'Purchases', value: pulse?.todayPurchases ?? 0, icon: Wallet },
-              { label: 'Paywalls viewed', value: pulse?.todayPaywallViews ?? 0, icon: CreditCard },
-            ].map((row) => {
-              const Icon = row.icon;
-              return (
-                <div key={row.label} className="flex items-center justify-between">
-                  <div className="flex items-center gap-2.5 text-ink-soft">
-                    <Icon className="w-4 h-4 text-ink-faint" />
-                    <span className="text-sm">{row.label}</span>
-                  </div>
-                  <span className="font-mono text-lg text-ink tabular-nums">{row.value}</span>
-                </div>
-              );
-            })}
-          </div>
+        <div className="card-animate">
+          {pulseLoading ? <SkeletonStatCard /> : (
+            <div className="card-surface p-6 sm:p-8 h-full">
+              <span className="eyebrow text-ink-faint">{rangeLabel}</span>
+              <div className="mt-4 space-y-4">
+                {[
+                  { label: 'New signups', value: pulse?.scopeSignups ?? pulse?.todaySignups, icon: UserPlus },
+                  { label: 'Trials started', value: pulse?.scopeTrialStarts ?? pulse?.todayTrialStarts, icon: Clock },
+                  { label: 'Purchases', value: pulse?.scopePurchases ?? pulse?.todayPurchases, icon: Wallet },
+                  { label: 'Paywalls viewed', value: pulse?.scopePaywallViews ?? pulse?.todayPaywallViews, icon: CreditCard },
+                ].map((row) => {
+                  const Icon = row.icon;
+                  return (
+                    <div key={row.label} className="flex items-center justify-between">
+                      <div className="flex items-center gap-2.5 text-ink-soft">
+                        <Icon className="w-4 h-4 text-ink-faint" />
+                        <span className="text-sm">{row.label}</span>
+                      </div>
+                      <span className="font-mono text-lg text-ink tabular-nums">{row.value ?? '—'}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
       {/* ── KPI row (6-up) ─────────────────────────────────────────────────── */}
-      {revenueLoading ? (
+      {revenueLoading || pulseLoading || funnelLoading ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-6 mb-8">
           {Array.from({ length: 6 }).map((_, i) => <SkeletonStatCard key={i} />)}
         </div>
@@ -194,7 +226,7 @@ export default function PulsePage() {
         )}
         {pulseLoading ? <SkeletonChartCard /> : (
           <div className="card-animate">
-            <ChartCard title="Daily Active Users" subtitle={`Last 14 days${pulse ? ` · Today: ${pulse.todayDAU}` : ''}`}>
+            <ChartCard title="Daily Active Users" subtitle={`${rangeLabel}${pulse ? ` · Today: ${pulse.todayDAU}` : ''}`}>
               {dauChartData.length > 0 ? (
                 <AreaChart data={dauChartData} xKey="date" yKey="users" color={chart.lake} />
               ) : (
@@ -209,7 +241,9 @@ export default function PulsePage() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="card-animate card-surface p-6 sm:p-8 lg:col-span-2">
           <h3 className="font-display text-xl text-ink mb-1">Top Movers</h3>
-          <p className="text-sm font-mono text-ink-faint mb-5">Feature activity · last 7 days vs prior 7</p>
+          <p className="text-sm font-mono text-ink-faint mb-5">
+            Feature activity · {dateRange === '1d' ? 'today vs yesterday' : `last ${days} days vs prior ${days}`}
+          </p>
           {pulse?.topMovers ? (
             <TopMovers gainers={pulse.topMovers.gainers} decliners={pulse.topMovers.decliners} />
           ) : (
@@ -220,7 +254,9 @@ export default function PulsePage() {
         <Link href="/conversion" className="group card-animate">
           <div className="card-surface card-hover p-6 sm:p-8 h-full">
             <div className="flex items-center justify-between mb-5">
-              <h3 className="font-display text-xl text-ink">Today&apos;s Funnel</h3>
+              <h3 className="font-display text-xl text-ink">
+                {dateRange === '1d' ? 'Today\'s Funnel' : `${days}-Day Funnel`}
+              </h3>
               <ArrowRight className="w-5 h-5 text-ink-faint group-hover:text-ink transition-colors" />
             </div>
             {pulse?.microFunnel ? (

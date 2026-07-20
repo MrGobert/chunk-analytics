@@ -54,6 +54,7 @@ export async function GET(request: NextRequest) {
       weekOverWeek: data.weekOverWeek ?? { trialStarts: 0, conversions: 0 },
       lastUpdated: new Date().toISOString(),
       ...(data.note ? { note: data.note } : {}),
+      ...(data.dataUnavailable ? { dataUnavailable: true } : {}),
     });
   } catch (error) {
     clearTimeout(timeoutId);
@@ -64,6 +65,7 @@ export async function GET(request: NextRequest) {
         funnel: [], trialConversionRate: 0, medianDaysToConvert: 0,
         conversionByPlatform: {}, weekOverWeek: { trialStarts: 0, conversions: 0 },
         lastUpdated: new Date().toISOString(),
+        dataUnavailable: true,
         note: 'Data unavailable - Cerebral server timeout. Try refreshing.',
       });
     }
@@ -73,6 +75,7 @@ export async function GET(request: NextRequest) {
       funnel: [], trialConversionRate: 0, medianDaysToConvert: 0,
       conversionByPlatform: {}, weekOverWeek: { trialStarts: 0, conversions: 0 },
       lastUpdated: new Date().toISOString(),
+      dataUnavailable: true,
       note: `Data unavailable - ${error instanceof Error ? error.message : 'Unknown error'}`,
     });
   }

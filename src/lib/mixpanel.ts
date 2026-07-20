@@ -2,8 +2,6 @@ import { MixpanelEvent } from '@/types/mixpanel';
 import { getCachedEventsAsync, setCachedEventsAsync, acquireLock, releaseLock, getStaleCachedEvents } from '@/lib/event-cache';
 import { formatDate } from '@/lib/utils';
 
-const CACHE_REVALIDATE_SECONDS = 300; // 5 minutes
-
 // ============================================
 // Event Name Normalization
 // ============================================
@@ -48,6 +46,20 @@ const EVENT_NAME_MAP: Record<string, string> = {
   'Monitor_Suggestion_Accepted': 'Automation_Suggestion_Accepted',
   'Monitor_Suggestion_Dismissed': 'Automation_Suggestion_Dismissed',
 };
+
+/**
+ * Expand canonical event names with every legacy/raw name that normalizes to
+ * one of them. Mixpanel's Export API filters before our normalization code
+ * runs, so filtered routes must request the aliases too or silently lose old
+ * client events.
+ */
+export function expandEventNames(eventNames: Iterable<string>): string[] {
+  const expanded = new Set(eventNames);
+  for (const [rawName, canonicalName] of Object.entries(EVENT_NAME_MAP)) {
+    if (expanded.has(canonicalName)) expanded.add(rawName);
+  }
+  return Array.from(expanded);
+}
 
 /**
  * Normalize a single event name to its canonical form.
@@ -323,20 +335,34 @@ export async function fetchMixpanelEventsFiltered(
   toDate: string,
   eventNames: string[]
 ): Promise<MixpanelEvent[]> {
+  const { events } = await fetchMixpanelEventsFilteredWithStatus(fromDate, toDate, eventNames);
+  return events;
+}
+
+/**
+ * Status-bearing filtered export. An empty filtered export is a valid result,
+ * so callers that render high-level KPIs need an explicit signal to distinguish
+ * "no events" from "Mixpanel was unavailable and no stale cache existed".
+ */
+export async function fetchMixpanelEventsFilteredWithStatus(
+  fromDate: string,
+  toDate: string,
+  eventNames: string[]
+): Promise<{ events: MixpanelEvent[]; dataUnavailable: boolean }> {
   const variant = hashEventNames(eventNames);
   const ttl = isImmutablePast(toDate) ? IMMUTABLE_TTL : FRESH_TTL;
   const cacheKey = `${fromDate}:${toDate}:${variant}`;
 
   // 1. Cache (memory → lock wait → disk), honouring the chosen TTL
   const cached = await getCachedEventsAsync(fromDate, toDate, variant, ttl);
-  if (cached) return cached;
+  if (cached) return { events: cached, dataUnavailable: false };
 
   // 2. Acquire the per-variant fetch lock
   const hasLock = acquireLock(fromDate, toDate, variant);
   if (!hasLock) {
     await new Promise((r) => setTimeout(r, 1000));
     const retry = await getCachedEventsAsync(fromDate, toDate, variant, ttl);
-    if (retry) return retry;
+    if (retry) return { events: retry, dataUnavailable: false };
     console.warn(`Filtered Mixpanel fetch timed out waiting for lock ${cacheKey}, falling back to stale.`);
   }
 
@@ -352,18 +378,18 @@ export async function fetchMixpanelEventsFiltered(
       releaseLock(fromDate, toDate, variant);
     }
   }
-  if (events) return events;
+  if (events) return { events, dataUnavailable: false };
 
   // 4. Stale fallback (ignore TTL) on rate-limit/timeout
   const stale = await getStaleCachedEvents(fromDate, toDate, variant);
   if (stale) {
     console.warn(`Serving ${stale.length} stale filtered events for ${cacheKey}.`);
-    return stale;
+    return { events: stale, dataUnavailable: false };
   }
 
   // 5. Genuine total failure
   console.warn(`No cache available for filtered fetch ${cacheKey}. Returning empty list.`);
-  return [];
+  return { events: [], dataUnavailable: true };
 }
 
 export async function fetchMixpanelEventsWithStatus(

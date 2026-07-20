@@ -2,6 +2,12 @@ import { withSentryConfig } from "@sentry/nextjs";
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // This repository lives beside other apps in the local workspace. Pinning
+  // the Turbopack root prevents builds from scanning the entire home workspace
+  // after detecting its unrelated top-level package-lock.json.
+  turbopack: {
+    root: process.cwd(),
+  },
   async redirects() {
     return [
       // IA renames — old bookmarks keep working

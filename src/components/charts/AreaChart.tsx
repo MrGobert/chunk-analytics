@@ -68,6 +68,7 @@ export default function AreaChart({
           strokeWidth={2.5}
           fill={gradient ? `url(#${gradientId})` : color}
           fillOpacity={gradient ? 1 : 0.22}
+          dot={data.length === 1 ? { fill: color, stroke: chart.cardStroke, strokeWidth: 2, r: 4 } : false}
           activeDot={{ fill: color, stroke: chart.cardStroke, strokeWidth: 2, r: 4 }}
         />
       </RechartsAreaChart>

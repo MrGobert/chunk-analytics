@@ -440,6 +440,7 @@ export interface SubscriberFunnel {
   weekOverWeek: { trialStarts: number; conversions: number };
   lastUpdated: string;
   note?: string;
+  dataUnavailable?: boolean;
 }
 
 export interface ChurnIntelligence {
@@ -536,6 +537,20 @@ export interface PulseMetrics {
     purchaseCompleted: number;
   };
   topMovers: { gainers: TopMover[]; decliners: TopMover[] };
+  // Range-aware fields used by Pulse. Legacy weekly fields remain above for
+  // safe hydration of session caches written by older dashboard builds.
+  activeCreators: number;
+  activeCreatorsPrev: number;
+  activeCreatorsChange: number | null;
+  rangeDays: number;
+  dauTrend: { date: string; users: number }[];
+  scopeSignups: number;
+  scopeTrialStarts: number;
+  scopePurchases: number;
+  scopePaywallViews: number;
+  dateRange: { from: string; to: string };
+  dataUnavailable?: boolean;
+  note?: string;
   lastUpdated: string;
 }
 

@@ -93,6 +93,49 @@ def _get_cached_or_compute(cache_key, compute_fn, *args, ttl=900):
     return result
 
 
+def _subscription_events_since(db, cutoff: datetime) -> list[dict]:
+    """Load production RevenueCat event mirrors from the requested window."""
+    try:
+        docs = list(
+            db.collection("subscription_events")
+            .where("occurredAt", ">=", cutoff)
+            .limit(5000)
+            .stream()
+        )
+        if len(docs) == 5000:
+            logging.warning("[ANALYTICS_API] subscription_events query hit the 5000-doc limit")
+        return [
+            doc.to_dict()
+            for doc in docs
+            if (doc.to_dict().get("environment") or "PRODUCTION") != "SANDBOX"
+        ]
+    except Exception as exc:
+        # The collection is new; deployments remain backward compatible while
+        # it fills by falling back to lifecycle markers on user documents.
+        logging.warning(f"[ANALYTICS_API] subscription event history unavailable: {exc}")
+        return []
+
+
+def _is_trial_start_event(data: dict) -> bool:
+    event_type = str(data.get("type") or "").upper()
+    period_type = str(data.get("periodType") or data.get("period_type") or "").upper()
+    return event_type == "TRIAL_STARTED" or (
+        event_type == "INITIAL_PURCHASE" and period_type == "TRIAL"
+    )
+
+
+def _is_paid_event(data: dict) -> bool:
+    event_type = str(data.get("type") or "").upper()
+    period_type = str(data.get("periodType") or data.get("period_type") or "").upper()
+    if event_type == "TRIAL_CONVERTED":
+        return True
+    return event_type in ("INITIAL_PURCHASE", "RENEWAL") and period_type != "TRIAL"
+
+
+def _event_occurred_at(data: dict) -> datetime:
+    return _to_datetime(data.get("occurredAt") or data.get("event_timestamp_ms"))
+
+
 # ---- Auth decorator (reuses existing verify_webhook_auth) ----
 
 
@@ -322,7 +365,8 @@ def _compute_revenue_summary(days: int) -> dict:
     start_active = (total_subscribers - new_subscribers) + churned
     churn_rate = round((churned / start_active * 100) if start_active > 0 else 0, 1)
 
-    # MRR trend + change: load daily MRR snapshots from Redis (populated by snapshot_daily_mrr task)
+    # MRR trend + change: load daily MRR snapshots from Redis (populated by
+    # snapshot_daily_mrr task), then Firestore if Redis was flushed/unavailable.
     mrr_trend = []
     mrr_change = 0.0
     redis = _get_redis()
@@ -333,6 +377,35 @@ def _compute_revenue_summary(days: int) -> dict:
                 mrr_trend = json.loads(trend_data)
         except Exception:
             pass
+
+    if not mrr_trend:
+        try:
+            history_doc = db.collection("analytics_cache").document("mrr_history").get()
+            if history_doc.exists:
+                mrr_trend = (history_doc.to_dict() or {}).get("history", []) or []
+        except Exception as exc:
+            logging.warning(f"[ANALYTICS_API] Firestore MRR history fallback failed: {exc}")
+
+    # Sanitize, de-duplicate, scope to the selected range, and always include a
+    # live point for today. Previously every range received the same unsorted
+    # history and an empty Redis cache collapsed the chart to no visible line.
+    history_by_date = {}
+    for point in mrr_trend:
+        point_date = str(point.get("date") or "")
+        try:
+            point_mrr = float(point.get("mrr", 0) or 0)
+        except (TypeError, ValueError):
+            continue
+        if point_date:
+            history_by_date[point_date] = round(point_mrr, 2)
+    today_key = now.strftime("%Y-%m-%d")
+    history_by_date[today_key] = round(mrr, 2)
+    cutoff_key = cutoff.strftime("%Y-%m-%d")
+    mrr_trend = [
+        {"date": date, "mrr": value}
+        for date, value in sorted(history_by_date.items())
+        if cutoff_key <= date <= today_key
+    ]
 
     # MRR change: compare current MRR against historical MRR from `days` ago
     if mrr_trend:
@@ -350,21 +423,30 @@ def _compute_revenue_summary(days: int) -> dict:
         elif mrr > 0:
             mrr_change = 100.0
 
-    # Today's revenue: count all new active subscribers created today (not just
-    # email-attributed conversions) and use their actual subscription price.
+    # Today's revenue comes from RevenueCat's transaction ledger. Account
+    # createdAt is not a purchase timestamp (an existing free user can buy
+    # today), which made this metric incorrectly remain at zero.
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     today_revenue = 0.0
-    for doc in active_docs:
-        data = doc.to_dict()
-        created = _get_creation_date(data)
-        if created and created >= today_start:
-            price = float(data.get("subscriptionPrice", DEFAULT_MONTHLY_PRICE) or DEFAULT_MONTHLY_PRICE)
-            is_annual = _is_annual_plan(data, price)
-            today_revenue += round(price / 12, 2) if is_annual else price
+    today_transactions = [
+        event for event in _subscription_events_since(db, today_start)
+        if _is_paid_event(event)
+    ]
+    for event in today_transactions:
+        try:
+            today_revenue += float(event.get("price") or 0)
+        except (TypeError, ValueError):
+            continue
 
-    # If no historical data, return single point for today
-    if not mrr_trend:
-        mrr_trend = [{"date": now.strftime("%Y-%m-%d"), "mrr": round(mrr, 2)}]
+    # Backward-compatible estimate until the new ledger receives its first
+    # event. It is intentionally used only when there are no mirrored paid
+    # transactions, never added on top of authoritative RevenueCat revenue.
+    if not today_transactions:
+        for doc in active_docs:
+            data = doc.to_dict()
+            purchased = _to_datetime(data.get("initialPurchaseAt"))
+            if purchased and purchased >= today_start:
+                today_revenue += float(data.get("subscriptionPrice", DEFAULT_MONTHLY_PRICE) or DEFAULT_MONTHLY_PRICE)
 
     return {
         "mrr": round(mrr, 2),
@@ -414,45 +496,107 @@ def _compute_subscriber_funnel(days: int) -> dict:
 
     users_ref = db.collection("users")
 
-    # Get all users created in period
-    all_users_in_period = list(
-        users_ref.where("createdAt", ">=", cutoff).limit(5000).stream()
-    )
+    # Signups remain account-based; trial and conversion stages are lifecycle-
+    # based so an older free account that starts a trial in this range is not
+    # lost, and a direct paid purchase is never mislabeled as a trial.
+    all_users_in_period = list(users_ref.where("createdAt", ">=", cutoff).limit(5000).stream())
     if len(all_users_in_period) == 5000:
-        logging.warning("[ANALYTICS_API] subscriber_funnel: createdAt query returned exactly 5000 docs — results may be truncated")
-
+        logging.warning("[ANALYTICS_API] subscriber_funnel signup query hit the 5000-doc limit")
     signed_up = len(all_users_in_period)
 
-    # Count by subscription status for funnel stages
-    started_trial = 0
-    converted_to_paid = 0
+    status_docs = {}
+    for status in ("trial", "active", "expired", "cancelled"):
+        docs = list(users_ref.where("subscriptionStatus", "==", status).limit(5000).stream())
+        for doc in docs:
+            status_docs[doc.id] = doc.to_dict()
+
+    history_cutoff = min(cutoff, two_weeks_ago)
+    lifecycle_events = _subscription_events_since(db, history_cutoff)
+    events_by_user = {}
+    for event in lifecycle_events:
+        uid = str(event.get("appUserId") or event.get("app_user_id") or "")
+        occurred = _event_occurred_at(event)
+        if uid and occurred:
+            events_by_user.setdefault(uid, []).append(event)
+    for user_events in events_by_user.values():
+        user_events.sort(key=lambda event: _event_occurred_at(event) or now)
+
+    trial_starts = {}
+    conversions = {}
+    platforms = {}
+    for uid, user_events in events_by_user.items():
+        starts = [event for event in user_events if _is_trial_start_event(event)]
+        for start_event in starts:
+            started_at = _event_occurred_at(start_event)
+            if not started_at:
+                continue
+            trial_starts.setdefault(uid, started_at)
+            platforms[uid] = start_event.get("platform") or "unknown"
+            paid_after_start = next(
+                (
+                    event for event in user_events
+                    if _is_paid_event(event)
+                    and (_event_occurred_at(event) or started_at) >= started_at
+                ),
+                None,
+            )
+            if paid_after_start:
+                conversions[uid] = _event_occurred_at(paid_after_start) or started_at
+                platforms[uid] = paid_after_start.get("platform") or platforms[uid]
+
+    # Historical fallback for users that predate the event mirror. The trial
+    # welcome-email timestamp is an especially useful durable marker because
+    # older conversion handling deleted trialEndDate.
+    for uid, data in status_docs.items():
+        emails_sent = data.get("emailsSent", {}) or {}
+        started_at = (
+            _to_datetime(data.get("trialStartedAt"))
+            or _to_datetime(data.get("trialStartDate"))
+            or _to_datetime(emails_sent.get("trialStarted"))
+        )
+        if not started_at and data.get("subscriptionStatus") == "trial":
+            trial_end = _to_datetime(data.get("trialEndDate"))
+            if trial_end:
+                started_at = trial_end - timedelta(days=3)
+        if started_at:
+            trial_starts.setdefault(uid, started_at)
+            platforms.setdefault(uid, data.get("platform", "unknown") or "unknown")
+
+        converted_at = _to_datetime(data.get("trialConvertedAt"))
+        has_trial_history = bool(started_at or data.get("hasStartedTrial"))
+        if converted_at:
+            conversions.setdefault(uid, converted_at)
+        elif has_trial_history and data.get("subscriptionStatus") == "active":
+            # Exact conversion time was not retained historically, but current
+            # active status plus an explicit trial marker proves conversion.
+            conversions.setdefault(uid, started_at or now)
+
+    cohort_starts = {uid: when for uid, when in trial_starts.items() if when >= cutoff}
+    cohort_conversions = {
+        uid: conversions[uid]
+        for uid in cohort_starts
+        if uid in conversions and conversions[uid] >= cohort_starts[uid]
+    }
+    started_trial = len(cohort_starts)
+    converted_to_paid = len(cohort_conversions)
+    trial_conversion_rate = round((converted_to_paid / started_trial * 100) if started_trial else 0, 1)
+
     active_30d = 0
     churned_count = 0
-    conversion_by_platform = {}
-
-    for doc in all_users_in_period:
-        data = doc.to_dict()
-        status = data.get("subscriptionStatus", "")
-
-        if status in ("trial", "active", "expired", "cancelled"):
-            started_trial += 1
-
-        if status == "active":
-            converted_to_paid += 1
-            platform = data.get("platform", "unknown") or "unknown"
-            conversion_by_platform[platform] = conversion_by_platform.get(platform, 0) + 1
-
-            # Check if active in last 30 days
+    platform_trials = {}
+    platform_conversions = {}
+    for uid in cohort_starts:
+        data = status_docs.get(uid, {})
+        platform = platforms.get(uid) or data.get("platform") or "unknown"
+        platform_trials[platform] = platform_trials.get(platform, 0) + 1
+        if uid in cohort_conversions:
+            platform_conversions[platform] = platform_conversions.get(platform, 0) + 1
+        if data.get("subscriptionStatus") == "active":
             last_active = _to_datetime(data.get("lastActiveAt"))
             if last_active and last_active >= (now - timedelta(days=30)):
                 active_30d += 1
-
-        if status in ("expired", "cancelled"):
+        if data.get("subscriptionStatus") in ("expired", "cancelled"):
             churned_count += 1
-
-    trial_conversion_rate = round(
-        (converted_to_paid / started_trial * 100) if started_trial > 0 else 0, 1
-    )
 
     # Build funnel stages
     funnel = []
@@ -467,26 +611,12 @@ def _compute_subscriber_funnel(days: int) -> dict:
         rate = round((count / signed_up * 100) if signed_up > 0 else 0, 1)
         funnel.append({"stage": stage_name, "count": count, "rate": rate})
 
-    # Median days to convert from emailTracking
-    median_days = 0
-    try:
-        conversion_docs = list(
-            db.collection("emailTracking")
-            .where("conversionEvent", "==", "TRIAL_CONVERTED")
-            .where("sentAt", ">=", cutoff)
-            .limit(1000)
-            .stream()
-        )
-        days_list = []
-        for doc in conversion_docs:
-            data = doc.to_dict()
-            dtc = data.get("daysToConvert")
-            if dtc is not None and dtc > 0:
-                days_list.append(dtc)
-        if days_list:
-            median_days = round(median(days_list), 1)
-    except Exception:
-        pass
+    conversion_days = [
+        max(0, (converted_at - cohort_starts[uid]).total_seconds() / 86400)
+        for uid, converted_at in cohort_conversions.items()
+        if converted_at > cohort_starts[uid]
+    ]
+    median_days = round(median(conversion_days), 1) if conversion_days else 0
 
     # Week over week comparison
     this_week_trials = 0
@@ -494,21 +624,16 @@ def _compute_subscriber_funnel(days: int) -> dict:
     last_week_trials = 0
     last_week_conversions = 0
 
-    for doc in all_users_in_period:
-        data = doc.to_dict()
-        created = _get_creation_date(data)
-        status = data.get("subscriptionStatus", "")
-
-        if created and created >= week_ago:
-            if status in ("trial", "active", "expired", "cancelled"):
-                this_week_trials += 1
-            if status == "active":
-                this_week_conversions += 1
-        elif created and created >= two_weeks_ago:
-            if status in ("trial", "active", "expired", "cancelled"):
-                last_week_trials += 1
-            if status == "active":
-                last_week_conversions += 1
+    for uid, started_at in trial_starts.items():
+        if started_at >= week_ago:
+            this_week_trials += 1
+        elif started_at >= two_weeks_ago:
+            last_week_trials += 1
+    for converted_at in conversions.values():
+        if converted_at >= week_ago:
+            this_week_conversions += 1
+        elif converted_at >= two_weeks_ago:
+            last_week_conversions += 1
 
     wow_trials = round(
         ((this_week_trials - last_week_trials) / last_week_trials * 100)
@@ -519,12 +644,13 @@ def _compute_subscriber_funnel(days: int) -> dict:
         if last_week_conversions > 0 else 0, 1
     )
 
-    # Convert platform counts to percentages
-    total_converted = sum(conversion_by_platform.values())
-    conv_pct_by_platform = {}
-    if total_converted > 0:
-        for platform, count in conversion_by_platform.items():
-            conv_pct_by_platform[platform] = round(count / total_converted * 100, 1)
+    # Actual trial-to-paid rate per platform (the old implementation returned
+    # each platform's share of all conversions under a "conversion rate" label).
+    conv_pct_by_platform = {
+        platform: round(platform_conversions.get(platform, 0) / count * 100, 1)
+        for platform, count in platform_trials.items()
+        if count > 0
+    }
 
     return {
         "funnel": funnel,

@@ -4,6 +4,7 @@ import { TrendingUp, TrendingDown } from 'lucide-react';
 import type { TopMover } from '@/types/mixpanel';
 
 function MoverRow({ mover, up }: { mover: TopMover; up: boolean }) {
+  const isNew = mover.previous === 0 && mover.current > 0;
   const pct = mover.change ?? 0;
   return (
     <div className="flex items-center justify-between py-2">
@@ -17,7 +18,7 @@ function MoverRow({ mover, up }: { mover: TopMover; up: boolean }) {
             up ? 'bg-sage-tint text-sage-deep' : 'bg-ember-tint text-ember-deep'
           }`}
         >
-          {up ? '↑' : '↓'} {Math.abs(pct).toFixed(0)}%
+          {isNew ? 'New' : `${up ? '↑' : '↓'} ${Math.abs(pct).toFixed(0)}%`}
         </span>
       </div>
     </div>

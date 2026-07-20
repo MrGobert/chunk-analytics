@@ -1,4 +1,4 @@
-import { format, subDays, parseISO } from 'date-fns';
+import { subDays } from 'date-fns';
 
 /** Safe division clamped to a non-negative range. Returns 0 when the denominator is 0. */
 export function safeDiv(numerator: number, denominator: number): number {
@@ -96,4 +96,10 @@ export function getDaysInRange(from: string, to: string): string[] {
   }
 
   return days;
+}
+
+/** Shift an ISO date-only value without crossing a timezone/DST boundary. */
+export function shiftDate(date: string, amount: number): string {
+  const noonUtc = new Date(`${date}T12:00:00Z`);
+  return formatDate(new Date(noonUtc.getTime() + amount * 86400000));
 }
