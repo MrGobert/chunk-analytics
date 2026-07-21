@@ -101,4 +101,32 @@ describe('buildSequentialFunnel', () => {
     ]);
     expect(funnel[0].count).toBe(1);
   });
+
+  it('models the collections funnel (Created → Viewed → Chat Started → Shared)', () => {
+    const COLLECTION_STEPS = [
+      { name: 'Created', eventName: 'Collection_Created' },
+      { name: 'Viewed', eventName: 'Collection_Viewed' },
+      { name: 'Chat Started', eventName: 'Collection_Chat_Started' },
+      { name: 'Shared', eventName: 'Collection_Shared' },
+    ];
+    const events = [
+      // u1 goes all the way through
+      event('Collection_Created', 'u1'),
+      event('Collection_Viewed', 'u1'),
+      event('Collection_Chat_Started', 'u1'),
+      event('Collection_Shared', 'u1'),
+      // u2 chats but never shares
+      event('Collection_Created', 'u2'),
+      event('Collection_Viewed', 'u2'),
+      event('Collection_Chat_Started', 'u2'),
+      // u3 only views
+      event('Collection_Created', 'u3'),
+      event('Collection_Viewed', 'u3'),
+      // u4 shares without ever creating/viewing/chatting in-window → excluded everywhere
+      event('Collection_Shared', 'u4'),
+    ];
+    const funnel = buildSequentialFunnel(events, COLLECTION_STEPS);
+    expect(funnel.map((s) => s.count)).toEqual([3, 3, 2, 1]);
+    expect(funnel[3].name).toBe('Shared');
+  });
 });

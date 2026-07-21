@@ -279,13 +279,13 @@ function CollectionsSection({ dateRange, platform, userType }: FilterProps) {
         <StatCard title="Created" value={metrics.totalCreated} trend={metrics.createdTrend} />
         <StatCard title="Viewed" value={metrics.totalViewed} trend={metrics.viewedTrend} />
         <StatCard title="Chat Sessions" value={metrics.totalChatStarted} trend={metrics.chatStartedTrend} />
-        <StatCard title="Exports" value={metrics.totalExported} trend={metrics.exportedTrend} />
+        <StatCard title="Messages Sent" value={metrics.totalChatMessages} trend={metrics.chatMessagesTrend} />
       </div>
 
       <div className="grid grid-cols-1 gap-6 mb-8">
-        <ChartCard title="Collections Funnel" subtitle="Created → Viewed → Chat Started → Exported/Shared">
+        <ChartCard title="Collections Funnel" subtitle="Unique users per stage — Created → Viewed → Chat Started → Shared">
           {metrics.collectionsFunnel.length > 0 ? (
-            <FunnelChart data={metrics.collectionsFunnel} />
+            <FunnelChart data={metrics.collectionsFunnel} unitLabel="users" />
           ) : (
             <div className="empty-state h-64">No funnel data yet</div>
           )}

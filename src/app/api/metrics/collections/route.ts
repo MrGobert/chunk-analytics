@@ -10,6 +10,7 @@ import {
   filterEventsByType,
   getUniqueUsers,
   countEvents,
+  buildSequentialFunnel,
   calculateTrend,
   getLastUpdated,
   UserType,
@@ -25,6 +26,7 @@ const COLLECTION_EVENTS = [
   'Collection_URL_Added',
   'Collection_URL_Removed',
   'Collection_Chat_Started',
+  'Collection_Chat_Message_Sent',
   'Collection_Exported',
   'Collection_Shared',
 ];
@@ -53,6 +55,7 @@ export async function GET(request: NextRequest) {
     const totalURLsAdded = countEvents(collectionEvents, 'Collection_URL_Added');
     const totalURLsRemoved = countEvents(collectionEvents, 'Collection_URL_Removed');
     const totalChatStarted = countEvents(collectionEvents, 'Collection_Chat_Started');
+    const totalChatMessages = countEvents(collectionEvents, 'Collection_Chat_Message_Sent');
     const totalExported = countEvents(collectionEvents, 'Collection_Exported');
     const totalShared = countEvents(collectionEvents, 'Collection_Shared');
     const uniqueCollectionUsers = getUniqueUsers(collectionEvents).size;
@@ -75,33 +78,21 @@ export async function GET(request: NextRequest) {
     const createdTrend = calculateTrend(totalCreated, countEvents(prevCollections, 'Collection_Created'));
     const viewedTrend = calculateTrend(totalViewed, countEvents(prevCollections, 'Collection_Viewed'));
     const chatStartedTrend = calculateTrend(totalChatStarted, countEvents(prevCollections, 'Collection_Chat_Started'));
+    const chatMessagesTrend = calculateTrend(totalChatMessages, countEvents(prevCollections, 'Collection_Chat_Message_Sent'));
     const exportedTrend = calculateTrend(totalExported, countEvents(prevCollections, 'Collection_Exported'));
     const sharedTrend = calculateTrend(totalShared, countEvents(prevCollections, 'Collection_Shared'));
 
-    // Collections funnel: Created → Viewed → Chat Started → Exported/Shared
-    const exportedAndShared = totalExported + totalShared;
-    const funnelTop = totalCreated || 1;
-    const collectionsFunnel = [
-      { name: 'Created', count: totalCreated, percentage: 100, dropoff: 0 },
-      {
-        name: 'Viewed',
-        count: totalViewed,
-        percentage: Math.round((totalViewed / funnelTop) * 100 * 10) / 10,
-        dropoff: totalCreated > 0 ? Math.round(Math.max(0, ((totalCreated - totalViewed) / totalCreated) * 100) * 10) / 10 : 0,
-      },
-      {
-        name: 'Chat Started',
-        count: totalChatStarted,
-        percentage: Math.round((totalChatStarted / funnelTop) * 100 * 10) / 10,
-        dropoff: totalViewed > 0 ? Math.round(Math.max(0, ((totalViewed - totalChatStarted) / totalViewed) * 100) * 10) / 10 : 0,
-      },
-      {
-        name: 'Exported/Shared',
-        count: exportedAndShared,
-        percentage: Math.round((exportedAndShared / funnelTop) * 100 * 10) / 10,
-        dropoff: totalChatStarted > 0 ? Math.round(Math.max(0, ((totalChatStarted - exportedAndShared) / totalChatStarted) * 100) * 10) / 10 : 0,
-      },
-    ];
+    // Collections funnel — sequential unique users: a user counts in a stage
+    // only if they also reached every prior stage (monotonic non-increasing).
+    // Created → Viewed → Chat Started (a session) → Shared (a chat made public).
+    // "Exported" is intentionally omitted — no collection export feature exists
+    // on any platform, so that event never fires.
+    const collectionsFunnel = buildSequentialFunnel(collectionEvents, [
+      { name: 'Created', eventName: 'Collection_Created' },
+      { name: 'Viewed', eventName: 'Collection_Viewed' },
+      { name: 'Chat Started', eventName: 'Collection_Chat_Started' },
+      { name: 'Shared', eventName: 'Collection_Shared' },
+    ]);
 
     // Daily activity
     const days = getDaysInRange(dateRange.from, dateRange.to);
@@ -116,7 +107,7 @@ export async function GET(request: NextRequest) {
         created: dayEvents.filter((e) => e.event === 'Collection_Created').length,
         viewed: dayEvents.filter((e) => e.event === 'Collection_Viewed').length,
         chatStarted: dayEvents.filter((e) => e.event === 'Collection_Chat_Started').length,
-        exported: dayEvents.filter((e) => e.event === 'Collection_Exported').length,
+        chatMessages: dayEvents.filter((e) => e.event === 'Collection_Chat_Message_Sent').length,
       };
     });
 
@@ -143,12 +134,14 @@ export async function GET(request: NextRequest) {
       totalURLsAdded,
       totalURLsRemoved,
       totalChatStarted,
+      totalChatMessages,
       totalExported,
       totalShared,
       uniqueCollectionUsers,
       createdTrend,
       viewedTrend,
       chatStartedTrend,
+      chatMessagesTrend,
       exportedTrend,
       sharedTrend,
       collectionsFunnel,
