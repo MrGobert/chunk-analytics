@@ -252,6 +252,7 @@ export interface NotesMetrics {
   totalShared: number;
   totalDocumentUploads: number;
   uniqueNoteUsers: number;
+  uniqueNoteCreators: number;
   totalWritingToolUses: number;
   createdTrend: number | null;
   viewedTrend: number | null;

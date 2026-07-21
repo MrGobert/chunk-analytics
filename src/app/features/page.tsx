@@ -219,16 +219,24 @@ function NotesSection({ dateRange, platform, userType }: FilterProps) {
     <div className="mt-8">
       {metrics.dataUnavailable && <DataUnavailableBanner />}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-        <StatCard title="Notes Created" value={metrics.totalNotesCreated} trend={metrics.createdTrend} />
+        <StatCard
+          title="Notes Created"
+          value={metrics.totalNotesCreated}
+          trend={metrics.createdTrend}
+          subtitle={`by ${(metrics.uniqueNoteCreators ?? 0).toLocaleString()} unique user${metrics.uniqueNoteCreators === 1 ? '' : 's'}`}
+        />
         <StatCard title="Notes Viewed" value={metrics.totalNotesViewed} trend={metrics.viewedTrend} />
         <StatCard title="Published" value={metrics.totalPublished} trend={metrics.publishedTrend} />
         <StatCard title="Writing Tools Used" value={metrics.totalWritingToolUses} trend={metrics.writingToolTrend} />
       </div>
 
       <div className="grid grid-cols-1 gap-6 mb-8">
-        <ChartCard title="Notes Lifecycle Funnel" subtitle="Created → Saved → Published → Shared">
+        <ChartCard
+          title="Notes Lifecycle Funnel"
+          subtitle="Unique users per stage (each must reach all prior stages) — Created → Saved → Published → Shared"
+        >
           {metrics.notesFunnel.length > 0 ? (
-            <FunnelChart data={metrics.notesFunnel} />
+            <FunnelChart data={metrics.notesFunnel} unitLabel="users" />
           ) : (
             <div className="empty-state h-64">No funnel data yet</div>
           )}

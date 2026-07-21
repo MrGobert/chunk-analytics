@@ -1,4 +1,4 @@
-import { MixpanelEvent } from '@/types/mixpanel';
+import { MixpanelEvent, FunnelStep } from '@/types/mixpanel';
 import { getCachedEventsAsync, setCachedEventsAsync, acquireLock, releaseLock, getStaleCachedEvents } from '@/lib/event-cache';
 import { formatDate } from '@/lib/utils';
 
@@ -570,6 +570,44 @@ export function getUniqueUsers(events: MixpanelEvent[]): Set<string> {
 
 export function countEvents(events: MixpanelEvent[], eventType: string): number {
   return events.filter((e) => normalizeEventName(e.event) === eventType).length;
+}
+
+/**
+ * Build a true sequential unique-user funnel: a user counts in a step only if
+ * they also reached every prior step within the same event window, so counts
+ * are monotonically non-increasing. `percentage` is relative to the first
+ * step; `dropoff` is relative to the previous step.
+ */
+export function buildSequentialFunnel(
+  events: MixpanelEvent[],
+  steps: { name: string; eventName: string }[]
+): FunnelStep[] {
+  const reached: Set<string>[] = steps.map((step) => {
+    const users = new Set<string>();
+    for (const e of events) {
+      if (normalizeEventName(e.event) === step.eventName) {
+        users.add(e.properties.distinct_id);
+      }
+    }
+    return users;
+  });
+
+  for (let i = 1; i < reached.length; i++) {
+    reached[i] = new Set([...reached[i]].filter((id) => reached[i - 1].has(id)));
+  }
+
+  const firstCount = reached[0]?.size ?? 0;
+
+  return steps.map((step, i) => {
+    const count = reached[i].size;
+    const prevCount = i === 0 ? count : reached[i - 1].size;
+    return {
+      name: step.name,
+      count,
+      percentage: i === 0 ? 100 : firstCount > 0 ? (count / firstCount) * 100 : 0,
+      dropoff: i === 0 || prevCount === 0 ? 0 : ((prevCount - count) / prevCount) * 100,
+    };
+  });
 }
 
 export function groupEventsByDate(

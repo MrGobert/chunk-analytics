@@ -10,6 +10,7 @@ import {
   filterEventsByType,
   getUniqueUsers,
   countEvents,
+  buildSequentialFunnel,
   calculateTrend,
   getLastUpdated,
   getPropertyDistribution,
@@ -78,36 +79,15 @@ export async function GET(request: NextRequest) {
     const sharedTrend = calculateTrend(totalShared, countEvents(prevNotes, 'Note_Shared'));
     const writingToolTrend = calculateTrend(totalWritingToolUses, countEvents(prevNotes, 'Note_Writing_Tool_Used'));
 
-    // Notes funnel: Created → Saved → Published → Shared (using unique users per step)
-    const usersCreated = new Set(notesEvents.filter((e) => e.event === 'Note_Created').map((e) => e.properties.distinct_id));
-    const usersSaved = new Set(notesEvents.filter((e) => e.event === 'Note_Saved').map((e) => e.properties.distinct_id));
-    const usersPublished = new Set(notesEvents.filter((e) => e.event === 'Note_Published').map((e) => e.properties.distinct_id));
-    const usersShared = new Set(notesEvents.filter((e) => e.event === 'Note_Shared').map((e) => e.properties.distinct_id));
-
-    const createdCount = usersCreated.size;
-    const savedCount = usersSaved.size;
-    const publishedCount = usersPublished.size;
-    const sharedCount = usersShared.size;
-
-    const savedPct = createdCount > 0 ? (savedCount / createdCount) * 100 : 0;
-    const publishedPct = createdCount > 0 ? (publishedCount / createdCount) * 100 : 0;
-    const sharedPct = createdCount > 0 ? (sharedCount / createdCount) * 100 : 0;
-
-    const notesFunnel = [
-      { name: 'Created', count: createdCount, percentage: 100, dropoff: 0 },
-      {
-        name: 'Saved', count: savedCount, percentage: Math.min(savedPct, 100),
-        dropoff: createdCount > 0 ? Math.min(100, Math.max(0, ((createdCount - savedCount) / createdCount) * 100)) : 0
-      },
-      {
-        name: 'Published', count: publishedCount, percentage: Math.min(publishedPct, 100),
-        dropoff: savedCount > 0 ? Math.min(100, Math.max(0, ((savedCount - publishedCount) / savedCount) * 100)) : 0
-      },
-      {
-        name: 'Shared', count: sharedCount, percentage: Math.min(sharedPct, 100),
-        dropoff: publishedCount > 0 ? Math.min(100, Math.max(0, ((publishedCount - sharedCount) / publishedCount) * 100)) : 0
-      },
-    ];
+    // Notes funnel: sequential unique users — a user counts in a step only if
+    // they also reached every prior step within the window
+    const notesFunnel = buildSequentialFunnel(notesEvents, [
+      { name: 'Created', eventName: 'Note_Created' },
+      { name: 'Saved', eventName: 'Note_Saved' },
+      { name: 'Published', eventName: 'Note_Published' },
+      { name: 'Shared', eventName: 'Note_Shared' },
+    ]);
+    const uniqueNoteCreators = notesFunnel[0].count;
 
     // Daily activity
     const days = getDaysInRange(dateRange.from, dateRange.to);
@@ -166,6 +146,7 @@ export async function GET(request: NextRequest) {
       totalShared,
       totalDocumentUploads,
       uniqueNoteUsers,
+      uniqueNoteCreators,
       totalWritingToolUses,
       createdTrend,
       viewedTrend,

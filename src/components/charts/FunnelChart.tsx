@@ -9,9 +9,11 @@ interface FunnelStep {
 
 interface FunnelChartProps {
   data: FunnelStep[];
+  /** Unit appended to each step count, e.g. "users" → "13 users". */
+  unitLabel?: string;
 }
 
-export default function FunnelChart({ data }: FunnelChartProps) {
+export default function FunnelChart({ data, unitLabel }: FunnelChartProps) {
   if (data.length === 0) {
     return <div className="empty-state py-8">No funnel data available</div>;
   }
@@ -36,12 +38,14 @@ export default function FunnelChart({ data }: FunnelChartProps) {
                   {labelInside && (
                     <span className="text-sm font-semibold text-[#F6EFE4] tabular-nums">
                       {step.count.toLocaleString()}
+                      {unitLabel ? ` ${unitLabel}` : ''}
                     </span>
                   )}
                 </div>
                 {!labelInside && (
                   <span className="ml-2 text-sm font-semibold text-ink tabular-nums">
                     {step.count.toLocaleString()}
+                    {unitLabel ? ` ${unitLabel}` : ''}
                   </span>
                 )}
               </div>
