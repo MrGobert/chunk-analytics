@@ -136,6 +136,49 @@ def _event_occurred_at(data: dict) -> datetime:
     return _to_datetime(data.get("occurredAt") or data.get("event_timestamp_ms"))
 
 
+def _customer_subscription_events(db, uid: str) -> list[dict]:
+    """Load one customer's production RevenueCat event mirrors, oldest first.
+
+    Equality-only query (no order_by) — subscription_events has no composite
+    index on appUserId+occurredAt; sorting happens in Python instead.
+    """
+    try:
+        docs = list(
+            db.collection("subscription_events")
+            .where("appUserId", "==", uid)
+            .limit(500)
+            .stream()
+        )
+        events = []
+        for doc in docs:
+            data = doc.to_dict()
+            if (data.get("environment") or "PRODUCTION") == "SANDBOX":
+                continue
+            occurred = _event_occurred_at(data)
+            if not occurred:
+                continue
+            event_type = str(data.get("type") or "").lower()
+            if _is_trial_start_event(data):
+                event_type = "trial_started"
+            events.append({
+                "event": event_type,
+                "date": occurred.isoformat(),
+                "platform": data.get("platform"),
+                "store": data.get("store"),
+                "productId": data.get("productId"),
+                "periodType": data.get("periodType"),
+                "price": data.get("price"),
+                "currency": data.get("currency"),
+                "expirationAt": _safe_isoformat(data.get("expirationAt")) or None,
+                "source": "revenuecat",
+            })
+        events.sort(key=lambda e: e["date"])
+        return events
+    except Exception as exc:
+        logging.warning(f"[ANALYTICS_API] subscription events unavailable for {uid}: {exc}")
+        return []
+
+
 # ---- Auth decorator (reuses existing verify_webhook_auth) ----
 
 
@@ -1097,21 +1140,49 @@ def customer_detail(uid: str):
     return jsonify(result), 200
 
 
-def _get_customer_detail(uid: str) -> dict:
-    from firebase_setup import db
+def _derived_subscription_history(data: dict) -> list[dict]:
+    """Infer subscription history from user-doc lifecycle fields.
 
-    now = datetime.now(timezone.utc)
+    Fallback for users predating the subscription_events webhook mirror.
+    """
+    history = []
+    created = _get_creation_date(data)
+    if created:
+        history.append({
+            "event": "created",
+            "date": created.isoformat(),
+            "source": "derived",
+        })
 
-    # Get user doc
-    user_doc = db.collection("users").document(uid).get()
-    if not user_doc.exists:
-        return None
+    trial_end = _to_datetime(data.get("trialEndDate"))
+    if trial_end:
+        history.append({
+            "event": "trial_ends",
+            "date": trial_end.isoformat(),
+            "source": "derived",
+        })
 
-    data = user_doc.to_dict()
-    health = _compute_health_score(data, now)
-    usage = data.get("usageStats", {}) or {}
+    renewal_date = _to_datetime(data.get("renewalDate"))
+    if renewal_date:
+        history.append({
+            "event": "subscription_active",
+            "date": renewal_date.isoformat(),
+            "source": "derived",
+        })
 
-    # Get email history
+    expiration_date = _to_datetime(data.get("expirationDate"))
+    if expiration_date:
+        history.append({
+            "event": "expired",
+            "date": expiration_date.isoformat(),
+            "source": "derived",
+        })
+
+    history.sort(key=lambda x: x["date"])
+    return history
+
+
+def _customer_email_history(db, uid: str) -> list[dict]:
     email_history = []
     try:
         email_docs = list(
@@ -1132,38 +1203,94 @@ def _get_customer_detail(uid: str) -> dict:
             })
     except Exception:
         pass
+    return email_history
 
-    # Infer subscription history from user doc fields
-    subscription_history = []
-    created = _get_creation_date(data)
-    if created:
-        subscription_history.append({
-            "event": "created",
-            "date": created.isoformat(),
-        })
 
-    trial_end = _to_datetime(data.get("trialEndDate"))
-    if trial_end:
-        subscription_history.append({
-            "event": "trial_started",
-            "date": trial_end.isoformat(),
-        })
+def _current_subscription(uid: str, data: dict) -> dict:
+    """Live RevenueCat state, falling back to the user doc's mirror fields."""
+    try:
+        import revenuecat_client
 
-    renewal_date = _to_datetime(data.get("renewalDate"))
-    if renewal_date:
-        subscription_history.append({
-            "event": "subscription_active",
-            "date": renewal_date.isoformat(),
-        })
+        live = revenuecat_client.get_current_subscription(uid)
+    except Exception as exc:
+        logging.warning(f"[ANALYTICS_API] RevenueCat lookup failed for {uid}: {exc}")
+        live = None
 
-    expiration_date = _to_datetime(data.get("expirationDate"))
-    if expiration_date:
-        subscription_history.append({
-            "event": "expired",
-            "date": expiration_date.isoformat(),
-        })
+    if live is not None:
+        # v2 sends period timestamps as epoch milliseconds
+        live["currentPeriodStartsAt"] = _safe_isoformat(live.get("currentPeriodStartsAt")) or None
+        live["currentPeriodEndsAt"] = _safe_isoformat(live.get("currentPeriodEndsAt")) or None
+        live["source"] = "revenuecat"
+        return live
 
-    subscription_history.sort(key=lambda x: x["date"])
+    if not data:
+        return None
+
+    return {
+        "source": "firestore",
+        "status": data.get("subscriptionStatus"),
+        "willRenew": data.get("subscriptionStatus") in ("active", "trial"),
+        "store": data.get("subscriptionStore"),
+        "productId": data.get("productId"),
+        "currentPeriodEndsAt": _safe_isoformat(
+            data.get("renewalDate") or data.get("expirationDate")
+        ) or None,
+        "price": data.get("subscriptionPrice"),
+        "currency": data.get("subscriptionCurrency"),
+    }
+
+
+def _get_customer_detail(uid: str) -> dict:
+    from firebase_setup import db
+
+    now = datetime.now(timezone.utc)
+
+    user_doc = db.collection("users").document(uid).get()
+    email_history = _customer_email_history(db, uid)
+    events = _customer_subscription_events(db, uid)
+
+    if not user_doc.exists:
+        # No Firestore profile (e.g. a Mixpanel distinct_id that never signed
+        # up, or a deleted account) — return whatever linked data exists.
+        if not email_history and not events:
+            return None
+        return {
+            "uid": uid,
+            "partialProfile": True,
+            "email": "",
+            "name": "",
+            "subscriptionStatus": "",
+            "platform": "unknown",
+            "createdAt": "",
+            "lastActiveAt": "",
+            "healthScore": None,
+            "healthStatus": None,
+            "healthFactors": None,
+            "hasUsageStats": False,
+            "usageStats": {},
+            "emailHistory": email_history,
+            "subscriptionHistory": events,
+            "subscriptionHistorySource": "events",
+            "currentSubscription": _current_subscription(uid, {}),
+        }
+
+    data = user_doc.to_dict()
+    health = _compute_health_score(data, now)
+    usage = data.get("usageStats", {}) or {}
+
+    if events:
+        subscription_history = events
+        created = _get_creation_date(data)
+        if created:
+            subscription_history = [{
+                "event": "created",
+                "date": created.isoformat(),
+                "source": "derived",
+            }] + subscription_history
+        history_source = "events"
+    else:
+        subscription_history = _derived_subscription_history(data)
+        history_source = "derived"
 
     return {
         "uid": uid,
@@ -1174,6 +1301,9 @@ def _get_customer_detail(uid: str) -> dict:
         "createdAt": _safe_isoformat(data.get("createdAt")),
         "lastActiveAt": _safe_isoformat(data.get("lastActiveAt")),
         "healthScore": health["healthScore"],
+        "healthStatus": health["healthStatus"],
+        "healthFactors": health["factors"],
+        "hasUsageStats": bool(data.get("usageStats")),
         "usageStats": {
             "monthlySearches": usage.get("monthlySearches", 0) or 0,
             "monthlyDocuments": usage.get("monthlyDocuments", 0) or 0,
@@ -1183,6 +1313,8 @@ def _get_customer_detail(uid: str) -> dict:
         },
         "emailHistory": email_history,
         "subscriptionHistory": subscription_history,
+        "subscriptionHistorySource": history_source,
+        "currentSubscription": _current_subscription(uid, data),
     }
 
 
@@ -1439,6 +1571,13 @@ _EMAIL_TEMPLATES = {
         "trigger": "manual",
         "schedule": "On demand",
     },
+    "whats_new_summer_2026": {
+        "name": "What's New — Summer 2026",
+        "category": "Announcements",
+        "description": "Re-engagement broadcast covering the May–July 2026 feature wave.",
+        "trigger": "manual",
+        "schedule": "On demand",
+    },
 }
 
 
@@ -1449,6 +1588,7 @@ def _render_email_template(key: str) -> dict | None:
     renderers = {
         "welcome": lambda: email_service.get_welcome_email("James"),
         "memory_2_announcement": lambda: email_service.get_memory_2_announcement_email("James"),
+        "whats_new_summer_2026": lambda: email_service.get_whats_new_summer_2026_email("James"),
         "trial_started": lambda: email_service.get_trial_started_email("James"),
         "trial_ending": lambda: email_service.get_trial_ending_email("James", hours_remaining=12),
         "subscription_expired": lambda: email_service.get_subscription_expired_email("James"),

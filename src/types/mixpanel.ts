@@ -615,16 +615,34 @@ export interface CustomerHealth {
   note?: string;
 }
 
+export interface CurrentSubscription {
+  source: 'revenuecat' | 'firestore';
+  userExists?: boolean;
+  isSubscribed?: boolean;
+  status?: string | null;
+  store?: string | null;
+  productId?: string | null;
+  currentPeriodStartsAt?: string | null;
+  currentPeriodEndsAt?: string | null;
+  willRenew?: boolean;
+  isSandbox?: boolean;
+  price?: number | null;
+  currency?: string | null;
+}
+
 export interface CustomerDetail {
   uid: string;
   email: string;
   name?: string;
   platform: string;
-  healthScore: number;
-  healthFactors?: CustomerHealthFactors;
+  healthScore: number | null;
+  healthStatus?: string | null;
+  healthFactors?: CustomerHealthFactors | null;
   subscriptionStatus: string;
   createdAt: string;
   lastActiveAt: string;
+  partialProfile?: boolean;
+  hasUsageStats?: boolean;
   usageStats: {
     monthlySearches?: number;
     monthlyDocuments?: number;
@@ -646,9 +664,29 @@ export interface CustomerDetail {
     date?: string;
     timestamp?: string;
     platform?: string;
+    store?: string;
+    productId?: string;
+    periodType?: string;
+    price?: number | null;
+    currency?: string;
+    source?: 'revenuecat' | 'derived';
   }[];
+  subscriptionHistorySource?: 'events' | 'derived';
+  currentSubscription?: CurrentSubscription | null;
   lastUpdated: string;
   error?: string;
+}
+
+export interface UserActivityMetrics {
+  uid: string;
+  totalEvents: number;
+  activeDays: number;
+  lastSeen: string | null;
+  byCategory: { category: string; events: number }[];
+  topEvents: { event: string; count: number }[];
+  dateRange: { from: string; to: string };
+  dataUnavailable?: boolean;
+  lastUpdated: string;
 }
 
 export interface ActivationMetrics {
