@@ -1,14 +1,15 @@
+import json
 import os
 import sys
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from evals import assertions as A
 from evals.cases import ALL_CASES, get_case
-from evals.chat_client import ChatResult, default_chat_body
+from evals.chat_client import ChatClient, ChatResult, default_chat_body
 from evals.judge import JudgeSpec, judge_answer
 from evals.stream_parser import ZERO_WIDTH_SPACE, parse_stream
 
@@ -137,6 +138,41 @@ class TestStreamParser(unittest.TestCase):
         parsed = parse_stream([" \n", " \n", " \n"])
         self.assertEqual(parsed.heartbeats, 3)
         self.assertEqual(parsed.answer_text, "")
+
+    def test_standalone_heartbeat_between_content_lines_is_dropped(self):
+        # Post line-boundary-fix wire shape: cerebral only synthesizes " \n"
+        # after a chunk ending in "\n", so it always arrives as its own line —
+        # even mid-chartdata-fence it must not corrupt the JSON.
+        parsed = parse_stream(
+            ['```chartdata\n{"type": "bar",\n', " \n", '"data": [1]}\n```\n']
+        )
+        self.assertEqual(parsed.heartbeats, 1)
+        self.assertEqual(len(parsed.chart_blocks), 1)
+        json.loads(parsed.chart_blocks[0])  # must parse cleanly
+
+    def test_heartbeat_glued_to_open_line_is_preserved_like_web_client(self):
+        # Pre-fix corruption shape (the chartdata eval failure of 2026-07-24):
+        # a keepalive emitted after a chunk with NO trailing newline glues onto
+        # the open line. The real web client renders exactly this corruption,
+        # so the parser must preserve it — the strict chartdata assertion then
+        # catching it is the point of the eval.
+        parsed = parse_stream(['```chartdata\n{"category', " \n", '": "NYC"}\n```\n'])
+        self.assertEqual(parsed.heartbeats, 0)
+        self.assertEqual(len(parsed.chart_blocks), 1)
+        self.assertIn('{"category \n"', parsed.chart_blocks[0])
+        with self.assertRaises(ValueError):
+            json.loads(parsed.chart_blocks[0])
+
+    def test_whitespace_only_lines_dropped_like_web_client(self):
+        # chat.ts drops ANY whitespace-only non-empty line via line.trim() —
+        # including the backend's "\n \n" midline-escalation shape.
+        parsed = parse_stream(["foo\n", "  \n", "bar"])
+        self.assertEqual(parsed.answer_text, "foo\nbar")
+        self.assertEqual(parsed.heartbeats, 1)
+
+        parsed = parse_stream(["dangling", "\n \n", "rest\n"])
+        self.assertEqual(parsed.answer_text, "dangling\nrest")
+        self.assertEqual(parsed.heartbeats, 1)
 
 
 def _stream_result(stream_text, **kwargs):
@@ -281,6 +317,50 @@ class TestCases(unittest.TestCase):
         self.assertFalse(body["memoryEnabled"])
         self.assertEqual(body["conversation_id"], "eval-run1-case1")
         self.assertTrue(body["request_id"])
+
+
+class TestResearchPoll(unittest.TestCase):
+    """poll_research_result must ride out transient 5xx (router errors and
+    web-dyno restarts mid-deploy) and only treat cerebral's Celery-FAILURE
+    body as terminal."""
+
+    @staticmethod
+    def _response(status, json_body=None, text=""):
+        resp = Mock()
+        resp.status_code = status
+        resp.text = text
+        if json_body is None:
+            resp.json.side_effect = ValueError("not json")
+        else:
+            resp.json.return_value = json_body
+        return resp
+
+    def test_transient_5xx_keeps_polling(self):
+        client = ChatClient("https://cerebral.test", identity=None)
+        responses = [
+            self._response(503, text="<html>upstream connect error</html>"),
+            self._response(202, json_body={"state": "PROGRESS"}),
+            self._response(200, json_body={"report": "done", "sources": []}),
+        ]
+        with patch("evals.chat_client.httpx.get", side_effect=responses), patch(
+            "evals.chat_client.time.sleep"
+        ):
+            result = client.poll_research_result("task-1", timeout_s=60, interval_s=0)
+        self.assertEqual(result.get("report"), "done")
+
+    def test_celery_failure_body_is_terminal(self):
+        client = ChatClient("https://cerebral.test", identity=None)
+        body = {
+            "error": "Research task failed",
+            "details": "Worker exited prematurely: signal 15 (SIGTERM) Job: 96.",
+        }
+        with patch(
+            "evals.chat_client.httpx.get",
+            side_effect=[self._response(500, json_body=body, text=json.dumps(body))],
+        ), patch("evals.chat_client.time.sleep"):
+            result = client.poll_research_result("task-2", timeout_s=60, interval_s=0)
+        self.assertEqual(result["state"], "FAILURE")
+        self.assertEqual(result["status_code"], 500)
 
 
 if __name__ == "__main__":

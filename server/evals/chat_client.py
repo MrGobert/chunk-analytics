@@ -208,7 +208,11 @@ class ChatClient:
     def poll_research_result(self, task_id: str, timeout_s: int = 420, interval_s: float = 5.0) -> dict:
         """Poll /api/research_result/<id>?format=json until the report is ready.
 
-        202 = not ready yet; 200 = {"report", "sources", ...}; 5xx = failure.
+        202 = not ready yet; 200 = {"report", "sources", ...}. A 5xx is only
+        terminal when it carries cerebral's Celery-FAILURE body ("Research
+        task failed", main.py); any other 5xx is transient infrastructure — a
+        router error or web-dyno restart mid-deploy — and polling continues
+        until the deadline.
         """
         deadline = time.monotonic() + timeout_s
         last: dict = {}
@@ -228,8 +232,17 @@ class ChatClient:
                     except ValueError:
                         pass
                 elif response.status_code >= 500:
-                    return {"state": "FAILURE", "status_code": response.status_code,
-                            "body": response.text[:500]}
+                    try:
+                        body = response.json()
+                    except ValueError:
+                        body = {}
+                    if isinstance(body, dict) and body.get("error") == "Research task failed":
+                        return {"state": "FAILURE", "status_code": response.status_code,
+                                "body": response.text[:500]}
+                    logging.warning(
+                        f"[EVALS] research_result transient {response.status_code}: "
+                        f"{response.text[:200]}"
+                    )
             except (httpx.HTTPError, ValueError) as exc:
                 logging.warning(f"[EVALS] research_result poll error: {exc}")
             time.sleep(interval_s)

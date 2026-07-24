@@ -91,7 +91,10 @@ def process_line(parsed: ParsedStream, line: str, text_lines: list) -> None:
     if line.startswith("data: "):  # tolerated SSE framing, same as the web client
         line = line[6:]
 
-    if line == " ":  # heartbeat token " \n"
+    # Heartbeat / keepalive: the web client drops ANY whitespace-only
+    # non-empty line (chat.ts gates on `line.trim()`), not just the canonical
+    # " " — mirror that exactly. Empty lines stay paragraph breaks below.
+    if line and not line.strip():
         parsed.heartbeats += 1
         return
 
