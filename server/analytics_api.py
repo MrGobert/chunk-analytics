@@ -1870,9 +1870,29 @@ def evals_run():
         }
     )
 
-    from eval_tasks import run_eval_suite_task
+    # Dispatch by task name through the explicitly configured Celery app.
+    # The web dyno never initializes celery_app, so importing eval_tasks and
+    # calling .delay() on its @shared_task here binds to Celery's fallback
+    # default app (amqp://localhost:5672) and dies with ECONNREFUSED. Every
+    # other task in this codebase is dispatched from the worker dyno (where
+    # `celery -A celery_app` makes the configured app current), which is why
+    # this only bites web-side dispatch. send_task also keeps the heavy evals
+    # package out of the web process entirely.
+    from celery_app import celery as celery_client
 
-    run_eval_suite_task.delay(run_id, "manual")
+    try:
+        celery_client.send_task("run_eval_suite", args=[run_id, "manual"])
+    except Exception as exc:
+        logging.error(f"[ANALYTICS_API] eval dispatch failed: {exc}", exc_info=True)
+        try:
+            _eval_runs_collection().document(run_id).set(
+                {"status": "error", "summary": {"error": f"dispatch failed: {exc}"}},
+                merge=True,
+            )
+        except Exception:
+            pass
+        return jsonify({"error": f"Could not queue eval run: {exc}"}), 503
+
     return jsonify({"run_id": run_id, "status": "queued"}), 200
 
 
