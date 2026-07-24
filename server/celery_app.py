@@ -37,7 +37,7 @@ celery.conf.update(
     redis_backend_use_ssl=broker_use_ssl,
     task_ignore_result=True,
     timezone="UTC",
-    imports=["email_tasks", "analytics_tasks"],
+    imports=["email_tasks", "analytics_tasks", "eval_tasks"],
     beat_schedule={
         # ============================================================
         # Trial & Churn Monitoring
@@ -119,6 +119,13 @@ celery.conf.update(
         "snapshot-daily-mrr": {
             "task": "snapshot_daily_mrr",
             "schedule": crontab(minute=55, hour=23),
+        },
+        # ============================================================
+        # AI Chat Eval Suite (runtime-gated by EVAL_DAILY_SCHEDULE_ENABLED)
+        # ============================================================
+        "run-eval-suite-daily": {
+            "task": "dispatch_scheduled_eval",
+            "schedule": crontab(minute=30, hour=7),
         },
     },
 )

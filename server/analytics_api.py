@@ -1777,6 +1777,147 @@ def _compute_onboarding_categories() -> dict:
 
 
 # ============================================================
+# AI Chat Eval Suite
+# ============================================================
+
+# A run doc stuck in queued/running older than this is treated as dead.
+EVAL_RUN_STALE_MINUTES = 45
+
+
+def _eval_runs_collection():
+    from firebase_setup import db
+
+    return db.collection("eval_runs")
+
+
+def _serialize_run(doc_id: str, data: dict, include_cases: bool = False) -> dict:
+    run = {
+        "run_id": doc_id,
+        "status": data.get("status", "unknown"),
+        "trigger": data.get("trigger", ""),
+        "target_url": data.get("target_url", ""),
+        "eval_uid": data.get("eval_uid", ""),
+        "created_at": _safe_isoformat(data.get("created_at")),
+        "started_at": _safe_isoformat(data.get("started_at")),
+        "finished_at": _safe_isoformat(data.get("finished_at")),
+        "duration_s": data.get("duration_s"),
+        "progress": data.get("progress", {}),
+        "summary": data.get("summary", {}),
+        "case_index": data.get("case_index", []),
+    }
+    if include_cases:
+        run["cases"] = []
+    return run
+
+
+def _find_active_eval_run():
+    """Return (run_id, data) for a live queued/running run, expiring stale ones."""
+    try:
+        docs = list(
+            _eval_runs_collection()
+            .order_by("created_at", direction="DESCENDING")
+            .limit(10)
+            .stream()
+        )
+    except Exception as e:
+        logging.warning(f"[ANALYTICS_API] eval run scan failed: {e}")
+        return None, None
+    now = datetime.now(timezone.utc)
+    for doc in docs:
+        data = doc.to_dict() or {}
+        if data.get("status") not in ("queued", "running"):
+            continue
+        created = _to_datetime(data.get("created_at"))
+        if created and now - created > timedelta(minutes=EVAL_RUN_STALE_MINUTES):
+            try:
+                doc.reference.set(
+                    {"status": "error", "summary": {"error": "stale run auto-expired"}},
+                    merge=True,
+                )
+            except Exception:
+                pass
+            continue
+        return doc.id, data
+    return None, None
+
+
+@analytics_api_bp.route("/evals/run", methods=["POST"])
+@require_analytics_auth
+def evals_run():
+    """Create an eval run doc and dispatch the Celery suite task."""
+    import uuid as _uuid
+
+    from evals import config as eval_config
+
+    if not eval_config.evals_enabled():
+        return jsonify({"error": "Evals are disabled (EVAL_ENABLED=false)"}), 503
+    ok, problem = eval_config.is_configured()
+    if not ok:
+        return jsonify({"error": f"Eval account not configured: {problem}"}), 503
+
+    active_id, _active = _find_active_eval_run()
+    if active_id:
+        return jsonify({"error": "A run is already in progress", "run_id": active_id}), 409
+
+    run_id = (
+        f"{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}-{_uuid.uuid4().hex[:6]}"
+    )
+    _eval_runs_collection().document(run_id).set(
+        {
+            "status": "queued",
+            "trigger": "manual",
+            "created_at": datetime.now(timezone.utc),
+        }
+    )
+
+    from eval_tasks import run_eval_suite_task
+
+    run_eval_suite_task.delay(run_id, "manual")
+    return jsonify({"run_id": run_id, "status": "queued"}), 200
+
+
+@analytics_api_bp.route("/evals/runs", methods=["GET"])
+@require_analytics_auth
+@safe_analytics({"runs": []})
+def evals_runs():
+    """Compact summaries of recent runs, newest first."""
+    limit = min(max(request.args.get("limit", 30, type=int), 1), 100)
+    _find_active_eval_run()  # opportunistically expire stale runs
+    docs = (
+        _eval_runs_collection()
+        .order_by("created_at", direction="DESCENDING")
+        .limit(limit)
+        .stream()
+    )
+    runs = [_serialize_run(doc.id, doc.to_dict() or {}) for doc in docs]
+    return jsonify({"runs": runs}), 200
+
+
+@analytics_api_bp.route("/evals/runs/<run_id>", methods=["GET"])
+@require_analytics_auth
+@safe_analytics({"run": None})
+def evals_run_detail(run_id):
+    """Full run doc + per-case results (serves both polling and detail view)."""
+    snapshot = _eval_runs_collection().document(run_id).get()
+    if not snapshot.exists:
+        return jsonify({"run": None, "error": "not found"}), 404
+    run = _serialize_run(run_id, snapshot.to_dict() or {}, include_cases=True)
+    case_docs = (
+        _eval_runs_collection().document(run_id).collection("cases").stream()
+    )
+    cases = []
+    for doc in case_docs:
+        data = doc.to_dict() or {}
+        data["id"] = doc.id
+        data["started_at"] = _safe_isoformat(data.get("started_at"))
+        data["finished_at"] = _safe_isoformat(data.get("finished_at"))
+        cases.append(data)
+    cases.sort(key=lambda c: c.get("idx", 0))
+    run["cases"] = cases
+    return jsonify({"run": run}), 200
+
+
+# ============================================================
 # Health Check
 # ============================================================
 

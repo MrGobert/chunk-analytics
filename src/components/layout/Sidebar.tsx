@@ -25,6 +25,7 @@ import {
   Briefcase,
   Bug,
   Activity,
+  FlaskConical,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -43,6 +44,8 @@ const ROUTE_TO_ENDPOINTS: Record<string, string[]> = {
   '/capture-monitors': ['/api/metrics/capture-monitors'],
   '/outreach': ['/api/metrics/emails'],
   '/health': ['/api/sentry/stats'],
+  // '/evals' is intentionally absent: the Evals page polls directly (no
+  // useAnalytics cache), so prefetching would never be read.
 };
 
 interface NavItem {
@@ -90,6 +93,7 @@ const navSections: NavSection[] = [
     items: [
       { href: '/outreach', label: 'Email', icon: Mail },
       { href: '/health', label: 'Health', icon: Bug },
+      { href: '/evals', label: 'Evals', icon: FlaskConical },
     ],
   },
 ];
