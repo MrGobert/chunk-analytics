@@ -8,6 +8,17 @@ import {
 import { getDateRange, getDaysInRange, formatDate, safeDiv } from '@/lib/utils';
 import { buildFunnel, uniqueUsersFor } from '@/lib/funnel';
 import { MixpanelEvent } from '@/types/mixpanel';
+import {
+  marketingIdentityLinks,
+  marketingJourneyId,
+  marketingPageKey,
+  marketingPageKeyFromValue,
+  marketingPageLabelFromKey,
+  marketingPageViews,
+  orderedJourneyCounts,
+  purchaseCompletions,
+  signupCompletions,
+} from '@/lib/marketing-events';
 
 export const maxDuration = 60;
 
@@ -48,6 +59,7 @@ function buildDailyData(
   events: MixpanelEvent[],
   days: string[],
   matchers: { key: string; match: (event: MixpanelEvent) => boolean }[],
+  identityLinks?: Map<string, string>,
 ) {
   return days.map((date) => {
     const dayEvents = events.filter(
@@ -55,7 +67,12 @@ function buildDailyData(
     );
     const row: Record<string, string | number> = { date };
     for (const matcher of matchers) {
-      row[matcher.key] = usersFor(dayEvents, matcher.match).size;
+      const matchingEvents = dayEvents.filter(matcher.match);
+      row[matcher.key] = identityLinks
+        ? new Set(
+            matchingEvents.map((event) => marketingJourneyId(event, identityLinks)),
+          ).size
+        : usersFor(dayEvents, matcher.match).size;
     }
     return row;
   });
@@ -69,32 +86,57 @@ function pageLabel(raw: string): string {
 }
 
 function buildWebMetrics(events: MixpanelEvent[]) {
-  const pageViews = events.filter((event) => event.event === 'Page_Viewed');
-  const marketingVisitors = usersFor(pageViews, () => true);
-  const signupUsers = uniqueUsersFor(events, SIGNUP_EVENTS);
-  const subscriberUsers = uniqueUsersFor(events, PURCHASE_EVENTS);
+  const pageViews = marketingPageViews(events);
+  const signupStarts = events.filter((event) => event.event === 'Signup_Started');
+  const signupEvents = signupCompletions(events);
+  const purchaseEvents = purchaseCompletions(events);
+  const identityLinks = marketingIdentityLinks(events);
+  const funnelCounts = orderedJourneyCounts(
+    [
+      { name: 'Marketing Visitors', events: pageViews },
+      { name: 'Signup Started', events: signupStarts },
+      { name: 'Account Created', events: signupEvents },
+      { name: 'Subscribed', events: purchaseEvents },
+    ],
+    identityLinks,
+  );
+  const [
+    marketingVisitors = 0,
+    signupStartedUsers = 0,
+    signupUsers = 0,
+    subscriberUsers = 0,
+  ] =
+    funnelCounts.map((step) => step.count);
 
   const visitCounts = new Map<string, number>();
   for (const event of pageViews) {
-    const page = String(event.properties.page_name || 'Unknown');
-    if (page !== 'Unknown') visitCounts.set(page, (visitCounts.get(page) || 0) + 1);
+    const page = marketingPageKey(event);
+    if (page !== 'unknown') visitCounts.set(page, (visitCounts.get(page) || 0) + 1);
   }
 
   const signupUsersByPage = new Map<string, Set<string>>();
   const signupPageByUser = new Map<string, string>();
-  for (const event of events.filter((item) => SIGNUP_EVENTS.includes(item.event))) {
-    const page = String(event.properties.signup_source_page || '');
+  for (const event of signupEvents) {
+    const page = marketingPageKeyFromValue(
+      String(event.properties.signup_source_page || ''),
+    );
     if (!page) continue;
-    const uid = event.properties.distinct_id;
+    const uid = marketingJourneyId(event, identityLinks);
     signupPageByUser.set(uid, page);
+    signupPageByUser.set(event.properties.distinct_id, page);
     if (!signupUsersByPage.has(page)) signupUsersByPage.set(page, new Set());
     signupUsersByPage.get(page)?.add(uid);
   }
 
   const subscriberUsersByPage = new Map<string, Set<string>>();
-  for (const event of events.filter((item) => PURCHASE_EVENTS.includes(item.event))) {
-    const uid = event.properties.distinct_id;
-    const page = String(event.properties.signup_source_page || signupPageByUser.get(uid) || '');
+  for (const event of purchaseEvents) {
+    const uid = marketingJourneyId(event, identityLinks);
+    const page = marketingPageKeyFromValue(String(
+      event.properties.signup_source_page ||
+        signupPageByUser.get(uid) ||
+        signupPageByUser.get(event.properties.distinct_id) ||
+        '',
+    ));
     if (!page) continue;
     if (!subscriberUsersByPage.has(page)) subscriberUsersByPage.set(page, new Set());
     subscriberUsersByPage.get(page)?.add(uid);
@@ -110,7 +152,7 @@ function buildWebMetrics(events: MixpanelEvent[]) {
       const visits = visitCounts.get(page) || 0;
       const signups = signupUsersByPage.get(page)?.size || 0;
       return {
-        page,
+        page: marketingPageLabelFromKey(page),
         visits,
         signups,
         subscriptions: subscriberUsersByPage.get(page)?.size || 0,
@@ -121,22 +163,19 @@ function buildWebMetrics(events: MixpanelEvent[]) {
     .slice(0, 15);
 
   return {
-    funnel: buildFunnel([
-      { name: 'Marketing Visitors', count: marketingVisitors.size },
-      { name: 'Account Created', count: signupUsers.size },
-      { name: 'Subscribed', count: subscriberUsers.size },
-    ]),
+    funnel: buildFunnel(funnelCounts),
     statCards: [
-      { label: 'Marketing Visitors', value: marketingVisitors.size, format: 'number' as const },
-      { label: 'Accounts Created', value: signupUsers.size, format: 'number' as const },
-      { label: 'Visitor → Signup', value: safeDiv(signupUsers.size, marketingVisitors.size), format: 'percentage' as const },
-      { label: 'Signup → Subscriber', value: safeDiv(subscriberUsers.size, signupUsers.size), format: 'percentage' as const },
+      { label: 'Marketing Visitors', value: marketingVisitors, format: 'number' as const },
+      { label: 'Signup Starts', value: signupStartedUsers, format: 'number' as const },
+      { label: 'Visitor → Signup', value: safeDiv(signupUsers, marketingVisitors), format: 'percentage' as const },
+      { label: 'Signup → Subscriber', value: safeDiv(subscriberUsers, signupUsers), format: 'percentage' as const },
     ],
     topPages: Array.from(visitCounts)
-      .map(([page, visits]) => ({ page, visits }))
+      .map(([page, visits]) => ({ page: marketingPageLabelFromKey(page), visits }))
       .sort((a, b) => b.visits - a.visits)
       .slice(0, 15),
     pageAttribution,
+    identityLinks,
   };
 }
 
@@ -269,12 +308,14 @@ export async function GET(request: NextRequest) {
         funnel: web.funnel,
         statCards: web.statCards,
         dailyData: buildDailyData(events, days, [
-          { key: 'marketing', match: (event) => event.event === 'Page_Viewed' },
+          { key: 'marketing', match: (event) => ['Marketing_Page_Viewed', 'Page_Viewed'].includes(event.event) },
+          { key: 'signupStarted', match: (event) => event.event === 'Signup_Started' },
           { key: 'signup', match: (event) => SIGNUP_EVENTS.includes(event.event) },
           { key: 'subscriber', match: (event) => PURCHASE_EVENTS.includes(event.event) },
-        ]),
+        ], web.identityLinks),
         dailyLines: [
           { key: 'marketing', color: '#f59e0b', name: 'Marketing Visitors' },
+          { key: 'signupStarted', color: '#8b5cf6', name: 'Signup Started' },
           { key: 'signup', color: '#3b82f6', name: 'Accounts Created' },
           { key: 'subscriber', color: '#10b981', name: 'Subscribed' },
         ],

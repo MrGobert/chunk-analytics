@@ -9,13 +9,12 @@ import {
   getUniqueUsers,
   getUniqueUsersByDate,
   filterEventsByType,
-  getPropertyDistribution,
   getLastUpdated,
   referrerHost,
   UserType,
 } from '@/lib/mixpanel';
 import { getDateRange, getDaysInRange } from '@/lib/utils';
-import { subDays, startOfMonth, endOfMonth, format, differenceInDays } from 'date-fns';
+import { differenceInDays } from 'date-fns';
 
 export async function GET(request: NextRequest) {
   try {
@@ -141,7 +140,10 @@ export async function GET(request: NextRequest) {
     // ============================================
     // Traffic Sources (Web only)
     // ============================================
-    const trafficSessionEvents = filterEventsByType(events, ['App_Session_Started', 'Marketing_Session_Started', 'Page_Viewed']);
+    const trafficSessionEvents = filterEventsByType(events, [
+      'App_Session_Started',
+      'Marketing_Session_Started',
+    ]);
     
     // Extract referrer domains (shared normalization: www-stripped host, own-domain
     // and empty/unparseable referrers fold into "(direct)").
@@ -149,7 +151,9 @@ export async function GET(request: NextRequest) {
     const utmSourceCounts = new Map<string, number>();
 
     trafficSessionEvents.forEach((e) => {
-      const domain = referrerHost(e.properties.referrer);
+      const domain = referrerHost(
+        e.properties.referrer_domain ?? e.properties.referrer ?? e.properties.$referrer,
+      );
       referrerCounts.set(domain, (referrerCounts.get(domain) || 0) + 1);
 
       const utmSource = e.properties.utm_source as string;
@@ -159,13 +163,13 @@ export async function GET(request: NextRequest) {
     });
 
     const trafficSources = Array.from(referrerCounts.entries())
-      .map(([source, count]) => ({ source, count }))
-      .sort((a, b) => b.count - a.count)
+      .map(([source, sessions]) => ({ source, sessions }))
+      .sort((a, b) => b.sessions - a.sessions)
       .slice(0, 10);
 
     const utmSources = Array.from(utmSourceCounts.entries())
-      .map(([source, count]) => ({ source, count }))
-      .sort((a, b) => b.count - a.count)
+      .map(([campaign, sessions]) => ({ campaign, sessions }))
+      .sort((a, b) => b.sessions - a.sessions)
       .slice(0, 10);
 
     // ============================================

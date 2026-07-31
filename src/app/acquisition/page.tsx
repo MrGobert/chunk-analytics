@@ -12,7 +12,7 @@ import DataTable from '@/components/charts/DataTable';
 import { SkeletonPage, SkeletonChartCard } from '@/components/ui/Skeleton';
 import { useAnalytics } from '@/hooks/useAnalytics';
 import { chart } from '@/lib/chartTheme';
-import { Rocket, Globe, Share2, Monitor, Smartphone, Tablet, Laptop, Glasses, MousePointerClick, FileText, UserPlus, Lock } from 'lucide-react';
+import { Rocket, Globe, Share2, Monitor, Smartphone, Tablet, Laptop, Glasses, MousePointerClick, FileText, UserPlus, CheckCircle2 } from 'lucide-react';
 import type { AcquisitionFunnelMetrics, MarketingMetrics, AdvancedMetrics, ViralityMetrics } from '@/types/mixpanel';
 
 const VIEW_TABS = [
@@ -219,9 +219,26 @@ export default function AcquisitionPage() {
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
                 <StatCard title="CTA Clicks" value={marketing.totalCTAClicks} trend={marketing.ctaClicksTrend} format="number" icon={<MousePointerClick className="w-5 h-5" />} />
+                <StatCard title="Signup Starts" value={marketing.signupStarts} trend={marketing.signupStartsTrend} format="number" icon={<UserPlus className="w-5 h-5" />} />
+                <StatCard title="Completed Signups" value={marketing.signupCompletions} trend={marketing.signupCompletionsTrend} format="number" icon={<CheckCircle2 className="w-5 h-5" />} />
                 <StatCard title="Feature Page Visits" value={marketing.featurePagesVisited} trend={marketing.featurePagesTrend} format="number" icon={<FileText className="w-5 h-5" />} />
-                <StatCard title="Guest Prompts" value={marketing.guestSignupPrompts} trend={marketing.guestPromptsTrend} format="number" icon={<UserPlus className="w-5 h-5" />} />
-                <StatCard title="Feature Limits Hit" value={marketing.featureLimitReached} format="number" icon={<Lock className="w-5 h-5" />} />
+              </div>
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-12">
+                <ChartCard title="Website Signup Funnel" subtitle="Unique same-browser journeys through each conversion stage">
+                  {marketing.marketingCTAFunnel.some((step) => step.count > 0) ? <FunnelChart data={marketing.marketingCTAFunnel} /> : <div className="empty-state h-64">No signup funnel data available</div>}
+                </ChartCard>
+                <ChartCard title="Daily Signup Flow" subtitle="Deduplicated conversion events in Mixpanel project time">
+                  <LineChart
+                    data={marketing.dailyData}
+                    xKey="date"
+                    lines={[
+                      { key: 'ctaClicks', color: chart.series[0], name: 'CTA Clicks' },
+                      { key: 'signupStarts', color: chart.series[1], name: 'Signup Starts' },
+                      { key: 'signupCompletions', color: chart.primary, name: 'Completed Signups' },
+                    ]}
+                    showLegend
+                  />
+                </ChartCard>
               </div>
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-12">
                 <ChartCard title="CTA Source Distribution" subtitle="Where CTA clicks originate">
@@ -244,10 +261,10 @@ export default function AcquisitionPage() {
               </div>
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 <ChartCard title="Referrer Domains" subtitle="Top traffic sources by session count">
-                  {advanced.trafficSources.length > 0 ? <DataTable data={advanced.trafficSources as { source: string; sessions: number }[]} columns={[{ key: 'source', header: 'Source' }, { key: 'sessions', header: 'Sessions', numeric: true }]} /> : <div className="empty-state h-64">No referrer data available</div>}
+                  {advanced.trafficSources.length > 0 ? <DataTable data={advanced.trafficSources} columns={[{ key: 'source', header: 'Source' }, { key: 'sessions', header: 'Sessions', numeric: true }]} /> : <div className="empty-state h-64">No referrer data available</div>}
                 </ChartCard>
                 <ChartCard title="UTM Campaigns" subtitle="Campaign performance by sessions">
-                  {advanced.utmSources.length > 0 ? <DataTable data={advanced.utmSources as { campaign: string; sessions: number }[]} columns={[{ key: 'campaign', header: 'Campaign' }, { key: 'sessions', header: 'Sessions', numeric: true }]} /> : <div className="empty-state h-64">No UTM campaign data available</div>}
+                  {advanced.utmSources.length > 0 ? <DataTable data={advanced.utmSources} columns={[{ key: 'campaign', header: 'Campaign' }, { key: 'sessions', header: 'Sessions', numeric: true }]} /> : <div className="empty-state h-64">No UTM campaign data available</div>}
                 </ChartCard>
               </div>
             </>

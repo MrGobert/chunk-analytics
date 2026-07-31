@@ -503,8 +503,8 @@ export interface AdvancedMetrics {
   retention: { day1: number; day7: number; day30: number; totalNewUsers?: number };
   userBreakdown: { total?: number; paid: number; free: number; guest: number; authenticated?: number; paidPercentage?: number; conversionRate?: number };
   featureAdoption: { feature: string; users?: number; rate?: number; adoptionRate?: number }[];
-  trafficSources: { source: string; sessions?: number; count?: number }[];
-  utmSources: { source?: string; campaign?: string; sessions?: number; count?: number }[];
+  trafficSources: { source: string; sessions: number }[];
+  utmSources: { campaign: string; sessions: number }[];
   lastUpdated: string;
 }
 
@@ -840,10 +840,14 @@ export interface MarketingMetrics {
   paywallDismissals: number;
   featureLimitReached: number;
   marketingSessions: number;
+  signupStarts: number;
+  signupCompletions: number;
   pageViews: number;
   pagesPerSession: number;
   newVisitors: number;
   ctaClicksTrend: number | null;
+  signupStartsTrend: number | null;
+  signupCompletionsTrend: number | null;
   featurePagesTrend: number | null;
   guestPromptsTrend: number | null;
   paywallDismissalsTrend: number | null;
@@ -857,7 +861,16 @@ export interface MarketingMetrics {
   utmSourceDistribution: { source: string; sessions: number }[];
   utmMediumDistribution: { source: string; sessions: number }[];
   utmCampaignDistribution: { source: string; sessions: number }[];
-  dailyData: { date: string; tryFree: number; createAccount: number; featurePages: number; guestPrompts: number }[];
+  dailyData: {
+    date: string;
+    tryFree: number;
+    createAccount: number;
+    ctaClicks: number;
+    signupStarts: number;
+    signupCompletions: number;
+    featurePages: number;
+    guestPrompts: number;
+  }[];
   newVisitorsDaily: { date: string; newVisitors: number }[];
   marketingCTAFunnel: FunnelStep[];
   lastUpdated: string;

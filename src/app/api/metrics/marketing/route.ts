@@ -17,6 +17,17 @@ import {
 import { getDateRange, getDaysInRange, formatDate, safeDiv } from '@/lib/utils';
 import { MixpanelEvent } from '@/types/mixpanel';
 import { subDays } from 'date-fns';
+import { buildFunnel } from '@/lib/funnel';
+import {
+  marketingCtaClicks,
+  marketingFeatureKey,
+  marketingFeaturePageVisits,
+  marketingJourneyId,
+  marketingPageLabel,
+  marketingPageViews,
+  orderedJourneyCounts,
+  signupCompletions,
+} from '@/lib/marketing-events';
 
 /** Sort a value→count map into a descending { source, sessions } list. */
 function toSourceList(counts: Map<string, number>): { source: string; sessions: number }[] {
@@ -36,6 +47,7 @@ function distributionByProp(events: MixpanelEvent[], prop: string): { source: st
 }
 
 const MARKETING_EVENTS = [
+  'Marketing_CTA_Clicked',
   'Try_For_Free_Clicked',
   'Create_Account_Clicked',
   'Feature_Page_Visited',
@@ -44,6 +56,10 @@ const MARKETING_EVENTS = [
   'Paywall_Dismissed',
   'Paywall Dismissed',
   'Marketing_Session_Started',
+  'Signup_Started',
+  'Signup_Completed',
+  'SignUp',
+  'Account Created',
 ];
 
 export async function GET(request: NextRequest) {
@@ -62,15 +78,28 @@ export async function GET(request: NextRequest) {
 
     const marketingEvents = filterEventsByType(events, MARKETING_EVENTS);
 
+    // Canonical events are dual-written with their legacy equivalents during
+    // the migration. Collapse each pair one-to-one, retaining historical
+    // legacy-only rows and any genuine repeated actions.
+    const ctaEvents = marketingCtaClicks(events);
+    const pageViewEvents = marketingPageViews(events);
+    const featurePageEvents = marketingFeaturePageVisits(events);
+    const signupStartEvents = events.filter((event) => event.event === 'Signup_Started');
+    const signupCompleteEvents = signupCompletions(events);
+
     // Summary counts
-    const tryForFreeClicks = countEvents(marketingEvents, 'Try_For_Free_Clicked');
-    const createAccountClicks = countEvents(marketingEvents, 'Create_Account_Clicked');
-    const totalCTAClicks = tryForFreeClicks + createAccountClicks;
-    const featurePagesVisited = countEvents(marketingEvents, 'Feature_Page_Visited');
+    const tryForFreeClicks = ctaEvents.filter(
+      (event) => event.event === 'Try_For_Free_Clicked',
+    ).length;
+    const totalCTAClicks = ctaEvents.length;
+    const createAccountClicks = totalCTAClicks - tryForFreeClicks;
+    const featurePagesVisited = featurePageEvents.length;
     const guestSignupPrompts = countEvents(marketingEvents, 'Guest_Signup_Prompt');
     const paywallDismissals = countEvents(marketingEvents, 'Paywall_Dismissed') + countEvents(marketingEvents, 'Paywall Dismissed');
     const featureLimitReached = countEvents(marketingEvents, 'Feature_Limit_Reached');
     const marketingSessions = countEvents(marketingEvents, 'Marketing_Session_Started');
+    const signupStarts = signupStartEvents.length;
+    const signupCompletionsCount = signupCompleteEvents.length;
 
     // Previous period for trends
     const rangeDays = range === '1d' ? 1 : range === '7d' ? 7 : range === '90d' ? 90 : range === '365d' ? 365 : 30;
@@ -87,27 +116,50 @@ export async function GET(request: NextRequest) {
     }
 
     const prevMarketing = filterEventsByType(previousEvents, MARKETING_EVENTS);
-    const prevCTAClicks = countEvents(prevMarketing, 'Try_For_Free_Clicked') + countEvents(prevMarketing, 'Create_Account_Clicked');
+    const previousCtaEvents = marketingCtaClicks(previousEvents);
+    const previousPageViewEvents = marketingPageViews(previousEvents);
+    const previousFeaturePageEvents = marketingFeaturePageVisits(previousEvents);
+    const previousSignupStarts = previousEvents.filter(
+      (event) => event.event === 'Signup_Started',
+    );
+    const previousSignupCompletions = signupCompletions(previousEvents);
+    const prevCTAClicks = previousCtaEvents.length;
     const ctaClicksTrend = calculateTrend(totalCTAClicks, prevCTAClicks);
-    const featurePagesTrend = calculateTrend(featurePagesVisited, countEvents(prevMarketing, 'Feature_Page_Visited'));
+    const signupStartsTrend = calculateTrend(signupStarts, previousSignupStarts.length);
+    const signupCompletionsTrend = calculateTrend(
+      signupCompletionsCount,
+      previousSignupCompletions.length,
+    );
+    const featurePagesTrend = calculateTrend(
+      featurePagesVisited,
+      previousFeaturePageEvents.length,
+    );
     const guestPromptsTrend = calculateTrend(guestSignupPrompts, countEvents(prevMarketing, 'Guest_Signup_Prompt'));
     const prevDismissals = countEvents(prevMarketing, 'Paywall_Dismissed') + countEvents(prevMarketing, 'Paywall Dismissed');
     const paywallDismissalsTrend = calculateTrend(paywallDismissals, prevDismissals);
 
     // CTA source distribution
-    const tryFreeEvents = marketingEvents.filter((e) => e.event === 'Try_For_Free_Clicked');
-    const createAccountEvents = marketingEvents.filter((e) => e.event === 'Create_Account_Clicked');
-    const allCTAEvents = [...tryFreeEvents, ...createAccountEvents];
-    const ctaSourceDist = getPropertyDistribution(allCTAEvents, 'source');
-    const ctaSourceDistribution = Array.from(ctaSourceDist.entries())
-      .map(([source, count]) => ({ source: source || 'Unknown', count }))
+    const ctaSourceCounts = new Map<string, number>();
+    for (const event of ctaEvents) {
+      const source =
+        (event.properties.cta_id as string | undefined) ||
+        (event.properties.source as string | undefined) ||
+        (event.properties.placement as string | undefined) ||
+        'Unknown';
+      ctaSourceCounts.set(source, (ctaSourceCounts.get(source) || 0) + 1);
+    }
+    const ctaSourceDistribution = Array.from(ctaSourceCounts.entries())
+      .map(([source, count]) => ({ source, count }))
       .sort((a, b) => b.count - a.count);
 
     // Feature page distribution
-    const featurePageEvents = marketingEvents.filter((e) => e.event === 'Feature_Page_Visited');
-    const featurePageDist = getPropertyDistribution(featurePageEvents, 'page');
-    const featurePageDistribution = Array.from(featurePageDist.entries())
-      .map(([page, count]) => ({ page: page || 'Unknown', count }))
+    const featurePageCounts = new Map<string, number>();
+    for (const event of featurePageEvents) {
+      const feature = marketingFeatureKey(event);
+      featurePageCounts.set(feature, (featurePageCounts.get(feature) || 0) + 1);
+    }
+    const featurePageDistribution = Array.from(featurePageCounts.entries())
+      .map(([page, count]) => ({ page, count }))
       .sort((a, b) => b.count - a.count);
 
     // Feature limit reached distribution
@@ -127,46 +179,61 @@ export async function GET(request: NextRequest) {
     // Daily data
     const days = getDaysInRange(dateRange.from, dateRange.to);
     const dailyData = days.map((date) => {
-      const dayEvents = marketingEvents.filter((e) => {
+      const dayMarketingEvents = marketingEvents.filter((e) => {
         const eventDate = formatDate(new Date(e.properties.time * 1000));
         return eventDate === date;
       });
+      const dayCtaEvents = ctaEvents.filter(
+        (event) => formatDate(new Date(event.properties.time * 1000)) === date,
+      );
+      const daySignupStarts = signupStartEvents.filter(
+        (event) => formatDate(new Date(event.properties.time * 1000)) === date,
+      );
+      const daySignupCompletions = signupCompleteEvents.filter(
+        (event) => formatDate(new Date(event.properties.time * 1000)) === date,
+      );
+      const dayTryFree = dayCtaEvents.filter(
+        (event) => event.event === 'Try_For_Free_Clicked',
+      ).length;
 
       return {
         date,
-        tryFree: dayEvents.filter((e) => e.event === 'Try_For_Free_Clicked').length,
-        createAccount: dayEvents.filter((e) => e.event === 'Create_Account_Clicked').length,
-        featurePages: dayEvents.filter((e) => e.event === 'Feature_Page_Visited').length,
-        guestPrompts: dayEvents.filter((e) => e.event === 'Guest_Signup_Prompt').length,
+        tryFree: dayTryFree,
+        createAccount: dayCtaEvents.length - dayTryFree,
+        ctaClicks: dayCtaEvents.length,
+        signupStarts: daySignupStarts.length,
+        signupCompletions: daySignupCompletions.length,
+        featurePages: featurePageEvents.filter(
+          (event) => formatDate(new Date(event.properties.time * 1000)) === date,
+        ).length,
+        guestPrompts: dayMarketingEvents.filter((e) => e.event === 'Guest_Signup_Prompt').length,
       };
     });
 
     // ── Landing-page navigation metrics ───────────────────────────────────
-    // Page views and first-time visitors read from `Page_Viewed` / `Marketing_Session_Started`,
-    // which are NOT in MARKETING_EVENTS, so they come off the platform/user-filtered `events`.
-    // Single pass builds: total page views, the per-page view/unique-visitor distribution, and
-    // each visitor's first-seen timestamp (min over session + page-view events).
+    // Page views prefer the canonical event and fall back to legacy-only data.
     const pageMap = new Map<string, { views: number; visitors: Set<string> }>();
     const firstSeen = new Map<string, number>();
-    let pageViews = 0;
-    for (const e of events) {
-      const isPageView = e.event === 'Page_Viewed';
-      if (isPageView) {
-        pageViews += 1;
-        const page = (e.properties.page_name as string) || 'Unknown';
-        let entry = pageMap.get(page);
-        if (!entry) {
-          entry = { views: 0, visitors: new Set<string>() };
-          pageMap.set(page, entry);
-        }
-        entry.views += 1;
-        entry.visitors.add(e.properties.distinct_id);
+    const pageViews = pageViewEvents.length;
+    for (const event of pageViewEvents) {
+      const page = marketingPageLabel(event);
+      let entry = pageMap.get(page);
+      if (!entry) {
+        entry = { views: 0, visitors: new Set<string>() };
+        pageMap.set(page, entry);
       }
-      if (isPageView || e.event === 'Marketing_Session_Started') {
-        const id = e.properties.distinct_id;
-        const t = e.properties.time;
-        const prev = firstSeen.get(id);
-        if (prev === undefined || t < prev) firstSeen.set(id, t);
+      entry.views += 1;
+      entry.visitors.add(marketingJourneyId(event));
+    }
+    for (const event of [
+      ...pageViewEvents,
+      ...events.filter((item) => item.event === 'Marketing_Session_Started'),
+    ]) {
+      const id = marketingJourneyId(event);
+      const t = event.properties.time;
+      const prev = firstSeen.get(id);
+      if (prev === undefined || t < prev) {
+        firstSeen.set(id, t);
       }
     }
     const pageViewDistribution = Array.from(pageMap.entries())
@@ -177,13 +244,13 @@ export async function GET(request: NextRequest) {
     // Single pass over the prior window: previous page-view count (trend) and the
     // "seen before" baseline. previousEvents is [] when that fetch failed, in which case
     // every current visitor reads as new — same caveat as the CTA/feature trends above.
-    let prevPageViews = 0;
+    const prevPageViews = previousPageViewEvents.length;
     const seenBefore = new Set<string>();
-    for (const e of previousEvents) {
-      if (e.event === 'Page_Viewed') prevPageViews += 1;
-      if (e.event === 'Page_Viewed' || e.event === 'Marketing_Session_Started') {
-        seenBefore.add(e.properties.distinct_id);
-      }
+    for (const event of [
+      ...previousPageViewEvents,
+      ...previousEvents.filter((item) => item.event === 'Marketing_Session_Started'),
+    ]) {
+      seenBefore.add(marketingJourneyId(event));
     }
 
     // Pages per session — denominator is the 30-min-deduped Marketing_Session_Started count.
@@ -209,7 +276,9 @@ export async function GET(request: NextRequest) {
     const sessionStartEvents = marketingEvents.filter((e) => e.event === 'Marketing_Session_Started');
     const referrerCounts = new Map<string, number>();
     for (const e of sessionStartEvents) {
-      const host = referrerHost(e.properties.referrer);
+      const host = referrerHost(
+        e.properties.referrer_domain ?? e.properties.referrer ?? e.properties.$referrer,
+      );
       referrerCounts.set(host, (referrerCounts.get(host) || 0) + 1);
     }
     const referrerDistribution = toSourceList(referrerCounts);
@@ -217,29 +286,19 @@ export async function GET(request: NextRequest) {
     const utmMediumDistribution = distributionByProp(sessionStartEvents, 'utm_medium');
     const utmCampaignDistribution = distributionByProp(sessionStartEvents, 'utm_campaign');
 
-    // Marketing CTA funnel: Page View → CTA Click → Signup Prompt → Feature Limit
-    const funnelTop = marketingSessions || 1;
-    const marketingCTAFunnel = [
-      { name: 'Marketing Sessions', count: marketingSessions, percentage: 100, dropoff: 0 },
-      {
-        name: 'CTA Clicked',
-        count: totalCTAClicks,
-        percentage: Math.round((totalCTAClicks / funnelTop) * 100 * 10) / 10,
-        dropoff: marketingSessions > 0 ? Math.round(Math.max(0, ((marketingSessions - totalCTAClicks) / marketingSessions) * 100) * 10) / 10 : 0,
-      },
-      {
-        name: 'Feature Pages Visited',
-        count: featurePagesVisited,
-        percentage: Math.round((featurePagesVisited / funnelTop) * 100 * 10) / 10,
-        dropoff: totalCTAClicks > 0 ? Math.round(Math.max(0, ((totalCTAClicks - featurePagesVisited) / totalCTAClicks) * 100) * 10) / 10 : 0,
-      },
-      {
-        name: 'Guest Signup Prompts',
-        count: guestSignupPrompts,
-        percentage: Math.round((guestSignupPrompts / funnelTop) * 100 * 10) / 10,
-        dropoff: featurePagesVisited > 0 ? Math.round(Math.max(0, ((featurePagesVisited - guestSignupPrompts) / featurePagesVisited) * 100) * 10) / 10 : 0,
-      },
-    ];
+    // Require each later stage to belong to a visitor who reached the previous
+    // stage. $device_id keeps the journey connected after Mixpanel identify().
+    const marketingCTAFunnel = buildFunnel(
+      orderedJourneyCounts([
+        {
+          name: 'Marketing Visitors',
+          events: [...sessionStartEvents, ...pageViewEvents],
+        },
+        { name: 'CTA Clicked', events: ctaEvents },
+        { name: 'Signup Started', events: signupStartEvents },
+        { name: 'Signup Completed', events: signupCompleteEvents },
+      ]),
+    );
 
     const response = NextResponse.json({
       totalCTAClicks,
@@ -250,10 +309,14 @@ export async function GET(request: NextRequest) {
       paywallDismissals,
       featureLimitReached,
       marketingSessions,
+      signupStarts,
+      signupCompletions: signupCompletionsCount,
       pageViews,
       pagesPerSession,
       newVisitors,
       ctaClicksTrend,
+      signupStartsTrend,
+      signupCompletionsTrend,
       featurePagesTrend,
       guestPromptsTrend,
       paywallDismissalsTrend,

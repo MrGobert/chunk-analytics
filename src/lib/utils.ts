@@ -1,5 +1,10 @@
 import { subDays } from 'date-fns';
 
+// Mixpanel's project is configured in UTC. Export API date boundaries and
+// dashboard buckets must use the same calendar or late-evening events appear
+// missing from "Today" in Pacific time.
+export const MIXPANEL_PROJECT_TIME_ZONE = 'UTC';
+
 /** Safe division clamped to a non-negative range. Returns 0 when the denominator is 0. */
 export function safeDiv(numerator: number, denominator: number): number {
   if (denominator <= 0) return 0;
@@ -8,7 +13,7 @@ export function safeDiv(numerator: number, denominator: number): number {
 
 export function formatDate(date: Date): string {
   const formatter = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'America/Los_Angeles',
+    timeZone: MIXPANEL_PROJECT_TIME_ZONE,
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',

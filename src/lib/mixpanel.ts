@@ -691,7 +691,10 @@ export function getPropertyDistribution(
 export function referrerHost(referrer: unknown): string {
   if (typeof referrer !== 'string' || referrer.trim() === '') return '(direct)';
   try {
-    const host = new URL(referrer).hostname.replace(/^www\./, '');
+    const value = referrer.trim();
+    const host = new URL(value.includes('://') ? value : `https://${value}`)
+      .hostname
+      .replace(/^www\./, '');
     if (!host || host === 'chunkapp.com' || host.endsWith('.chunkapp.com')) return '(direct)';
     return host;
   } catch {
