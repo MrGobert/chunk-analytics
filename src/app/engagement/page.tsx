@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef } from 'react';
 import gsap from 'gsap';
+import { AlertTriangle } from 'lucide-react';
 import { useDashboardFilters } from '@/hooks/useDashboardFilters';
 import PageHeader from '@/components/layout/PageHeader';
 import StatCard from '@/components/cards/StatCard';
@@ -12,7 +13,7 @@ import PieChart from '@/components/charts/PieChart';
 import DataTable from '@/components/charts/DataTable';
 import { SkeletonPage, SkeletonChartCard } from '@/components/ui/Skeleton';
 import { useAnalytics } from '@/hooks/useAnalytics';
-import { UserMetrics, AdvancedMetrics, HelpCenterMetrics, PowerUserMetrics } from '@/types/mixpanel';
+import { EngagementMetrics, HelpCenterMetrics } from '@/types/mixpanel';
 import { chart } from '@/lib/chartTheme';
 
 function formatDuration(duration: number) {
@@ -28,22 +29,39 @@ const SEGMENT_COLORS: Record<string, string> = {
   Dormant: chart.series[7],
 };
 
+function DataStatusBanner({ message }: { message: string }) {
+  return (
+    <div className="mb-6 p-4 bg-butter-tint border border-butter rounded-card flex items-center gap-2 text-sm text-ink">
+      <AlertTriangle className="w-5 h-5 text-[#C8922A] shrink-0" />
+      <span>{message}</span>
+    </div>
+  );
+}
+
 export default function EngagementPage() {
   const { dateRange, setDateRange, platform, setPlatform, userType, setUserType } = useDashboardFilters();
   const containerRef = useRef<HTMLDivElement>(null);
 
-  const { data: userMetrics, isLoading: isUsersLoading, isRefreshing: isUsersRefreshing, lastUpdated: usersLastUpdated } =
-    useAnalytics<UserMetrics>('/api/metrics/users', { range: dateRange, platform, userType });
-  const { data: advancedMetrics, isLoading: isAdvancedLoading, isRefreshing: isAdvancedRefreshing, lastUpdated: advancedLastUpdated } =
-    useAnalytics<AdvancedMetrics>('/api/metrics/advanced', { range: dateRange, platform, userType });
-  const { data: power } =
-    useAnalytics<PowerUserMetrics>('/api/metrics/power-users', { range: dateRange, platform, userType });
-  const { data: helpMetrics, isLoading: isHelpLoading } =
+  const {
+    data: engagement,
+    isLoading,
+    isRefreshing,
+    lastUpdated,
+    error: engagementError,
+  } = useAnalytics<EngagementMetrics>('/api/metrics/engagement', {
+    range: dateRange,
+    platform,
+    userType,
+  });
+  const { data: helpMetrics, isLoading: isHelpLoading, error: helpError } =
     useAnalytics<HelpCenterMetrics>('/api/metrics/help-center', { range: dateRange, platform, userType });
 
-  const isLoading = isUsersLoading || isAdvancedLoading;
-  const isRefreshing = isUsersRefreshing || isAdvancedRefreshing;
-  const lastUpdated = advancedLastUpdated || usersLastUpdated;
+  const userMetrics = engagement?.users;
+  const advancedMetrics = engagement?.advanced;
+  const power = engagement?.power;
+  const dataUnavailable = engagement?.dataUnavailable;
+  const servedStale = engagement?.servedStale;
+  const dataAsOf = engagement?.dataAsOf;
 
   const hasAnimated = useRef(false);
   useEffect(() => {
@@ -87,8 +105,12 @@ export default function EngagementPage() {
   if (isLoading) {
     return <SkeletonPage statCards={3} statCardCols="grid-cols-1 md:grid-cols-3" chartCards={4} />;
   }
-  if (!userMetrics || !advancedMetrics) {
-    return <div className="empty-state py-20">Failed to load metrics. Please try again.</div>;
+  if (!userMetrics || !advancedMetrics || !power) {
+    return (
+      <div className="empty-state py-20">
+        {engagementError || 'Failed to load engagement metrics. Please try again.'}
+      </div>
+    );
   }
 
   return (
@@ -105,6 +127,17 @@ export default function EngagementPage() {
         lastUpdated={lastUpdated}
         isRefreshing={isRefreshing}
       />
+
+      {dataUnavailable && (
+        <DataStatusBanner message="Mixpanel engagement data is temporarily unavailable. The charts below are not real zeroes—please refresh shortly." />
+      )}
+      {!dataUnavailable && servedStale && (
+        <DataStatusBanner
+          message={`Showing the most recent cached Mixpanel engagement snapshot${
+            dataAsOf ? ` from ${new Date(dataAsOf).toLocaleString()}` : ''
+          }.`}
+        />
+      )}
 
       {/* Stat cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
@@ -206,15 +239,29 @@ export default function EngagementPage() {
       </div>
 
       {/* ── Help Center ─────────────────────────────────────────────────────── */}
-      {(helpMetrics || isHelpLoading) && (
+      {(helpMetrics || isHelpLoading || helpError) && (
         <>
           <div className="mt-12 mb-8 border-t border-line pt-8">
             <h2 className="font-display text-2xl text-ink">Help Center</h2>
             <p className="text-sm text-ink-soft mt-1">Which features and FAQs users seek help with most</p>
           </div>
 
-          {helpMetrics ? (
+          {helpError ? (
+            <DataStatusBanner message={`Help Center analytics could not be loaded: ${helpError}`} />
+          ) : helpMetrics ? (
             <>
+              {helpMetrics.dataUnavailable && (
+                <DataStatusBanner message="Mixpanel Help Center activity is temporarily unavailable." />
+              )}
+              {!helpMetrics.dataUnavailable && helpMetrics.servedStale && (
+                <DataStatusBanner
+                  message={`Showing cached Help Center activity${
+                    helpMetrics.dataAsOf
+                      ? ` from ${new Date(helpMetrics.dataAsOf).toLocaleString()}`
+                      : ''
+                  }.`}
+                />
+              )}
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
                 <div className="card-animate"><StatCard title="Help Page Views" value={helpMetrics.totalViews} trend={helpMetrics.viewsTrend} format="number" /></div>
                 <div className="card-animate"><StatCard title="Unique Help Users" value={helpMetrics.uniqueUsers} trend={helpMetrics.uniqueUsersTrend} format="number" /></div>

@@ -100,6 +100,10 @@ export interface UserMetrics {
   sessionDurations: SessionDuration[];
   sessionsPerUser: SessionsPerUser[];
   geographic: GeographicData[];
+  dataUnavailable?: boolean;
+  servedStale?: boolean;
+  dataAsOf?: string | null;
+  lastUpdated?: string;
 }
 
 export interface WeeklyDataPoint {
@@ -505,6 +509,22 @@ export interface AdvancedMetrics {
   featureAdoption: { feature: string; users?: number; rate?: number; adoptionRate?: number }[];
   trafficSources: { source: string; sessions: number }[];
   utmSources: { campaign: string; sessions: number }[];
+  dataUnavailable?: boolean;
+  servedStale?: boolean;
+  dataAsOf?: string | null;
+  lastUpdated: string;
+}
+
+export interface EngagementMetrics {
+  users: UserMetrics;
+  advanced: AdvancedMetrics;
+  power: PowerUserMetrics;
+  dateRange: DateRange;
+  platform: string;
+  userType: UserType;
+  dataUnavailable?: boolean;
+  servedStale?: boolean;
+  dataAsOf?: string | null;
   lastUpdated: string;
 }
 
@@ -816,6 +836,9 @@ export interface PowerUserMetrics {
   topUsers: { uid: string; activeDays: number; features: number; events: number; subscriber: boolean }[];
   featureBreadth: { features: string; users: number }[];
   dateRange: DateRange;
+  dataUnavailable?: boolean;
+  servedStale?: boolean;
+  dataAsOf?: string | null;
   lastUpdated: string;
 }
 
@@ -852,6 +875,9 @@ export interface HelpCenterMetrics {
   topFaqQuestions: { question: string; category: string; count: number }[];
   navDestinations: { destination: string; count: number }[];
   dailyData: { date: string; views: number; faqOpens: number; ctaClicks: number }[];
+  dataUnavailable?: boolean;
+  servedStale?: boolean;
+  dataAsOf?: string | null;
   lastUpdated: string;
 }
 

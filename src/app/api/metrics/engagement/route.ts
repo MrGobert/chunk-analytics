@@ -1,10 +1,14 @@
-// Power users — segment the active product base and surface the top users.
+// Engagement command center — one narrow Mixpanel snapshot for the whole page.
 export const maxDuration = 60;
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getLastUpdated, type UserType } from '@/lib/mixpanel';
 import { getDateRange } from '@/lib/utils';
-import { aggregatePowerUsers } from '@/lib/engagement';
+import {
+  aggregateAdvancedEngagement,
+  aggregatePowerUsers,
+  aggregateUserEngagement,
+} from '@/lib/engagement';
 import { getEngagementSnapshot } from '@/lib/engagement-server';
 
 export async function GET(request: NextRequest) {
@@ -18,18 +22,30 @@ export async function GET(request: NextRequest) {
     const dateRange = from && to ? { from, to } : getDateRange(range);
 
     const snapshot = await getEngagementSnapshot({ dateRange, platform, userType });
-    const metrics = aggregatePowerUsers(snapshot.events, dateRange);
+    const lastUpdated = getLastUpdated();
 
     return NextResponse.json(
       {
-        ...metrics,
+        users: {
+          ...aggregateUserEngagement(snapshot.events, dateRange),
+          lastUpdated,
+        },
+        advanced: {
+          ...aggregateAdvancedEngagement(snapshot.events, dateRange),
+          lastUpdated,
+        },
+        power: {
+          ...aggregatePowerUsers(snapshot.events, dateRange),
+          dateRange,
+          lastUpdated,
+        },
         dateRange,
         platform,
         userType,
         dataUnavailable: snapshot.fetchStatus.dataUnavailable,
         servedStale: snapshot.fetchStatus.servedStale,
         dataAsOf: snapshot.fetchStatus.fetchedAt,
-        lastUpdated: getLastUpdated(),
+        lastUpdated,
       },
       {
         headers: {
@@ -38,10 +54,10 @@ export async function GET(request: NextRequest) {
       },
     );
   } catch (error) {
-    console.error('Error fetching power-user metrics:', error);
+    console.error('Error fetching engagement metrics:', error);
     return NextResponse.json(
       {
-        error: 'Failed to fetch power-user metrics',
+        error: 'Failed to fetch engagement metrics',
         details: error instanceof Error ? error.message : String(error),
       },
       { status: 500 },

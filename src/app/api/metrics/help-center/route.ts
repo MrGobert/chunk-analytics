@@ -3,7 +3,8 @@ export const maxDuration = 60;
 
 import { NextRequest, NextResponse } from 'next/server';
 import {
-  fetchMixpanelEvents,
+  expandEventNames,
+  fetchMixpanelEventsFilteredWithStatus,
   filterByPlatform,
   filterByUserType,
   filterEventsByType,
@@ -14,8 +15,8 @@ import {
   groupEventsByDate,
   UserType,
 } from '@/lib/mixpanel';
-import { getDateRange, getDaysInRange, formatDate } from '@/lib/utils';
-import { subDays } from 'date-fns';
+import { getDateRange, getDaysInRange, shiftDate } from '@/lib/utils';
+import { ENGAGEMENT_USER_CONTEXT_EVENTS } from '@/lib/engagement';
 
 const HELP_CENTER_EVENTS = [
   'Help_Page_Viewed',
@@ -24,6 +25,10 @@ const HELP_CENTER_EVENTS = [
   'Help_FAQ_Opened',
   'Help_Sidebar_Nav_Clicked',
 ];
+const HELP_CENTER_EXPORT_EVENT_NAMES = expandEventNames([
+  ...HELP_CENTER_EVENTS,
+  ...ENGAGEMENT_USER_CONTEXT_EVENTS,
+]);
 
 export async function GET(request: NextRequest) {
   try {
@@ -36,23 +41,31 @@ export async function GET(request: NextRequest) {
 
     const dateRange = from && to ? { from, to } : getDateRange(range);
 
-    // Previous period dates (computed before fetch so both can run in parallel)
-    const rangeDays = range === '1d' ? 1 : range === '7d' ? 7 : range === '90d' ? 90 : range === '365d' ? 365 : 30;
-    const previousFrom = formatDate(subDays(new Date(dateRange.from), rangeDays));
-    const previousTo = formatDate(subDays(new Date(dateRange.to), rangeDays));
+    const days = getDaysInRange(dateRange.from, dateRange.to);
+    const previousTo = shiftDate(dateRange.from, -1);
+    const previousFrom = shiftDate(previousTo, -(days.length - 1));
 
-    // Fetch current and previous period in parallel
-    const [allEvents, allPreviousEvents] = await Promise.all([
-      fetchMixpanelEvents(dateRange.from, dateRange.to),
-      fetchMixpanelEvents(previousFrom, previousTo).catch(() => [] as Awaited<ReturnType<typeof fetchMixpanelEvents>>),
+    // Help Center only needs a handful of event names. The old full exports
+    // competed with the three core Engagement requests and regularly timed out.
+    const [currentStatus, previousStatus] = await Promise.all([
+      fetchMixpanelEventsFilteredWithStatus(
+        dateRange.from,
+        dateRange.to,
+        HELP_CENTER_EXPORT_EVENT_NAMES,
+      ),
+      fetchMixpanelEventsFilteredWithStatus(
+        previousFrom,
+        previousTo,
+        HELP_CENTER_EXPORT_EVENT_NAMES,
+      ),
     ]);
 
     const helpEvents = filterEventsByType(
-      filterByUserType(filterByPlatform(allEvents, platform), userType),
+      filterByUserType(filterByPlatform(currentStatus.events, platform), userType),
       HELP_CENTER_EVENTS,
     );
     const prevHelp = filterEventsByType(
-      filterByUserType(filterByPlatform(allPreviousEvents, platform), userType),
+      filterByUserType(filterByPlatform(previousStatus.events, platform), userType),
       HELP_CENTER_EVENTS,
     );
 
@@ -71,10 +84,18 @@ export async function GET(request: NextRequest) {
     const prevPageViews = prevHelp.filter((e) => e.event === 'Help_Page_Viewed').length;
     const prevFaqOpens = prevHelp.filter((e) => e.event === 'Help_FAQ_Opened').length;
     const prevCtaClicks = prevHelp.filter((e) => e.event === 'Help_CTA_Clicked').length;
-    const viewsTrend = calculateTrend(totalViews, prevPageViews);
-    const uniqueUsersTrend = calculateTrend(uniqueUsers, getUniqueUsers(prevHelp).size);
-    const faqOpensTrend = calculateTrend(faqOpens, prevFaqOpens);
-    const ctaClicksTrend = calculateTrend(ctaClicks, prevCtaClicks);
+    const viewsTrend = previousStatus.dataUnavailable
+      ? null
+      : calculateTrend(totalViews, prevPageViews);
+    const uniqueUsersTrend = previousStatus.dataUnavailable
+      ? null
+      : calculateTrend(uniqueUsers, getUniqueUsers(prevHelp).size);
+    const faqOpensTrend = previousStatus.dataUnavailable
+      ? null
+      : calculateTrend(faqOpens, prevFaqOpens);
+    const ctaClicksTrend = previousStatus.dataUnavailable
+      ? null
+      : calculateTrend(ctaClicks, prevCtaClicks);
 
     // Page view distribution — use existing utility
     const pageViewDistribution = Array.from(getPropertyDistribution(pageViewEvents, 'page'))
@@ -111,7 +132,6 @@ export async function GET(request: NextRequest) {
 
     // Daily data — pre-group once (O(n)) instead of filtering per day (O(n*d))
     const grouped = groupEventsByDate(helpEvents);
-    const days = getDaysInRange(dateRange.from, dateRange.to);
     const dailyData = days.map((date) => {
       const dayEvents = grouped.get(date) || [];
       return {
@@ -137,6 +157,13 @@ export async function GET(request: NextRequest) {
         topFaqQuestions,
         navDestinations,
         dailyData,
+        dateRange,
+        priorRange: { from: previousFrom, to: previousTo },
+        platform,
+        userType,
+        dataUnavailable: currentStatus.dataUnavailable,
+        servedStale: currentStatus.servedStale || previousStatus.servedStale,
+        dataAsOf: currentStatus.fetchedAt,
         lastUpdated: getLastUpdated(),
       },
       {
