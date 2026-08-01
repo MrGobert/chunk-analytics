@@ -513,6 +513,16 @@ export interface TopMover {
   current: number;
   previous: number;
   change: number | null;
+  /** Absolute current-minus-previous movement used for ranking. */
+  delta: number;
+  /** Comparable primary-action unit, e.g. captures or images completed. */
+  unit: string;
+  breakdown: {
+    event: string;
+    label: string;
+    current: number;
+    previous: number;
+  }[];
 }
 
 export interface PulseMetrics {
@@ -553,6 +563,8 @@ export interface PulseMetrics {
   scopePaywallViews: number;
   dateRange: { from: string; to: string };
   dataUnavailable?: boolean;
+  servedStale?: boolean;
+  dataAsOf?: string | null;
   note?: string;
   lastUpdated: string;
 }
@@ -569,8 +581,18 @@ export interface FeatureOverviewMetrics {
   features: {
     name: string;
     totalEvents: number;
+    primaryActions: number;
+    previousPrimaryActions: number;
     uniqueUsers: number;
     trend: number | null;
+    activityTrend: number | null;
+    unit: string;
+    breakdown: {
+      event: string;
+      label: string;
+      current: number;
+      previous: number;
+    }[];
     /** DAU/MAU ratio for this feature (0–1) — added by the stickiness extension. */
     stickiness?: number;
     /** Share of active users who used this feature (0–1). */
@@ -583,6 +605,8 @@ export interface FeatureOverviewMetrics {
   // True only on a genuine Mixpanel fetch failure (no fresh data and no stale
   // cache) — lets the UI show "data unavailable" instead of misleading zeros.
   dataUnavailable?: boolean;
+  servedStale?: boolean;
+  dataAsOf?: string | null;
   lastUpdated: string;
 }
 

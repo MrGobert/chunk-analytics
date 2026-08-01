@@ -12,7 +12,7 @@ import BarChart from '@/components/charts/BarChart';
 import PieChart from '@/components/charts/PieChart';
 import LineChart from '@/components/charts/LineChart';
 import FunnelChart from '@/components/charts/FunnelChart';
-import FeatureTabBar, { FEATURE_TABS } from '@/components/features/FeatureTabBar';
+import FeatureTabBar from '@/components/features/FeatureTabBar';
 import { chart } from '@/lib/chartTheme';
 import { SkeletonPage, SkeletonStatCard, SkeletonChartCard } from '@/components/ui/Skeleton';
 import { useAnalytics } from '@/hooks/useAnalytics';
@@ -48,6 +48,16 @@ function DataUnavailableBanner() {
       Live analytics data is temporarily unavailable — the Mixpanel export
       couldn’t be reached and no cached data was available. Figures below may
       read as zero; retry shortly.
+    </div>
+  );
+}
+
+function StaleDataBanner({ dataAsOf }: { dataAsOf?: string | null }) {
+  return (
+    <div className="mb-8 rounded-card border border-butter bg-butter-tint px-4 py-3 text-sm text-ink">
+      Showing the most recent cached Mixpanel snapshot
+      {dataAsOf ? ` from ${new Date(dataAsOf).toLocaleString()}` : ''}. Fresh data
+      could not be fetched, so recent activity may be missing.
     </div>
   );
 }
@@ -758,7 +768,8 @@ export default function FeaturesPage() {
   const eventsData = useMemo(() =>
     (overview?.features ?? []).map((f) => ({
       feature: f.name,
-      count: f.totalEvents,
+      // Fall back for a cached response written by the pre-primary-action API.
+      count: f.primaryActions ?? f.totalEvents,
     })),
     [overview?.features]
   );
@@ -814,6 +825,9 @@ export default function FeaturesPage() {
       />
 
       {overview?.dataUnavailable && <DataUnavailableBanner />}
+      {!overview?.dataUnavailable && overview?.servedStale && (
+        <StaleDataBanner dataAsOf={overview.dataAsOf} />
+      )}
 
       {/* ── Memory Enabled Stat Card ─────────────────────────────────────── */}
       {overview && (
@@ -831,7 +845,7 @@ export default function FeaturesPage() {
       {/* ── Feature Overview Charts ────────────────────────────────────────── */}
       {overview && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-          <ChartCard title="Events by Feature" subtitle="Total events per feature">
+          <ChartCard title="Primary Actions by Feature" subtitle="Comparable value-producing actions — the same metric used by Top Movers">
             <BarChart
               data={eventsData}
               xKey="feature"

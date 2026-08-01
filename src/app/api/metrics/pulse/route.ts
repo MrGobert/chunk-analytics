@@ -2,42 +2,28 @@
 export const maxDuration = 60;
 
 import { NextRequest, NextResponse } from 'next/server';
-import {
-  fetchMixpanelEventsFilteredWithStatus,
-  filterByPlatform,
-  filterByUserType,
-  getLastUpdated,
-  UserType,
-} from '@/lib/mixpanel';
-import { getDateRange, getDaysInRange, shiftDate } from '@/lib/utils';
-import { aggregatePulseMetrics, PULSE_EVENT_NAMES } from '@/lib/pulse';
+import { getLastUpdated, UserType } from '@/lib/mixpanel';
+import { getDateRange } from '@/lib/utils';
+import { aggregatePulseMetrics } from '@/lib/pulse';
+import { getFeatureActivitySnapshot } from '@/lib/feature-activity-server';
 
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
     const range = searchParams.get('range') || '7d';
+    const from = searchParams.get('from');
+    const to = searchParams.get('to');
     const platform = searchParams.get('platform') || 'all';
     const userType = (searchParams.get('userType') || 'all') as UserType;
-    const dateRange = getDateRange(range);
-    const currentDays = getDaysInRange(dateRange.from, dateRange.to);
-    const priorTo = shiftDate(dateRange.from, -1);
-    const priorFrom = shiftDate(priorTo, -(currentDays.length - 1));
-
-    // Today-vs-last-week context is required even for the 1-day view.
-    const sameWeekdayFrom = shiftDate(dateRange.to, -7);
-    const exportFrom = priorFrom < sameWeekdayFrom ? priorFrom : sameWeekdayFrom;
-    const { events: rawEvents, dataUnavailable } = await fetchMixpanelEventsFilteredWithStatus(
-      exportFrom,
-      dateRange.to,
-      PULSE_EVENT_NAMES,
-    );
-    const platformFiltered = filterByPlatform(rawEvents, platform);
-    const events = filterByUserType(platformFiltered, userType);
-    const metrics = aggregatePulseMetrics(events, {
-      currentDays,
-      priorDays: getDaysInRange(priorFrom, priorTo),
+    const dateRange = from && to ? { from, to } : getDateRange(range);
+    const snapshot = await getFeatureActivitySnapshot({ dateRange, platform, userType });
+    const metrics = aggregatePulseMetrics(snapshot.events, {
+      currentDays: snapshot.currentDays,
+      priorDays: snapshot.priorDays,
       today: dateRange.to,
+      featureActivity: snapshot.activity,
     });
+    const { dataUnavailable, servedStale, fetchedAt } = snapshot.fetchStatus;
 
     return NextResponse.json(
       {
@@ -46,7 +32,13 @@ export async function GET(request: NextRequest) {
         platform,
         userType,
         dataUnavailable,
-        ...(dataUnavailable ? { note: 'Mixpanel activity is temporarily unavailable. Try refreshing.' } : {}),
+        servedStale,
+        dataAsOf: fetchedAt,
+        ...(dataUnavailable
+          ? { note: 'Mixpanel activity is temporarily unavailable. Try refreshing.' }
+          : servedStale
+            ? { note: `Showing the most recent cached Mixpanel snapshot${fetchedAt ? ` from ${fetchedAt}` : ''}.` }
+            : {}),
         lastUpdated: getLastUpdated(),
       },
       { headers: { 'Cache-Control': 'public, s-maxage=300, stale-while-revalidate=600' } },

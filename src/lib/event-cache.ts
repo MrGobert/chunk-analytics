@@ -18,6 +18,12 @@ const LOCK_POLL_INTERVAL = 500;
 // In addition to memory cache (for same worker), use temp directory cache
 const eventCache = new Map<string, { events: MixpanelEvent[]; timestamp: number }>();
 
+export interface CachedEventsEntry {
+  events: MixpanelEvent[];
+  /** When this snapshot was originally fetched/written, not when it was read. */
+  timestamp: number;
+}
+
 /**
  * Cache key. `variant` distinguishes event-filtered fetches (a short hash of the
  * requested event names) from the full unfiltered export; empty string = full export
@@ -45,14 +51,14 @@ export async function getCachedEventsAsync(
   toDate: string,
   variant = '',
   ttl: number = TTL
-): Promise<MixpanelEvent[] | null> {
+): Promise<CachedEventsEntry | null> {
   const key = buildKey(fromDate, toDate, variant);
 
   // 1. Check Memory Cache. A filtered fetch can legitimately be empty (rare event
   //    over a short window), so an empty cached array is still a valid hit.
   const memoryCached = eventCache.get(key);
   if (memoryCached && Date.now() - memoryCached.timestamp <= ttl) {
-    return memoryCached.events;
+    return memoryCached;
   }
 
   // 2. Wait for Lock if another worker is currently downloading the file
@@ -82,9 +88,11 @@ export async function getCachedEventsAsync(
       if (Date.now() - stat.mtimeMs <= ttl) {
         const data = fs.readFileSync(diskFile, 'utf8');
         const parsed = JSON.parse(data) as MixpanelEvent[];
-        // Populate memory cache for this worker
-        eventCache.set(key, { events: parsed, timestamp: Date.now() });
-        return parsed;
+        // Preserve the disk snapshot's real age. Resetting this to Date.now()
+        // made an almost-expired file fresh for another full TTL in memory.
+        const entry = { events: parsed, timestamp: stat.mtimeMs };
+        eventCache.set(key, entry);
+        return entry;
       }
     } catch (e) {
       console.error('Error reading disk cache', e);
@@ -94,7 +102,11 @@ export async function getCachedEventsAsync(
   return null;
 }
 
-export async function getStaleCachedEvents(fromDate: string, toDate: string, variant = ''): Promise<MixpanelEvent[] | null> {
+export async function getStaleCachedEvents(
+  fromDate: string,
+  toDate: string,
+  variant = '',
+): Promise<CachedEventsEntry | null> {
   const key = buildKey(fromDate, toDate, variant);
   const diskFile = getCacheFilePath(key);
 
@@ -103,7 +115,8 @@ export async function getStaleCachedEvents(fromDate: string, toDate: string, var
     try {
       const data = fs.readFileSync(diskFile, 'utf8');
       const parsed = JSON.parse(data) as MixpanelEvent[];
-      return parsed;
+      const stat = fs.statSync(diskFile);
+      return { events: parsed, timestamp: stat.mtimeMs };
     } catch (e) {
       console.error('Error reading STALE disk cache', e);
     }

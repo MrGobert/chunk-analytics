@@ -1,43 +1,35 @@
-import { ALL_FEATURE_EVENTS, categorizeEvent, KEY_ACTION_EVENTS } from '@/lib/feature-categories';
+import {
+  isFeatureActivityEvent,
+  KEY_ACTION_EVENTS,
+} from '@/lib/feature-categories';
+import {
+  aggregateFeatureActivity,
+  FEATURE_ACTIVITY_EXPORT_EVENT_NAMES,
+} from '@/lib/feature-activity';
 import {
   calculateTrend,
   countEvents,
-  expandEventNames,
   isRealUser,
   normalizeEventName,
 } from '@/lib/mixpanel';
 import { formatDate, shiftDate } from '@/lib/utils';
-import type { MixpanelEvent, TopMover } from '@/types/mixpanel';
+import type { MixpanelEvent } from '@/types/mixpanel';
 
 const SESSION_EVENTS = ['App_Session_Started'];
-const BUSINESS_EVENTS = [
-  'Signup_Completed',
-  'Paywall_Viewed',
-  'Plan_Selected',
-  'Purchase_Initiated',
-  'Purchase_Completed',
-  'Purchase_Failed',
-  'Search_Failed',
-];
-
 /**
  * Exact raw names requested from Mixpanel. This keeps Pulse small enough for a
  * cold Vercel request while still including Apple auto-session events, web app
  * sessions, product activity, funnel events, and all known legacy aliases.
  */
-export const PULSE_EVENT_NAMES = expandEventNames([
-  ...ALL_FEATURE_EVENTS,
-  ...SESSION_EVENTS,
-  ...BUSINESS_EVENTS,
-]);
+export const PULSE_EVENT_NAMES = FEATURE_ACTIVITY_EXPORT_EVENT_NAMES;
 
-const ACTIVE_USER_EVENTS = new Set([...ALL_FEATURE_EVENTS, ...SESSION_EVENTS]);
 const KEY_ACTIONS = new Set(KEY_ACTION_EVENTS);
 
 export interface PulseAggregationOptions {
   currentDays: string[];
   priorDays: string[];
   today: string;
+  featureActivity?: ReturnType<typeof aggregateFeatureActivity>;
 }
 
 function eventDay(event: MixpanelEvent): string {
@@ -78,50 +70,10 @@ function activeCreators(events: MixpanelEvent[]): Set<string> {
   return users;
 }
 
-function categoryVolume(events: MixpanelEvent[]): Map<string, number> {
-  const volume = new Map<string, number>();
-  for (const event of events) {
-    const category = categorizeEvent(event.event);
-    if (category) volume.set(category, (volume.get(category) || 0) + 1);
-  }
-  return volume;
-}
-
-function buildTopMovers(currentEvents: MixpanelEvent[], priorEvents: MixpanelEvent[]) {
-  const currentVolume = categoryVolume(currentEvents);
-  const priorVolume = categoryVolume(priorEvents);
-  const categories = new Set([...currentVolume.keys(), ...priorVolume.keys()]);
-
-  const movers: TopMover[] = Array.from(categories)
-    .map((category) => {
-      const current = currentVolume.get(category) || 0;
-      const previous = priorVolume.get(category) || 0;
-      return { category, current, previous, change: calculateTrend(current, previous) };
-    })
-    // Include newly adopted categories (change=null) and low-volume short
-    // windows. A hard minimum of five made Today and many 7-day views blank.
-    .filter((mover) => mover.current !== mover.previous && (mover.current > 0 || mover.previous > 0));
-
-  const gainers = movers
-    .filter((mover) => mover.current > mover.previous)
-    .sort((a, b) => {
-      if (a.previous === 0 && b.previous !== 0) return -1;
-      if (b.previous === 0 && a.previous !== 0) return 1;
-      return (b.change ?? 0) - (a.change ?? 0) || b.current - a.current;
-    })
-    .slice(0, 3);
-  const decliners = movers
-    .filter((mover) => mover.current < mover.previous)
-    .sort((a, b) => (a.change ?? 0) - (b.change ?? 0) || b.previous - a.previous)
-    .slice(0, 3);
-
-  return { gainers, decliners };
-}
-
 /** Aggregate an already platform/user-filtered Pulse export. */
 export function aggregatePulseMetrics(
   events: MixpanelEvent[],
-  { currentDays, priorDays, today }: PulseAggregationOptions,
+  { currentDays, priorDays, today, featureActivity }: PulseAggregationOptions,
 ) {
   const currentDaySet = new Set(currentDays);
   const priorDaySet = new Set(priorDays);
@@ -132,7 +84,11 @@ export function aggregatePulseMetrics(
   // DAU is intentionally based on sessions or genuine product activity, not
   // signup/paywall events. This avoids counting a marketing conversion as an
   // active product user while retaining Apple users via $ae_session aliases.
-  const activeEvents = events.filter((event) => ACTIVE_USER_EVENTS.has(normalizeEventName(event.event)));
+  const activeEvents = events.filter(
+    (event) =>
+      SESSION_EVENTS.includes(normalizeEventName(event.event)) ||
+      isFeatureActivityEvent(event),
+  );
   const usersByDate = new Map<string, Set<string>>();
   for (const event of activeEvents) {
     const uid = event.properties.distinct_id;
@@ -205,6 +161,8 @@ export function aggregatePulseMetrics(
       purchaseInitiated: funnelUnique('Purchase_Initiated'),
       purchaseCompleted: funnelUnique('Purchase_Completed'),
     },
-    topMovers: buildTopMovers(currentEvents, priorEvents),
+    topMovers:
+      featureActivity?.topMovers ??
+      aggregateFeatureActivity(events, { currentDays, priorDays }).topMovers,
   };
 }

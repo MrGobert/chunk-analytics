@@ -12,7 +12,7 @@ import {
   UserType,
 } from '@/lib/mixpanel';
 import { getDateRange, getDaysInRange, formatDate } from '@/lib/utils';
-import { categorizeEvent } from '@/lib/feature-categories';
+import { categorizeEvent, isFeatureActivityEvent } from '@/lib/feature-categories';
 import { MixpanelEvent } from '@/types/mixpanel';
 
 export async function GET(request: NextRequest) {
@@ -48,7 +48,7 @@ export async function GET(request: NextRequest) {
       a.activeDays.add(d);
       a.eventCount++;
       if (lastDays.has(d)) a.activeInLast7 = true;
-      const cat = categorizeEvent(e.event);
+      const cat = isFeatureActivityEvent(e) ? categorizeEvent(e.event) : null;
       if (cat) a.featureCats.add(cat);
     }
 

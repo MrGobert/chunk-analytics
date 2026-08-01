@@ -75,12 +75,14 @@ describe('aggregatePulseMetrics', () => {
     });
     expect(metrics.activeCreators).toBe(2);
     expect(metrics.activeCreatorsPrev).toBe(1);
-    expect(metrics.topMovers.gainers).toContainEqual({
+    expect(metrics.topMovers.gainers).toContainEqual(expect.objectContaining({
       category: 'Notes',
       current: 2,
       previous: 0,
       change: null,
-    });
+      delta: 2,
+      unit: 'notes created',
+    }));
   });
 
   it('does not count an initiated or failed checkout as a started trial', () => {

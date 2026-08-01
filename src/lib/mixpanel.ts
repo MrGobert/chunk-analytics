@@ -101,10 +101,11 @@ export function categorizeUsers(events: MixpanelEvent[]): Map<string, 'visitor' 
   for (const event of events) {
     const userId = event.properties.distinct_id;
     const currentCategory = userCategories.get(userId) || 'visitor';
+    const canonicalEvent = normalizeEventName(event.event);
 
     // Check for subscriber indicators (highest priority)
     if (
-      SUBSCRIBER_EVENTS.includes(event.event) ||
+      SUBSCRIBER_EVENTS.includes(canonicalEvent) ||
       event.properties.$plan === 'Subscribed' ||
       event.properties.subscription_status === 'active' ||
       event.properties.is_pro === true
@@ -118,7 +119,7 @@ export function categorizeUsers(events: MixpanelEvent[]): Map<string, 'visitor' 
     // uids, so their presence alone is auth evidence.
     if (currentCategory !== 'subscriber') {
       if (
-        AUTH_EVENTS.includes(event.event) ||
+        AUTH_EVENTS.includes(canonicalEvent) ||
         event.properties.$user_id !== undefined ||
         event.properties.user_id !== undefined ||
         event.properties.is_authenticated === true ||
@@ -348,21 +349,35 @@ export async function fetchMixpanelEventsFilteredWithStatus(
   fromDate: string,
   toDate: string,
   eventNames: string[]
-): Promise<{ events: MixpanelEvent[]; dataUnavailable: boolean }> {
+): Promise<MixpanelFetchResult> {
   const variant = hashEventNames(eventNames);
   const ttl = isImmutablePast(toDate) ? IMMUTABLE_TTL : FRESH_TTL;
   const cacheKey = `${fromDate}:${toDate}:${variant}`;
 
   // 1. Cache (memory → lock wait → disk), honouring the chosen TTL
   const cached = await getCachedEventsAsync(fromDate, toDate, variant, ttl);
-  if (cached) return { events: cached, dataUnavailable: false };
+  if (cached) {
+    return {
+      events: cached.events,
+      dataUnavailable: false,
+      servedStale: false,
+      fetchedAt: new Date(cached.timestamp).toISOString(),
+    };
+  }
 
   // 2. Acquire the per-variant fetch lock
   const hasLock = acquireLock(fromDate, toDate, variant);
   if (!hasLock) {
     await new Promise((r) => setTimeout(r, 1000));
     const retry = await getCachedEventsAsync(fromDate, toDate, variant, ttl);
-    if (retry) return { events: retry, dataUnavailable: false };
+    if (retry) {
+      return {
+        events: retry.events,
+        dataUnavailable: false,
+        servedStale: false,
+        fetchedAt: new Date(retry.timestamp).toISOString(),
+      };
+    }
     console.warn(`Filtered Mixpanel fetch timed out waiting for lock ${cacheKey}, falling back to stale.`);
   }
 
@@ -378,29 +393,60 @@ export async function fetchMixpanelEventsFilteredWithStatus(
       releaseLock(fromDate, toDate, variant);
     }
   }
-  if (events) return { events, dataUnavailable: false };
+  if (events) {
+    return {
+      events,
+      dataUnavailable: false,
+      servedStale: false,
+      fetchedAt: new Date().toISOString(),
+    };
+  }
 
   // 4. Stale fallback (ignore TTL) on rate-limit/timeout
   const stale = await getStaleCachedEvents(fromDate, toDate, variant);
   if (stale) {
-    console.warn(`Serving ${stale.length} stale filtered events for ${cacheKey}.`);
-    return { events: stale, dataUnavailable: false };
+    console.warn(`Serving ${stale.events.length} stale filtered events for ${cacheKey}.`);
+    return {
+      events: stale.events,
+      dataUnavailable: false,
+      servedStale: true,
+      fetchedAt: new Date(stale.timestamp).toISOString(),
+    };
   }
 
   // 5. Genuine total failure
   console.warn(`No cache available for filtered fetch ${cacheKey}. Returning empty list.`);
-  return { events: [], dataUnavailable: true };
+  return {
+    events: [],
+    dataUnavailable: true,
+    servedStale: false,
+    fetchedAt: null,
+  };
+}
+
+export interface MixpanelFetchResult {
+  events: MixpanelEvent[];
+  dataUnavailable: boolean;
+  servedStale: boolean;
+  fetchedAt: string | null;
 }
 
 export async function fetchMixpanelEventsWithStatus(
   fromDate: string,
   toDate: string
-): Promise<{ events: MixpanelEvent[]; dataUnavailable: boolean }> {
+): Promise<MixpanelFetchResult> {
   const cacheKey = `${fromDate}:${toDate}`;
 
   // 1. Ask the Event Cache for data (checks memory, waits for locks, checks disk)
   const cached = await getCachedEventsAsync(fromDate, toDate);
-  if (cached) return { events: cached, dataUnavailable: false };
+  if (cached) {
+    return {
+      events: cached.events,
+      dataUnavailable: false,
+      servedStale: false,
+      fetchedAt: new Date(cached.timestamp).toISOString(),
+    };
+  }
 
   // 2. Try to acquire the system file lock for this date range
   const hasLock = acquireLock(fromDate, toDate);
@@ -409,7 +455,14 @@ export async function fetchMixpanelEventsWithStatus(
     // If we missed the lock right after checking cache, wait a tiny bit and retry the async cache getter
     await new Promise(r => setTimeout(r, 1000));
     const retryCached = await getCachedEventsAsync(fromDate, toDate);
-    if (retryCached) return { events: retryCached, dataUnavailable: false };
+    if (retryCached) {
+      return {
+        events: retryCached.events,
+        dataUnavailable: false,
+        servedStale: false,
+        fetchedAt: new Date(retryCached.timestamp).toISOString(),
+      };
+    }
     console.warn(`Mixpanel fetch timed out waiting for lock ${cacheKey}, falling back to stale data.`);
   }
 
@@ -427,20 +480,37 @@ export async function fetchMixpanelEventsWithStatus(
     }
   }
 
-  if (events) return { events, dataUnavailable: false };
+  if (events) {
+    return {
+      events,
+      dataUnavailable: false,
+      servedStale: false,
+      fetchedAt: new Date().toISOString(),
+    };
+  }
 
   // 4. Fallback: serve stale data ignoring TTL if Mixpanel returns 429
   const stale = await getStaleCachedEvents(fromDate, toDate);
   if (stale) {
-    console.warn(`Serving ${stale.length} stale events for ${cacheKey} due to API rate limits or timeout.`);
-    return { events: stale, dataUnavailable: false };
+    console.warn(`Serving ${stale.events.length} stale events for ${cacheKey} due to API rate limits or timeout.`);
+    return {
+      events: stale.events,
+      dataUnavailable: false,
+      servedStale: true,
+      fetchedAt: new Date(stale.timestamp).toISOString(),
+    };
   }
 
   // 5. Ultimate fallback: no fresh fetch AND no stale cache. This is a genuine
   // total failure, NOT a real "zero events" result — flag it so callers can
   // render a "data unavailable" state instead of misleading zeros.
   console.warn(`No stale cache available for ${cacheKey}. Returning empty events list (data unavailable).`);
-  return { events: [], dataUnavailable: true };
+  return {
+    events: [],
+    dataUnavailable: true,
+    servedStale: false,
+    fetchedAt: null,
+  };
 }
 
 /**

@@ -21,7 +21,14 @@ import { chart } from '@/lib/chartTheme';
 const fmtPct = (n: number) => `${(n * 100).toFixed(1)}%`;
 
 export default function PulsePage() {
-  const { dateRange, setDateRange } = useDashboardFilters();
+  const {
+    dateRange,
+    setDateRange,
+    platform,
+    setPlatform,
+    userType,
+    setUserType,
+  } = useDashboardFilters();
   const containerRef = useRef<HTMLDivElement>(null);
   const days = getDaysFromRange(dateRange);
 
@@ -30,7 +37,7 @@ export default function PulsePage() {
   const { data: churn } =
     useAnalytics<ChurnIntelligence>('/api/rc/churn-intelligence', { days });
   const { data: pulse, isLoading: pulseLoading, error: pulseError } =
-    useAnalytics<PulseMetrics>('/api/metrics/pulse', { range: dateRange, platform: 'all', userType: 'all' });
+    useAnalytics<PulseMetrics>('/api/metrics/pulse', { range: dateRange, platform, userType });
   const { data: funnel, isLoading: funnelLoading } =
     useAnalytics<SubscriberFunnel>('/api/rc/subscriber-funnel', { days });
   const { data: sentry } =
@@ -111,12 +118,17 @@ export default function PulsePage() {
         subtitle="Daily briefing — how Chunk is doing today"
         dateRange={dateRange}
         onDateRangeChange={setDateRange}
+        platform={platform}
+        onPlatformChange={setPlatform}
+        userType={userType}
+        onUserTypeChange={setUserType}
         lastUpdated={revenueUpdated}
         isRefreshing={revenueRefreshing}
       />
 
       <p className="text-xs text-ink-faint -mt-2 mb-6">
-        Revenue, conversion, product activity, funnels, and charts all follow the selected range.
+        Product activity and Top Movers follow the selected range, platform, and user type.
+        Revenue and conversion follow the selected range.
         DAU is today&apos;s unique product users and compares with the same weekday last week.
       </p>
 
@@ -134,7 +146,7 @@ export default function PulsePage() {
         </div>
       )}
 
-      {(pulse?.dataUnavailable || pulseError) && (
+      {(pulse?.dataUnavailable || pulse?.servedStale || pulseError) && (
         <div className="mb-6 p-4 bg-butter-tint border border-butter rounded-card flex items-center gap-2 text-sm text-ink">
           <AlertTriangle className="w-5 h-5 text-[#C8922A] shrink-0" />
           <span>{pulse?.note || pulseError || 'Mixpanel activity is temporarily unavailable.'}</span>
@@ -242,7 +254,7 @@ export default function PulsePage() {
         <div className="card-animate card-surface p-6 sm:p-8 lg:col-span-2">
           <h3 className="font-display text-xl text-ink mb-1">Top Movers</h3>
           <p className="text-sm font-mono text-ink-faint mb-5">
-            Feature activity · {dateRange === '1d' ? 'today vs yesterday' : `last ${days} days vs prior ${days}`}
+            Primary feature actions · {dateRange === '1d' ? 'today vs yesterday' : `last ${days} days vs prior ${days}`}
           </p>
           {pulse?.topMovers ? (
             <TopMovers gainers={pulse.topMovers.gainers} decliners={pulse.topMovers.decliners} />
