@@ -833,33 +833,39 @@ def get_monthly_recap_email(
     images: int = 0,
     notes: int = 0,
     collections: int = 0,
+    captures: int = 0,
+    automations: int = 0,
+    artifacts: int = 0,
 ) -> tuple[str, str, str]:
     """Generate monthly recap email — data-driven engagement."""
     subject = "📊 Your Chunk Month in Review"
 
-    # Build the secondary stats row (notes + collections) if either is non-zero
-    secondary_stats = ""
-    if notes > 0 or collections > 0:
-        secondary_stats = f"""
-    <table width="100%" border="0" cellpadding="0" cellspacing="0" style="margin-bottom:24px">
+    # Zero stats are hidden, not rendered — nobody needs "0 Automations".
+    all_stats = [
+        (searches, "Searches", BRAND["primary"]),
+        (documents, "Documents", BRAND["accent_blue"]),
+        (images, "Images", BRAND["purple"]),
+        (notes, "Notes", BRAND["color_notes"]),
+        (collections, "Collections", BRAND["color_urls"]),
+        (captures, "Captures", BRAND["color_documents"]),
+        (automations, "Automations", BRAND["color_reports"]),
+        (artifacts, "Artifacts", BRAND["signal_green"]),
+    ]
+    shown = [(value, label, color) for value, label, color in all_stats if value > 0]
+
+    # Stat grid: rows of up to 3, short rows padded so cells keep ~3-col width
+    stat_rows = ""
+    row_chunks = [shown[i:i + 3] for i in range(0, len(shown), 3)]
+    for i, chunk in enumerate(row_chunks):
+        cells = [_stat_block(str(value), label, color) for value, label, color in chunk]
+        cells += ['<td width="33%"></td>'] * (3 - len(chunk))
+        row_margin = "24px" if i == len(row_chunks) - 1 else "8px"
+        stat_rows += f"""
+    <table width="100%" border="0" cellpadding="0" cellspacing="0" style="margin-bottom:{row_margin}">
         <tr>
-            {_stat_block(str(notes), "Notes", BRAND['color_notes'])}
-            <td style="width:8px" width="8"></td>
-            {_stat_block(str(collections), "Collections", BRAND['color_urls'])}
-            <td style="width:8px" width="8"></td>
-            <td style="padding:16px;background-color:{BRAND['surface_elevated']};border:1px solid {BRAND['surface']};border-radius:10px;text-align:center" class="surface-card">
-                <p style="margin:0;font-family:{FONT_SERIF};font-size:28px;font-weight:600;color:{BRAND['butter_deep']};letter-spacing:-0.02em" class="dm-butter">~{searches * 5}</p>
-                <p style="margin:4px 0 0 0;font-family:{FONT_MONO};font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:{BRAND['text_faint']}" class="text-muted-dm">Min Saved</p>
-            </td>
+            {'<td style="width:8px" width="8"></td>'.join(cells)}
         </tr>
     </table>
-    """
-        time_saved_line = ""
-    else:
-        time_saved_line = f"""
-    <p style="margin:0 0 24px 0;font-family:{FONT_SANS};font-size:16px;color:{BRAND['text_primary']};line-height:1.6" class="text-dark">
-        Based on average research time, you've saved roughly <strong>~{searches * 5} minutes</strong> this month. That's real hours back in your day.
-    </p>
     """
 
     body = f"""
@@ -870,29 +876,12 @@ def get_monthly_recap_email(
         Here's what you accomplished with Chunk this month:
     </p>
 
-    <!-- Stats Grid: Searches, Documents, Images -->
-    <table width="100%" border="0" cellpadding="0" cellspacing="0" style="margin-bottom:{('8px' if secondary_stats else '24px')}">
-        <tr>
-            {_stat_block(str(searches), "Searches", BRAND['primary'])}
-            <td style="width:8px" width="8"></td>
-            {_stat_block(str(documents), "Documents", BRAND['accent_blue'])}
-            <td style="width:8px" width="8"></td>
-            {_stat_block(str(images), "Images", BRAND['purple'])}
-        </tr>
-    </table>
-
-    {secondary_stats}
-    {time_saved_line}
+    {stat_rows}
     {_serif_statement("Keep building your knowledge.", "knowledge.")}
     """
 
-    # Build preheader with all non-zero stats
-    stat_parts = []
-    if searches: stat_parts.append(f"{searches} searches")
-    if documents: stat_parts.append(f"{documents} documents")
-    if notes: stat_parts.append(f"{notes} notes")
-    if collections: stat_parts.append(f"{collections} collections")
-    if images: stat_parts.append(f"{images} images")
+    # Preheader: first few non-zero stats in display order
+    stat_parts = [f"{value} {label.lower()}" for value, label, _ in shown[:4]]
     preheader_stats = ", ".join(stat_parts) if stat_parts else "your activity"
 
     html = _base_email_template(
@@ -1388,6 +1377,191 @@ def get_memory_2_announcement_email(
     return subject, html, text
 
 
+# Screenshot for the What's New broadcast. All pre-July marketing screenshots show
+# the old gray UI and outdated model chips — leave None until a fresh capture is
+# hosted under server/static/email-assets/, then set the full URL here to enable
+# the flagship screenshot block.
+_WHATS_NEW_SCREENSHOT_URL: Optional[str] = None
+
+
+def get_whats_new_summer_2026_email(
+    user_name: str = "there",
+) -> tuple[str, str, str]:
+    """Generate the "What's New — Summer 2026" re-engagement broadcast email."""
+    subject = "You haven't seen Chunk like this"
+
+    screenshot_block = ""
+    if _WHATS_NEW_SCREENSHOT_URL:
+        screenshot_block = f"""
+    <!-- Connections panel screenshot -->
+    <table width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation" style="margin:28px 0 32px 0">
+        <tr>
+            <td align="center">
+                <table border="0" cellpadding="0" cellspacing="0" role="presentation" style="border-radius:16px;overflow:hidden;box-shadow:0 8px 32px rgba(93,64,28,0.14);border:1px solid {BRAND['surface']}">
+                    <tr>
+                        <td>
+                            <img
+                                src="{_WHATS_NEW_SCREENSHOT_URL}"
+                                alt="Connected Chat in Chunk — an answer with its grounded sources and related items"
+                                width="520"
+                                style="display:block;border:none;width:520px;max-width:100%;height:auto;border-radius:16px"
+                            >
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+        <tr>
+            <td align="center" style="padding-top:10px">
+                <p style="margin:0;font-family:{FONT_MONO};font-size:11px;letter-spacing:0.08em;color:{BRAND['text_muted']}">THE CONNECTIONS PANEL — EVERY ANSWER SHOWS ITS SOURCES</p>
+            </td>
+        </tr>
+    </table>
+    """
+
+    # "Also new" grab-bag — squircle-bulleted one-liners inside the night card
+    also_new_items = [
+        ("New models on the picker", "the GPT-5.6 family (Sol · Terra · Luna) and Claude Opus 4.8."),
+        ("⌘K command palette", "search everything, jump anywhere."),
+        ("Wiki-links across everything", "link notes to docs, research, and collections — then see it all in the Graph view."),
+        ("Suggestion cards", "turn any answer into a note, a collection, or a research run — one tap."),
+        ("Collections, redesigned", "your themed workspaces got a full makeover."),
+        ("Streaming word reveal + Stop", "answers materialize word by word, and you can stop them mid-thought."),
+        ("Paper &amp; Ember", "the warm new look you're reading right now — rolled out across every surface."),
+    ]
+    also_new_rows = "".join(
+        f"""
+        <table width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation">
+            <tr>
+                <td style="width:18px;vertical-align:top;padding-top:7px" width="18">
+                    <div style="width:8px;height:8px;background-color:{BRAND['primary_light']};border-radius:2px;font-size:0;line-height:0">&nbsp;</div>
+                </td>
+                <td style="padding-bottom:10px;font-family:{FONT_SANS};font-size:14px;color:{BRAND['text_muted_dark']};line-height:1.6">
+                    <strong style="color:{BRAND['text_inverse']}">{title}</strong> &mdash; {desc}
+                </td>
+            </tr>
+        </table>"""
+        for title, desc in also_new_items
+    )
+
+    body = f"""
+    <p style="margin:0 0 20px 0;font-family:{FONT_SANS};font-size:16px;color:{BRAND['text_primary']};line-height:1.7" class="text-dark">
+        Hey {user_name},
+    </p>
+    <p style="margin:0 0 16px 0;font-family:{FONT_SANS};font-size:16px;color:{BRAND['text_primary']};line-height:1.7" class="text-dark">
+        We've spent the summer shipping &mdash; the biggest wave of updates in Chunk's history. Every one of them points the same direction: <strong>everything you save should work together.</strong>
+    </p>
+    <p style="margin:0 0 28px 0;font-family:{FONT_SANS};font-size:16px;color:{BRAND['text_primary']};line-height:1.7" class="text-dark">
+        Whether you've been here all along or it's been a minute, this tour takes two minutes. Fair trade.
+    </p>
+
+    <!-- Stat strip -->
+    <table width="100%" border="0" cellpadding="0" cellspacing="0" style="margin-bottom:32px">
+        <tr>
+            {_stat_block("12", "Features Shipped", BRAND['primary'])}
+            <td style="width:8px" width="8"></td>
+            {_stat_block("2", "New Connectors", BRAND['accent_blue'])}
+            <td style="width:8px" width="8"></td>
+            {_stat_block("4", "Ways to Capture", BRAND['signal_green'])}
+        </tr>
+    </table>
+
+    <!-- Flagship: Connected Chat -->
+    <table width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation" style="margin-bottom:8px">
+        <tr>
+            <td>
+                <p style="margin:0 0 12px 0;font-family:{FONT_SANS};font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:{BRAND['sage_deep']};font-weight:700" class="dm-sage">THE HEADLINER &middot; CONNECTED CHAT</p>
+            </td>
+        </tr>
+    </table>
+
+    {_serif_statement("Your chats now show their work.", highlight="show their work")}
+
+    <p style="margin:0 0 24px 0;font-family:{FONT_SANS};font-size:16px;color:{BRAND['text_primary']};line-height:1.7" class="text-dark">
+        Ask Chunk a question and the answer now comes with receipts: the notes, documents, and research it drew on &mdash; plus related pieces from your own library, scored and surfaced right beside the reply. Less pile, more map.
+    </p>
+
+    {_protocol_step("01", "Ask like you always did.", "Every answer now shows what it grounded on — the exact notes, docs, and reports from your library that shaped the reply.")}
+    {_protocol_step("02", "See what connects.", "The new Connections panel surfaces related items you've saved, scored by relevance — including the ones you forgot you had.")}
+    {_protocol_step("03", "Pin what matters.", "Pin anything into the conversation as lasting context, and every note, doc, and report now shows exactly what links back to it.")}
+    {screenshot_block}
+
+    <!-- Three more headliners -->
+    <table width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation" style="margin:28px 0 8px 0">
+        <tr>
+            <td>
+                <p style="margin:0 0 16px 0;font-family:{FONT_SANS};font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:{BRAND['butter_deep']};font-weight:700" class="dm-butter">THREE MORE HEADLINERS</p>
+            </td>
+        </tr>
+    </table>
+
+    {_feature_card("📥", "Save to Chunk from anywhere", "A Chrome clipper, your own save-to email address, the native share sheet, and paste-or-drop on the web. It all lands in your Inbox, where AI titles it, tags it, and suggests where it belongs.", BRAND['color_urls'], "CAPTURE")}
+
+    {_feature_card("📡", "Automations", "Give Chunk a research question and get a cited digest of what changed since the last run. Watch a price or a page for changes. Agent Tasks (Pro) work across your notes and the web while you're elsewhere.", BRAND['color_reports'], "FORMERLY MONITORS")}
+
+    {_feature_card("🔌", "Connectors: Gamma + Notion", "Mention @Gamma to turn your research into a slide deck, or @Notion to search and update your pages in plain English — without leaving the chat.", BRAND['color_documents'], "PRO · BETA")}
+
+    <!-- Also new — the night moment -->
+    {_dark_card(f'''
+        <p style="margin:0 0 6px 0;font-family:{FONT_SANS};font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:{BRAND['primary_light']};font-weight:700">ALSO NEW</p>
+        <p style="margin:0 0 14px 0;font-family:{FONT_SANS};font-weight:700;color:{BRAND['text_inverse']};font-size:16px;letter-spacing:-0.01em">And because we couldn't stop:</p>
+        {also_new_rows}
+    ''')}
+
+    <!-- Evergreen + the way back in -->
+    <p style="margin:28px 0 8px 0;font-family:{FONT_SANS};font-size:16px;color:{BRAND['text_primary']};line-height:1.7;text-align:center" class="text-dark">
+        Everything you remember is still here &mdash; research reports, connected notes, collections, memory &mdash; just sharper. The free tier is the easiest way back in: sign in, ask one question, and watch what connects.
+    </p>
+    """
+
+    html = _base_email_template(
+        preheader="Answers that show their work, capture from anywhere, automations that watch the web. Come take the tour.",
+        hero_title="Everything you save, finally connected.",
+        hero_subtitle="Three months of shipping, one much smarter workspace.",
+        body_content=body,
+        cta_text="Come take the tour",
+        cta_url="https://www.chunkapp.com",
+        footer_tip="Your knowledge stays yours — everything you save in Chunk exports anytime as clean, AI-ready Markdown.",
+        hero_dark=True,
+        hero_label="WHAT'S NEW · MAY–JULY 2026",
+        hero_serif_word="connected",
+    )
+
+    # Replace the custom unsubscribe placeholder with Resend's native broadcast
+    # unsubscribe URL. Broadcasts don't go through send_email() so our custom
+    # replacement never fires — Resend handles unsubscribe natively for broadcasts.
+    resend_unsubscribe_link = (
+        f'<a href="{{{{{{RESEND_UNSUBSCRIBE_URL}}}}}}" '
+        f'style="color:{BRAND["text_muted_dark"]};text-decoration:none">Unsubscribe</a>'
+        f'<span style="color:rgba(246,239,228,0.45)"> · </span>'
+    )
+    html = html.replace("{UNSUBSCRIBE_LINK_PLACEHOLDER}", resend_unsubscribe_link)
+
+    text = (
+        "You haven't seen Chunk like this.\n\n"
+        "We've spent the summer shipping — the biggest wave of updates in Chunk's history. "
+        "Every one of them points the same direction: everything you save should work together.\n\n"
+        "THE HEADLINER — CONNECTED CHAT: Your chats now show their work.\n"
+        "1. Ask like you always did — every answer shows the notes, docs, and reports it grounded on.\n"
+        "2. See what connects — the new Connections panel surfaces related items from your library, scored by relevance.\n"
+        "3. Pin what matters — pin anything as lasting context; every object shows what links back to it.\n\n"
+        "THREE MORE HEADLINERS:\n"
+        "- Save to Chunk from anywhere — Chrome clipper, your own save-to email address, share sheet, paste/drop. "
+        "AI titles it, tags it, and suggests where it belongs.\n"
+        "- Automations — scheduled research digests with citations, price/page watchers, and Agent Tasks (Pro).\n"
+        "- Connectors (Pro · Beta) — @Gamma turns your research into slide decks; @Notion searches and updates your pages in plain English.\n\n"
+        "ALSO NEW: the GPT-5.6 family (Sol · Terra · Luna) and Claude Opus 4.8, the ⌘K command palette, "
+        "wiki-links across every content type with a Graph view, one-tap suggestion cards, a redesigned "
+        "Collections workspace, streaming word reveal with a Stop button, and the warm Paper & Ember redesign everywhere.\n\n"
+        "Everything you remember is still here — research reports, connected notes, collections, memory — just sharper. "
+        "The free tier is the easiest way back in.\n\n"
+        "Come take the tour: https://www.chunkapp.com\n\n"
+        "Your knowledge stays yours — everything you save exports anytime as clean, AI-ready Markdown."
+    )
+
+    return subject, html, text
+
+
 def get_feature_announcement_email(
     user_name: str = "there",
     feature_name: str = "",
@@ -1649,10 +1823,21 @@ def send_monthly_recap(
     user_id: str = None,
     notes: int = 0,
     collections: int = 0,
+    captures: int = 0,
+    automations: int = 0,
+    artifacts: int = 0,
 ) -> dict:
-    """Send monthly recap email."""
+    """Send monthly recap email. Pass stats by keyword — user_id sits mid-signature."""
     subject, html, text = get_monthly_recap_email(
-        user_name, searches, documents, images, notes, collections,
+        user_name,
+        searches=searches,
+        documents=documents,
+        images=images,
+        notes=notes,
+        collections=collections,
+        captures=captures,
+        automations=automations,
+        artifacts=artifacts,
     )
     return send_email(to_email, subject, html, text, email_type="monthly_recap", user_id=user_id)
 

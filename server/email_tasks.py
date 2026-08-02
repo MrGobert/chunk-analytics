@@ -45,6 +45,10 @@ MARKETING_EMAIL_FLAGS = [
 # Minimum hours between marketing emails to the same user
 EMAIL_COOLDOWN_HOURS = 24
 
+# Users fetched per Firestore page while the monthly recap beat task walks
+# the active/trial cohort
+RECAP_PAGE_SIZE = 400
+
 
 def _received_recent_email(emails_sent: dict, cooldown_hours: int = EMAIL_COOLDOWN_HOURS) -> bool:
     """
@@ -129,6 +133,130 @@ def _should_skip_user(user_data: dict, check_stale: bool = False) -> bool:
     if check_stale and _is_stale_account(user_data):
         return True
     return False
+
+
+# ============================================================
+# Monthly recap stat computation
+# ============================================================
+
+
+def _previous_month_window(now: datetime = None) -> tuple[datetime, datetime, str, str]:
+    """(month_start, month_end, month_key, next_month_key) for the previous
+    UTC calendar month. month_end is exclusive (first instant of the current
+    month). The "YYYY-MM" keys bound the ISO-string-timestamped collections
+    and name the usage_monthly doc."""
+    now = now or datetime.now(timezone.utc)
+    month_end = datetime(now.year, now.month, 1, tzinfo=timezone.utc)
+    if now.month == 1:
+        month_start = datetime(now.year - 1, 12, 1, tzinfo=timezone.utc)
+    else:
+        month_start = datetime(now.year, now.month - 1, 1, tzinfo=timezone.utc)
+    return (
+        month_start,
+        month_end,
+        month_start.strftime("%Y-%m"),
+        month_end.strftime("%Y-%m"),
+    )
+
+
+def _current_month_window(now: datetime = None) -> tuple[datetime, datetime, str, str]:
+    """Same shape as _previous_month_window, for the current month-to-date
+    (used by the customer-detail usage panel, not the recap email)."""
+    now = now or datetime.now(timezone.utc)
+    month_start = datetime(now.year, now.month, 1, tzinfo=timezone.utc)
+    if now.month == 12:
+        month_end = datetime(now.year + 1, 1, 1, tzinfo=timezone.utc)
+    else:
+        month_end = datetime(now.year, now.month + 1, 1, tzinfo=timezone.utc)
+    return (
+        month_start,
+        month_end,
+        month_start.strftime("%Y-%m"),
+        month_end.strftime("%Y-%m"),
+    )
+
+
+def _count(query) -> int:
+    """Run a Firestore count() aggregation and unwrap the result."""
+    result = query.count().get()
+    return int(result[0][0].value) if result else 0
+
+
+def _compute_recap_stats(db, uid: str, window: tuple = None) -> dict:
+    """Usage stats for one user over a calendar-month window, straight from
+    Firestore. Defaults to the previous calendar month (the recap email's
+    window); pass _current_month_window() for month-to-date.
+
+    Timestamp fields differ by collection because different writers own them
+    (audited across web/native/cerebral, 2026-08): notes and collections carry
+    a Firestore-Timestamp `createdAt` on every platform; files_metadata and
+    generated_images carry numeric epoch-seconds `timestamp` (generated_images
+    also has `createdAt`, but it is Timestamp-typed from the server and
+    number-typed from clients — do not query it); transforms and monitor runs
+    carry ISO-8601-string `created_at`, where bare "YYYY-MM" prefix bounds
+    sort correctly under both the "Z" and "+00:00" suffix variants. Searches
+    and captures leave no durable docs (messages live in arrays, inbox items
+    are deleted on triage), so cerebral counts them into
+    users/{uid}/usage_monthly/{YYYY-MM}.
+
+    Raises on failure — the caller's retry handles it. Never degrade to
+    zeros: a silent zero suppresses the email via the skip rule.
+    """
+    month_start, month_end, month_key, next_month_key = window or _previous_month_window()
+    user_ref = db.collection("users").document(uid)
+
+    counter_doc = user_ref.collection("usage_monthly").document(month_key).get()
+    counters = counter_doc.to_dict() if counter_doc.exists else {}
+
+    epoch_start, epoch_end = month_start.timestamp(), month_end.timestamp()
+
+    automations = 0
+    for monitor_ref in user_ref.collection("monitors").list_documents():
+        automations += _count(
+            monitor_ref.collection("runs")
+            .where("created_at", ">=", month_key)
+            .where("created_at", "<", next_month_key)
+        )
+
+    return {
+        "searches": int(counters.get("searches", 0)),
+        "captures": int(counters.get("captures", 0)),
+        "documents": _count(
+            db.collection("document_metadata")
+            .document(uid)
+            .collection("files_metadata")
+            .where("timestamp", ">=", epoch_start)
+            .where("timestamp", "<", epoch_end)
+        ),
+        "images": _count(
+            user_ref.collection("generated_images")
+            .where("timestamp", ">=", epoch_start)
+            .where("timestamp", "<", epoch_end)
+        ),
+        "notes": _count(
+            user_ref.collection("notes")
+            .where("createdAt", ">=", month_start)
+            .where("createdAt", "<", month_end)
+        ),
+        "collections": _count(
+            user_ref.collection("collections")
+            .where("createdAt", ">=", month_start)
+            .where("createdAt", "<", month_end)
+        ),
+        "artifacts": _count(
+            user_ref.collection("transforms")
+            .where("created_at", ">=", month_key)
+            .where("created_at", "<", next_month_key)
+        ),
+        "automations": automations,
+    }
+
+
+def _recap_should_send(stats: dict) -> bool:
+    """Any non-search activity sends; searches alone need >= 3 (a stray
+    search or two isn't a month worth recapping)."""
+    non_search = sum(v for k, v in stats.items() if k != "searches")
+    return non_search > 0 or stats.get("searches", 0) >= 3
 
 
 # ============================================================
@@ -309,59 +437,69 @@ def send_winback_30day_task(
     bind=True,
     name="send_monthly_recap_email",
     ignore_result=True,
-    soft_time_limit=60,
-    time_limit=90,
+    soft_time_limit=120,
+    time_limit=150,
     autoretry_for=(Exception,),
     retry_backoff=True,
     retry_kwargs={"max_retries": 3},
 )
-def send_monthly_recap_task(
-    self,
-    email: str,
-    user_name: str = "there",
-    searches: int = 0,
-    documents: int = 0,
-    images: int = 0,
-    user_id: str = None,
-    notes: int = 0,
-    collections: int = 0,
-):
+def send_monthly_recap_task(self, email: str, user_name: str = "there", user_id: str = None):
     """
-    Send monthly usage recap email to active subscriber.
+    Compute previous-month usage for one user and send the recap email.
+
+    Stats are computed here, not in the beat task, so the beat loop stays a
+    fast selection pass and a retry recomputes fresh data instead of
+    replaying a stale payload.
 
     Example:
-        send_monthly_recap_task.delay(email, user_name, searches=42, documents=5, images=12, user_id="uid", notes=10, collections=3)
+        send_monthly_recap_task.delay(email, user_name, user_id="uid")
     """
     if not is_valid_email(email):
         logging.warning(f"[EMAIL_TASK] Invalid email, skipping monthly recap: {email}")
         return {"status": "skipped", "email": email, "reason": "invalid_email"}
-        
+
     # Check if user is unsubscribed
     if check_unsubscribed(email):
         logging.info(f"[EMAIL_TASK] Skipping {email} - user unsubscribed")
         return {"status": "skipped", "email": email, "reason": "unsubscribed"}
 
+    if not user_id:
+        logging.warning(f"[EMAIL_TASK] No user_id for monthly recap: {email}")
+        return {"status": "skipped", "email": email, "reason": "no_user_id"}
+
     try:
-        logging.info(f"[EMAIL_TASK] Sending monthly recap email to {email}")
+        from firebase_setup import db
 
+        stats = _compute_recap_stats(db, user_id)
+
+        if not _recap_should_send(stats):
+            logging.info(
+                f"[EMAIL_TASK] Skipping monthly recap for {email} - insufficient usage: {stats}"
+            )
+            return {"status": "skipped", "email": email, "reason": "no_usage"}
+
+        logging.info(f"[EMAIL_TASK] Sending monthly recap email to {email}: {stats}")
         result = email_service.send_monthly_recap(
-            email, user_name, searches, documents, images, user_id,
-            notes, collections,
+            email, user_name, user_id=user_id, **stats
         )
-        resend_email_id = result.get("id")
-
-        # Track for analytics
-        if user_id:
-            track_email_sent(user_id, email, "monthly_recap", resend_email_id)
-
-        logging.info(f"[EMAIL_TASK] ✓ Monthly recap email sent to {email}")
-        return {"status": "sent", "email": email, "type": "monthly_recap"}
 
     except Exception as e:
         logging.error(
             f"[EMAIL_TASK] ❌ Failed to send monthly recap email to {email}: {e}"
         )
         raise
+
+    # Outside the retry block: the email is already out, so a tracking
+    # failure must log, not autoretry into a duplicate send.
+    try:
+        track_email_sent(user_id, email, "monthly_recap", result.get("id"))
+    except Exception as e:
+        logging.error(
+            f"[EMAIL_TASK] Monthly recap sent to {email} but tracking failed: {e}"
+        )
+
+    logging.info(f"[EMAIL_TASK] ✓ Monthly recap email sent to {email}")
+    return {"status": "sent", "email": email, "type": "monthly_recap"}
 
 
 @shared_task(
@@ -1322,12 +1460,15 @@ def check_welcome_sequence_day7_task(self):
     soft_time_limit=300,
     time_limit=360,
 )
-def check_monthly_recap_task(self):
+def check_monthly_recap_task(self, dry_run: bool = False):
     """
-    Monthly task: Send usage recap emails to active subscribers.
+    Monthly task: queue usage recap emails for active subscribers.
 
-    Queries Firestore for active subscribers and computes their usage stats
-    for the previous month, then sends a recap email.
+    Selection and dispatch only — per-user stats are computed in
+    send_monthly_recap_task, which also applies the minimum-usage skip rule.
+
+    dry_run=True returns the candidate list without dispatching or marking
+    (for manual pre-flight from a heroku run shell).
 
     Schedule: Run on the 1st of each month at 14:00 UTC via Celery Beat
     """
@@ -1337,79 +1478,76 @@ def check_monthly_recap_task(self):
         logging.info("[BEAT_TASK] Checking for monthly recap eligible users...")
 
         now = datetime.now(timezone.utc)
-
-        # Query active subscribers — limit to 500 per run to avoid
-        # overwhelming Firestore and the Celery worker
         users_ref = db.collection("users")
-        query = (
-            users_ref.where("subscriptionStatus", "in", ["active", "trial"])
-            .limit(500)
-        )
 
-        docs = query.stream()
+        queued = 0
+        candidates = []
+        last_doc = None
+        page_size = RECAP_PAGE_SIZE
 
-        count = 0
-        for doc in docs:
-            user_data = doc.to_dict()
-            if _should_skip_user(user_data):
-                continue
-            email = user_data.get("email")
-            name = user_data.get("displayName", user_data.get("name", "there"))
+        # Cursor pagination — the old bare .limit(500) silently dropped
+        # everyone past the first page.
+        while True:
+            query = (
+                users_ref.where("subscriptionStatus", "in", ["active", "trial"])
+                .order_by("__name__")
+                .limit(page_size)
+            )
+            if last_doc is not None:
+                query = query.start_after(last_doc)
 
-            # Check if we already sent this month's recap
-            emails_sent = user_data.get("emailsSent", {})
-            last_recap = emails_sent.get("monthlyRecap")
-            if last_recap:
-                # Skip if we already sent a recap this month
-                if hasattr(last_recap, "month") and last_recap.month == now.month and last_recap.year == now.year:
+            page = list(query.stream())
+            if not page:
+                break
+            last_doc = page[-1]
+
+            for doc in page:
+                user_data = doc.to_dict()
+                if _should_skip_user(user_data):
+                    continue
+                email = user_data.get("email")
+                name = user_data.get("displayName", user_data.get("name", "there"))
+
+                # Check if we already sent this month's recap
+                emails_sent = user_data.get("emailsSent", {})
+                last_recap = emails_sent.get("monthlyRecap")
+                if last_recap is not None and hasattr(last_recap, "month"):
+                    if last_recap.month == now.month and last_recap.year == now.year:
+                        continue
+
+                # 24h marketing cooldown, same as every other beat task
+                if _received_recent_email(emails_sent):
                     continue
 
-            if not email:
-                continue
+                if dry_run:
+                    candidates.append({"uid": doc.id, "email": email})
+                    continue
 
-            # Compute usage stats from user data
-            usage = user_data.get("usageStats", {})
-            searches = usage.get("monthlySearches", 0)
-            documents = usage.get("monthlyDocuments", 0)
-            images = usage.get("monthlyImages", 0)
-            notes_count = usage.get("monthlyNotes", 0)
-            collections_count = usage.get("monthlyCollections", 0)
+                # Stagger dispatch so the worker doesn't slam Resend with the
+                # whole cohort at once
+                send_monthly_recap_task.apply_async(
+                    args=[email, name],
+                    kwargs={"user_id": doc.id},
+                    countdown=queued * 2,
+                )
 
-            # If no usageStats counters, try counting from Firestore subcollections
-            if notes_count == 0:
-                try:
-                    notes_query = db.collection("users").document(doc.id).collection("notes").count()
-                    notes_result = notes_query.get()
-                    notes_count = notes_result[0][0].value if notes_result else 0
-                except Exception:
-                    notes_count = 0
+                # Mark as sent
+                doc.reference.update({"emailsSent.monthlyRecap": now})
 
-            if collections_count == 0:
-                try:
-                    coll_query = db.collection("users").document(doc.id).collection("collections").count()
-                    coll_result = coll_query.get()
-                    collections_count = coll_result[0][0].value if coll_result else 0
-                except Exception:
-                    collections_count = 0
+                queued += 1
+                logging.info(f"[BEAT_TASK] Queued monthly recap for {email}")
 
-            # Skip if user had zero activity across all metrics
-            if searches == 0 and documents == 0 and images == 0 and notes_count == 0 and collections_count == 0:
-                continue
+            if len(page) < page_size:
+                break
 
-            # Send recap email
-            send_monthly_recap_task.delay(
-                email, name, searches, documents, images, doc.id,
-                notes_count, collections_count,
+        if dry_run:
+            logging.info(
+                f"[BEAT_TASK] Dry run: {len(candidates)} monthly recap candidates"
             )
+            return {"status": "dry_run", "candidates": candidates}
 
-            # Mark as sent
-            doc.reference.update({"emailsSent.monthlyRecap": now})
-
-            count += 1
-            logging.info(f"[BEAT_TASK] Queued monthly recap for {email}")
-
-        logging.info(f"[BEAT_TASK] ✓ Queued {count} monthly recap emails")
-        return {"status": "completed", "emails_queued": count}
+        logging.info(f"[BEAT_TASK] ✓ Queued {queued} monthly recap emails")
+        return {"status": "completed", "emails_queued": queued}
 
     except Exception as e:
         logging.error(f"[BEAT_TASK] ❌ Error checking monthly recap users: {e}")

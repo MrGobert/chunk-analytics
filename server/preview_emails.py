@@ -75,11 +75,12 @@ TEMPLATES = {
     "monthly_recap": {
         "name": "Monthly Recap",
         "category": "Engagement",
-        "fn": lambda: email_service.get_monthly_recap_email("James", searches=127, documents=23, images=8, notes=34, collections=6),
+        "fn": lambda: email_service.get_monthly_recap_email("James", searches=127, documents=23, images=8, notes=34, collections=6, captures=19, automations=12, artifacts=4),
     },
     "monthly_recap_light": {
         "name": "Monthly Recap (Light User)",
         "category": "Engagement",
+        # Doubles as the zero-hiding check: only two stat tiles should render
         "fn": lambda: email_service.get_monthly_recap_email("James", searches=12, documents=2, images=0, notes=0, collections=0),
     },
     "reengagement_14day": {
@@ -106,6 +107,11 @@ TEMPLATES = {
         "name": "Memory 2.0 Announcement",
         "category": "Announcements",
         "fn": lambda: email_service.get_memory_2_announcement_email("James"),
+    },
+    "whats_new_summer_2026": {
+        "name": "What's New — Summer 2026",
+        "category": "Announcements",
+        "fn": lambda: email_service.get_whats_new_summer_2026_email("James"),
     },
     "feature_announcement": {
         "name": "Feature Announcement",
