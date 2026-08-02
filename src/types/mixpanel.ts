@@ -473,7 +473,7 @@ export interface ChurnIntelligence {
     emailsReceived: string[];
     emailsOpened: string[];
     platform: string;
-    usage: { searches: number; notes: number };
+    usage: { searches: number; captures: number };
   }[];
   topEngagedUsers: {
     uid: string;
@@ -483,7 +483,7 @@ export interface ChurnIntelligence {
     healthScore: number;
     subscriptionAge: number | null;
     platform: string;
-    usage: { searches: number; documents: number; notes: number; collections: number };
+    usage: { searches: number; captures: number };
     factors: { recency: number; frequency: number; featureDepth: number; tenure: number; emailEngagement: number };
   }[];
   winbackEffectiveness: Record<string, { sent: number; recovered: number; rate: number }>;
@@ -687,12 +687,16 @@ export interface CustomerDetail {
   lastActiveAt: string;
   partialProfile?: boolean;
   hasUsageStats?: boolean;
+  // Current month-to-date, computed from Firestore (see server _compute_recap_stats)
   usageStats: {
-    monthlySearches?: number;
-    monthlyDocuments?: number;
-    monthlyImages?: number;
-    monthlyNotes?: number;
-    monthlyCollections?: number;
+    searches?: number;
+    documents?: number;
+    images?: number;
+    notes?: number;
+    collections?: number;
+    captures?: number;
+    automations?: number;
+    artifacts?: number;
   };
   emailHistory: {
     emailType?: string;

@@ -60,7 +60,7 @@ export default function CustomersPage() {
       email: u.email || u.uid,
       health: u.healthScore,
       searches: u.usage?.searches ?? 0,
-      notes: u.usage?.notes ?? 0,
+      captures: u.usage?.captures ?? 0,
       lastActive: u.daysSinceActive != null ? `${u.daysSinceActive}d ago` : 'N/A',
       platform: u.platform,
     }));
@@ -78,7 +78,7 @@ export default function CustomersPage() {
       churnDate: u.churnDate,
       tenure: `${u.tenure}d`,
       searches: u.usage?.searches ?? 0,
-      notes: u.usage?.notes ?? 0,
+      captures: u.usage?.captures ?? 0,
       platform: u.platform,
       emailsReceived: (u.emailsReceived || []).length,
     }));
@@ -210,7 +210,7 @@ export default function CustomersPage() {
                 { key: 'email', header: 'User' },
                 { key: 'health', header: 'Health', numeric: true, render: healthCell },
                 { key: 'searches', header: 'Searches', numeric: true },
-                { key: 'notes', header: 'Notes', numeric: true },
+                { key: 'captures', header: 'Captures', numeric: true },
                 { key: 'lastActive', header: 'Last Active' },
                 { key: 'platform', header: 'Platform' },
               ]}
@@ -244,7 +244,7 @@ export default function CustomersPage() {
                 { key: 'churnDate', header: 'Churn Date' },
                 { key: 'tenure', header: 'Tenure', numeric: true },
                 { key: 'searches', header: 'Searches', numeric: true },
-                { key: 'notes', header: 'Notes', numeric: true },
+                { key: 'captures', header: 'Captures', numeric: true },
                 { key: 'platform', header: 'Platform' },
                 { key: 'emailsReceived', header: 'Emails Rx', numeric: true },
               ]}

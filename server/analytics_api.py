@@ -253,8 +253,56 @@ def _is_annual_plan(user_data: dict, price: float) -> bool:
     return False
 
 
-def _compute_health_score(user_data: dict, now: datetime) -> dict:
-    """Compute health score from 5 weighted factors."""
+# Per-user usage counters live in users/{uid}/usage_monthly/{YYYY-MM} docs,
+# written by cerebral's request paths (usage_tracking.track_*_monthly). The
+# legacy users/{uid}.usageStats.monthly* fields lost all writers in cerebral
+# commit dfe43f0 (2026-03) and must not be read — they are permanently 0.
+# Fields below are the server-observable feature signals in those docs; the
+# feature-depth factor self-scales as counters are added.
+USAGE_FEATURE_SIGNALS = ("searches", "captures")
+
+
+def _usage_month_keys(now: datetime) -> tuple[str, str]:
+    """("YYYY-MM" of the current month, "YYYY-MM" of the previous month)."""
+    first_of_month = datetime(now.year, now.month, 1, tzinfo=timezone.utc)
+    prev = first_of_month - timedelta(days=1)
+    return now.strftime("%Y-%m"), prev.strftime("%Y-%m")
+
+
+def _fetch_usage_monthly(db, uids: list, now: datetime) -> dict:
+    """Batch-read current+previous usage_monthly docs for many users.
+
+    Returns {uid: {"searches": int, "captures": int}} summed over the two
+    months (two-month window so scores aren't gutted on the 1st of a month).
+    One BatchGetDocuments round trip per 300 refs — never per-user queries;
+    this runs for every active/trial user on the 15-minute snapshot.
+    """
+    current_key, prev_key = _usage_month_keys(now)
+    refs = []
+    for uid in uids:
+        base = db.collection("users").document(uid).collection("usage_monthly")
+        refs.append(base.document(current_key))
+        refs.append(base.document(prev_key))
+
+    usage = {}
+    for i in range(0, len(refs), 300):
+        for snap in db.get_all(refs[i:i + 300]):
+            if not snap.exists:
+                continue
+            uid = snap.reference.parent.parent.id
+            data = snap.to_dict() or {}
+            agg = usage.setdefault(uid, {"searches": 0, "captures": 0})
+            for field in USAGE_FEATURE_SIGNALS:
+                agg[field] += int(data.get(field, 0) or 0)
+    return usage
+
+
+def _compute_health_score(user_data: dict, now: datetime, usage_monthly: dict = None) -> dict:
+    """Compute health score from 5 weighted factors.
+
+    usage_monthly is this user's entry from _fetch_usage_monthly. Passing
+    None scores frequency/featureDepth as 0 — identical to no recorded usage.
+    """
 
     # Factor 1: Recency (35% weight) - How recently was user active?
     last_active = _to_datetime(user_data.get("lastActiveAt"))
@@ -276,16 +324,16 @@ def _compute_health_score(user_data: dict, now: datetime) -> dict:
     if recency == 0:
         tenure = tenure * 0.5
 
-    # Factor 3: Usage Frequency (25% weight) - Monthly activity
-    usage = user_data.get("usageStats", {}) or {}
-    searches = usage.get("monthlySearches", 0) or 0
-    frequency = min(100, searches * 5)  # 20+ searches/month = 100
+    # Factor 3: Usage Frequency (25% weight) — searches over the two-month window
+    usage = usage_monthly or {}
+    searches = int(usage.get("searches", 0) or 0)
+    frequency = min(100, searches * 5)  # 20+ searches across the window = 100
 
     # Factor 4: Feature Depth (20% weight) - Uses multiple features?
-    features_used = sum(1 for k in ["monthlySearches", "monthlyDocuments",
-                        "monthlyImages", "monthlyNotes", "monthlyCollections"]
-                       if (usage.get(k, 0) or 0) > 0)
-    feature_depth = min(100, features_used * 25)  # 4+ features = 100
+    features_used = sum(
+        1 for k in USAGE_FEATURE_SIGNALS if (usage.get(k, 0) or 0) > 0
+    )
+    feature_depth = round(min(100, features_used * 100 / len(USAGE_FEATURE_SIGNALS)))
 
     # Factor 5: Email Engagement (10% weight)
     emails_sent = user_data.get("emailsSent", {}) or {}
@@ -726,14 +774,19 @@ def churn_intelligence():
     return jsonify(result), 200
 
 
-def _classify_churn_reason(data: dict, now: datetime) -> str:
-    """Classify churn reason from user data with enriched signal hierarchy."""
-    usage = data.get("usageStats", {}) or {}
+def _classify_churn_reason(data: dict, now: datetime, usage_monthly: dict = None) -> str:
+    """Classify churn reason from user data with enriched signal hierarchy.
+
+    usage_monthly covers the current+previous calendar month, so "usage" here
+    means recent usage near the churn date. Users who churned before the
+    usage_monthly counters existed (pre-2026-08) read as 0 — the same value
+    the dead usageStats fields gave them.
+    """
+    usage = usage_monthly or {}
     emails_sent = data.get("emailsSent", {}) or {}
-    searches = usage.get("monthlySearches", 0) or 0
-    documents = usage.get("monthlyDocuments", 0) or 0
-    notes = usage.get("monthlyNotes", 0) or 0
-    total_usage = searches + documents + notes
+    searches = int(usage.get("searches", 0) or 0)
+    captures = int(usage.get("captures", 0) or 0)
+    total_usage = searches + captures
 
     # Check if this was a trial user
     trial_end = _to_datetime(data.get("trialEndDate"))
@@ -840,6 +893,15 @@ def _compute_churn_intelligence(days: int) -> dict:
     start_active = existing_active_at_start + total_subscriber_churned
     churn_rate = round((total_subscriber_churned / start_active * 100) if start_active > 0 else 0, 1)
 
+    # One batched usage read for everyone scored or classified below
+    usage_by_uid = {}
+    try:
+        scored_uids = [d.id for d in active_docs + trial_docs]
+        scored_uids += [d["_uid"] for d in churned_in_period]
+        usage_by_uid = _fetch_usage_monthly(db, scored_uids, now)
+    except Exception as e:
+        logging.warning(f"[ANALYTICS_API] usage_monthly batch fetch failed: {e}")
+
     # Single pass: classify active + trial users as at-risk or engaged
     at_risk_users = []
     trial_at_risk_count = 0
@@ -847,7 +909,7 @@ def _compute_churn_intelligence(days: int) -> dict:
     for doc in active_docs + trial_docs:
         data = doc.to_dict()
         last_active = _to_datetime(data.get("lastActiveAt"))
-        health = _compute_health_score(data, now)
+        health = _compute_health_score(data, now, usage_by_uid.get(doc.id))
         tenure_date = _get_tenure_date(data)
         sub_age = (now - tenure_date).days if tenure_date else None
         platform = data.get("platform", "unknown") or "unknown"
@@ -878,7 +940,7 @@ def _compute_churn_intelligence(days: int) -> dict:
                 trial_at_risk_count += 1
         elif not is_trial and health["healthScore"] >= 40 and last_active and last_active >= fourteen_days_ago:
             # Engaged: active paying subscribers within 14 days with decent health
-            usage = data.get("usageStats", {}) or {}
+            usage = usage_by_uid.get(doc.id, {})
             engaged_candidates.append({
                 "uid": doc.id,
                 "email": data.get("email", ""),
@@ -888,10 +950,8 @@ def _compute_churn_intelligence(days: int) -> dict:
                 "subscriptionAge": sub_age,
                 "platform": platform,
                 "usage": {
-                    "searches": usage.get("monthlySearches", 0) or 0,
-                    "documents": usage.get("monthlyDocuments", 0) or 0,
-                    "notes": usage.get("monthlyNotes", 0) or 0,
-                    "collections": usage.get("monthlyCollections", 0) or 0,
+                    "searches": usage.get("searches", 0),
+                    "captures": usage.get("captures", 0),
                 },
                 "factors": health["factors"],
             })
@@ -935,7 +995,10 @@ def _compute_churn_intelligence(days: int) -> dict:
         pass
 
     # Pre-compute churn reasons for all churned users (avoids double classification)
-    reason_by_uid = {d["_uid"]: _classify_churn_reason(d, now) for d in churned_in_period}
+    reason_by_uid = {
+        d["_uid"]: _classify_churn_reason(d, now, usage_by_uid.get(d["_uid"]))
+        for d in churned_in_period
+    }
 
     churned_users = []
     for data in churned_subset:
@@ -945,7 +1008,7 @@ def _compute_churn_intelligence(days: int) -> dict:
         tenure = (exp_date - created).days if (exp_date and created) else 0
 
         user_emails = email_by_user.get(uid, {"received": [], "opened": []})
-        usage = data.get("usageStats", {}) or {}
+        usage = usage_by_uid.get(uid, {})
         churned_users.append({
             "uid": uid,
             "email": data.get("email", ""),
@@ -956,8 +1019,8 @@ def _compute_churn_intelligence(days: int) -> dict:
             "emailsOpened": user_emails["opened"],
             "platform": data.get("platform", "unknown") or "unknown",
             "usage": {
-                "searches": usage.get("monthlySearches", 0) or 0,
-                "notes": usage.get("monthlyNotes", 0) or 0,
+                "searches": usage.get("searches", 0),
+                "captures": usage.get("captures", 0),
             },
         })
 
@@ -1090,9 +1153,15 @@ def _compute_customer_health() -> dict:
         if not docs:
             break
 
+        try:
+            usage_by_uid = _fetch_usage_monthly(db, [d.id for d in docs], now)
+        except Exception as e:
+            logging.warning(f"[ANALYTICS_API] usage_monthly batch fetch failed: {e}")
+            usage_by_uid = {}
+
         for doc in docs:
             data = doc.to_dict()
-            health = _compute_health_score(data, now)
+            health = _compute_health_score(data, now, usage_by_uid.get(doc.id))
             created = _get_creation_date(data)
             subscribed_days = (now - created).days if created else 0
 
@@ -1275,8 +1344,23 @@ def _get_customer_detail(uid: str) -> dict:
         }
 
     data = user_doc.to_dict()
-    health = _compute_health_score(data, now)
-    usage = data.get("usageStats", {}) or {}
+    try:
+        usage_monthly = _fetch_usage_monthly(db, [uid], now).get(uid)
+    except Exception as e:
+        logging.warning(f"[ANALYTICS_API] usage_monthly fetch failed for {uid}: {e}")
+        usage_monthly = None
+    health = _compute_health_score(data, now, usage_monthly)
+
+    # Full current-month feature counts for the usage panel. On-demand,
+    # single-user endpoint — the ~8 count queries are affordable here (they
+    # are NOT affordable on the 15-min all-users snapshot paths above).
+    try:
+        from email_tasks import _compute_recap_stats, _current_month_window
+
+        usage_stats = _compute_recap_stats(db, uid, window=_current_month_window(now))
+    except Exception as e:
+        logging.warning(f"[ANALYTICS_API] usage stats computation failed for {uid}: {e}")
+        usage_stats = None
 
     if events:
         subscription_history = events
@@ -1303,14 +1387,8 @@ def _get_customer_detail(uid: str) -> dict:
         "healthScore": health["healthScore"],
         "healthStatus": health["healthStatus"],
         "healthFactors": health["factors"],
-        "hasUsageStats": bool(data.get("usageStats")),
-        "usageStats": {
-            "monthlySearches": usage.get("monthlySearches", 0) or 0,
-            "monthlyDocuments": usage.get("monthlyDocuments", 0) or 0,
-            "monthlyImages": usage.get("monthlyImages", 0) or 0,
-            "monthlyNotes": usage.get("monthlyNotes", 0) or 0,
-            "monthlyCollections": usage.get("monthlyCollections", 0) or 0,
-        },
+        "hasUsageStats": usage_stats is not None,
+        "usageStats": usage_stats or {},
         "emailHistory": email_history,
         "subscriptionHistory": subscription_history,
         "subscriptionHistorySource": history_source,
@@ -1525,7 +1603,7 @@ _EMAIL_TEMPLATES = {
     "monthly_recap": {
         "name": "Monthly Recap",
         "category": "Engagement",
-        "description": "Monthly usage summary sent to active subscribers on the 1st.",
+        "description": "Previous-month usage summary (searches, documents, images, notes, collections, captures, automations, artifacts) sent to active subscribers on the 1st.",
         "trigger": "beat",
         "schedule": "1st of month at 14:00 UTC (check_monthly_recap)",
     },
@@ -1597,7 +1675,7 @@ def _render_email_template(key: str) -> dict | None:
         "day1_help_center": lambda: email_service.get_day1_help_center_email("James"),
         "day3_artifacts": lambda: email_service.get_day3_artifacts_email("James"),
         "day7_researcher_stories": lambda: email_service.get_day7_researcher_stories_email("James"),
-        "monthly_recap": lambda: email_service.get_monthly_recap_email("James", searches=127, documents=23, images=8, notes=34, collections=6),
+        "monthly_recap": lambda: email_service.get_monthly_recap_email("James", searches=127, documents=23, images=8, notes=34, collections=6, captures=19, automations=12, artifacts=4),
         "reengagement_14day": lambda: email_service.get_reengagement_14day_email("James"),
         "signup_no_trial_nudge": lambda: email_service.get_signup_no_trial_nudge_email("James"),
         "winback_7day": lambda: email_service.get_winback_7day_email("James"),

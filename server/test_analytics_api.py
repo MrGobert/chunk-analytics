@@ -139,6 +139,99 @@ class SubscriberFunnelTests(unittest.TestCase):
         self.assertEqual(result["medianDaysToConvert"], 3.0)
 
 
+class HealthScoreTests(unittest.TestCase):
+    NOW = datetime.now(timezone.utc)
+
+    def _user(self):
+        return {
+            "lastActiveAt": self.NOW - timedelta(days=1),
+            "createdAt": self.NOW - timedelta(days=200),
+        }
+
+    def test_frequency_and_depth_come_from_usage_monthly(self):
+        health = analytics_api._compute_health_score(
+            self._user(), self.NOW, {"searches": 20, "captures": 3})
+        self.assertEqual(health["factors"]["frequency"], 100)
+        self.assertEqual(health["factors"]["featureDepth"], 100)
+
+    def test_single_signal_scores_half_depth(self):
+        health = analytics_api._compute_health_score(
+            self._user(), self.NOW, {"searches": 4, "captures": 0})
+        self.assertEqual(health["factors"]["frequency"], 20)
+        self.assertEqual(health["factors"]["featureDepth"], 50)
+
+    def test_missing_usage_scores_zero_not_error(self):
+        health = analytics_api._compute_health_score(self._user(), self.NOW, None)
+        self.assertEqual(health["factors"]["frequency"], 0)
+        self.assertEqual(health["factors"]["featureDepth"], 0)
+
+    def test_dead_usage_stats_fields_are_ignored(self):
+        # usageStats.monthly* lost all writers in cerebral dfe43f0 — a doc
+        # that still carries stale values must not influence the score
+        user = {**self._user(), "usageStats": {"monthlySearches": 50}}
+        health = analytics_api._compute_health_score(user, self.NOW, None)
+        self.assertEqual(health["factors"]["frequency"], 0)
+
+
+class FetchUsageMonthlyTests(unittest.TestCase):
+    def test_month_keys_roll_january_back_to_december(self):
+        keys = analytics_api._usage_month_keys(datetime(2026, 1, 15, tzinfo=timezone.utc))
+        self.assertEqual(keys, ("2026-01", "2025-12"))
+
+    def test_sums_both_months_and_maps_by_uid(self):
+        now = datetime(2026, 8, 2, tzinfo=timezone.utc)
+        requested = []
+
+        def snap(uid, searches, captures):
+            return SimpleNamespace(
+                exists=True,
+                to_dict=lambda: {"searches": searches, "captures": captures},
+                reference=SimpleNamespace(
+                    parent=SimpleNamespace(parent=SimpleNamespace(id=uid))
+                ),
+            )
+
+        class Db:
+            def collection(self, _name):
+                return SimpleNamespace(document=lambda uid: SimpleNamespace(
+                    collection=lambda _n: SimpleNamespace(
+                        document=lambda key: requested.append((uid, key))
+                    )
+                ))
+
+            def get_all(self, refs):
+                return [snap("u1", 5, 1), snap("u1", 7, 0),
+                        SimpleNamespace(exists=False)]
+
+        usage = analytics_api._fetch_usage_monthly(Db(), ["u1", "u2"], now)
+
+        self.assertEqual(usage, {"u1": {"searches": 12, "captures": 1}})
+        self.assertEqual(requested, [
+            ("u1", "2026-08"), ("u1", "2026-07"),
+            ("u2", "2026-08"), ("u2", "2026-07"),
+        ])
+
+
+class ChurnReasonTests(unittest.TestCase):
+    NOW = datetime.now(timezone.utc)
+
+    def _churned_user(self):
+        return {
+            "expirationDate": self.NOW - timedelta(days=5),
+            "createdAt": self.NOW - timedelta(days=200),
+            "lastActiveAt": self.NOW - timedelta(days=10),
+        }
+
+    def test_no_usage_monthly_reads_as_no_usage(self):
+        reason = analytics_api._classify_churn_reason(self._churned_user(), self.NOW, None)
+        self.assertEqual(reason, "No usage")
+
+    def test_recent_usage_monthly_reclassifies(self):
+        reason = analytics_api._classify_churn_reason(
+            self._churned_user(), self.NOW, {"searches": 9, "captures": 2})
+        self.assertEqual(reason, "Active user - unknown reason")
+
+
 class CustomerDetailTests(unittest.TestCase):
     NOW = datetime.now(timezone.utc)
 
@@ -162,24 +255,30 @@ class CustomerDetailTests(unittest.TestCase):
             "platform": "ios",
             "createdAt": self.NOW - timedelta(days=100),
             "lastActiveAt": self.NOW - timedelta(days=1),
-            "usageStats": {"monthlySearches": 10, "monthlyNotes": 2},
         }
         data.update(overrides)
         return FakeDoc("u1", data)
 
     def test_includes_health_factors_and_status(self):
-        result = self._get_detail(users=[self._user_doc()])
+        sample_stats = {"searches": 9, "captures": 2, "documents": 1, "images": 0,
+                        "notes": 3, "collections": 1, "automations": 0, "artifacts": 1}
+        import email_tasks
+        with patch.object(email_tasks, "_compute_recap_stats", return_value=sample_stats):
+            result = self._get_detail(users=[self._user_doc()])
         self.assertIn(result["healthStatus"], ("healthy", "atRisk", "churning"))
         self.assertEqual(
             set(result["healthFactors"]),
             {"recency", "frequency", "featureDepth", "tenure", "emailEngagement"},
         )
         self.assertTrue(result["hasUsageStats"])
+        self.assertEqual(result["usageStats"], sample_stats)
 
-    def test_has_usage_stats_false_when_untracked(self):
-        result = self._get_detail(users=[self._user_doc(usageStats=None)])
+    def test_has_usage_stats_false_when_counts_unavailable(self):
+        # FakeDB cannot serve the count queries — the endpoint must degrade
+        # to hasUsageStats=False instead of erroring or reporting zeros
+        result = self._get_detail(users=[self._user_doc()])
         self.assertFalse(result["hasUsageStats"])
-        self.assertEqual(result["usageStats"]["monthlySearches"], 0)
+        self.assertEqual(result["usageStats"], {})
 
     def test_timeline_uses_subscription_events(self):
         events = [

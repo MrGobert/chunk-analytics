@@ -5,7 +5,7 @@ import Link from 'next/link';
 import gsap from 'gsap';
 import { useAnalytics } from '@/hooks/useAnalytics';
 import type { CustomerDetail, UserActivityMetrics } from '@/types/mixpanel';
-import { ArrowLeft, Search, FileText, Image as ImageIcon, StickyNote, FolderOpen, Mail, CreditCard, UserX, Activity, BadgeCheck } from 'lucide-react';
+import { ArrowLeft, Search, FileText, Image as ImageIcon, StickyNote, FolderOpen, Inbox, Zap, Shapes, Mail, CreditCard, UserX, Activity, BadgeCheck } from 'lucide-react';
 
 const FACTOR_META: { key: keyof NonNullable<CustomerDetail['healthFactors']>; label: string; weight: number }[] = [
   { key: 'recency', label: 'Recency', weight: 35 },
@@ -142,11 +142,14 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ uid: 
 
   const usage = data.usageStats || {};
   const usageItems = [
-    { label: 'Searches', value: usage.monthlySearches ?? 0, icon: Search },
-    { label: 'Documents', value: usage.monthlyDocuments ?? 0, icon: FileText },
-    { label: 'Images', value: usage.monthlyImages ?? 0, icon: ImageIcon },
-    { label: 'Notes', value: usage.monthlyNotes ?? 0, icon: StickyNote },
-    { label: 'Collections', value: usage.monthlyCollections ?? 0, icon: FolderOpen },
+    { label: 'Searches', value: usage.searches ?? 0, icon: Search },
+    { label: 'Documents', value: usage.documents ?? 0, icon: FileText },
+    { label: 'Images', value: usage.images ?? 0, icon: ImageIcon },
+    { label: 'Notes', value: usage.notes ?? 0, icon: StickyNote },
+    { label: 'Collections', value: usage.collections ?? 0, icon: FolderOpen },
+    { label: 'Captures', value: usage.captures ?? 0, icon: Inbox },
+    { label: 'Automations', value: usage.automations ?? 0, icon: Zap },
+    { label: 'Artifacts', value: usage.artifacts ?? 0, icon: Shapes },
   ];
   const sub = data.currentSubscription;
 
@@ -214,9 +217,9 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ uid: 
         {/* Usage */}
         <div className="card-animate card-surface p-6 sm:p-8">
           <h3 className="font-display text-xl text-ink mb-1">This Month&apos;s Usage</h3>
-          <p className="text-sm font-mono text-ink-faint mb-5">Counters from the user record · reset monthly</p>
+          <p className="text-sm font-mono text-ink-faint mb-5">Month to date · counted from Firestore</p>
           {data.hasUsageStats === false ? (
-            <div className="empty-state py-8">No usage tracking recorded for this user</div>
+            <div className="empty-state py-8">Usage counts unavailable for this user</div>
           ) : (
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
               {usageItems.map((u) => {

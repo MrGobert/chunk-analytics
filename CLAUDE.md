@@ -114,8 +114,8 @@ All endpoints require auth (`Authorization` header = `REVENUECAT_WEBHOOK_AUTH` e
 
 Weighted composite of 5 factors:
 - Recency (35%) — days since last active (0 after 30 days; halves tenure when inactive)
-- Usage frequency (25%) — monthly searches (20+ = max)
-- Feature depth (20%) — number of distinct features used (4+ = max)
+- Usage frequency (25%) — searches over the current+previous calendar month from `users/{uid}/usage_monthly/{YYYY-MM}` docs (20+ = max). Batch-fetched via `_fetch_usage_monthly` (BatchGetDocuments, 2 doc reads/user) — never read `usageStats.monthly*` (dead since cerebral `dfe43f0`, 2026-03)
+- Feature depth (20%) — distinct server-observable signals used in that window (`USAGE_FEATURE_SIGNALS`: searches, captures; scale self-adjusts as counters are added)
 - Tenure (10%) — days since account creation (maxes at ~150 days)
 - Email engagement (10%) — emails received/interacted with
 
@@ -171,8 +171,13 @@ Score → status: ≥60 healthy, ≥30 atRisk, <30 churning.
 | `emailTracking` | Per-email send records with delivery/conversion tracking |
 | `emailUnsubscribes` | Unsubscribed email addresses |
 | `analytics_cache` | Firestore fallback for MRR history when Redis is unavailable |
-| `users/{uid}/notes` | User notes (queried for monthly recap counts) |
-| `users/{uid}/collections` | User collections (queried for monthly recap counts) |
+| `users/{uid}/notes` | User notes (monthly recap: `createdAt` Timestamp range count) |
+| `users/{uid}/collections` | User collections (monthly recap: `createdAt` Timestamp range count) |
+| `users/{uid}/generated_images` | Generated images (monthly recap: numeric `timestamp` range count — NOT `createdAt`, which is mixed-type) |
+| `users/{uid}/transforms` | Artifacts (monthly recap: ISO-string `created_at` month-prefix range count) |
+| `users/{uid}/monitors/*/runs` | Automation runs (monthly recap: ISO-string `created_at` month-prefix range count per monitor) |
+| `users/{uid}/usage_monthly/{YYYY-MM}` | Month-keyed `searches`/`captures` counters written by cerebral request paths; recap reads the previous month's doc |
+| `document_metadata/{uid}/files_metadata` | Uploaded documents (monthly recap: numeric epoch `timestamp` range count) |
 | `users/{uid}/deleted_notes` | Deletion tombstones for cross-platform sync |
 
 ### Environment Variables (Heroku)
