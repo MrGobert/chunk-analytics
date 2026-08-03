@@ -461,7 +461,7 @@ export interface ChurnIntelligence {
     healthScore: number;
     subscriptionAge: number | null;
     platform: string;
-    subscriptionType: 'active' | 'trial';
+    subscriptionType: 'active' | 'trial' | 'cancelled';
     trialEndsIn?: number | null;
   }[];
   churnedUsers: {
@@ -659,6 +659,12 @@ export interface CustomerHealth {
   note?: string;
 }
 
+export interface CustomerSearchResult {
+  uid: string;
+  email?: string;
+  name?: string;
+}
+
 export interface CurrentSubscription {
   source: 'revenuecat' | 'firestore';
   userExists?: boolean;
@@ -668,10 +674,21 @@ export interface CurrentSubscription {
   productId?: string | null;
   currentPeriodStartsAt?: string | null;
   currentPeriodEndsAt?: string | null;
-  willRenew?: boolean;
+  willRenew?: boolean | null;
   isSandbox?: boolean;
   price?: number | null;
   currency?: string | null;
+}
+
+export interface CustomerUsageStats {
+  searches?: number;
+  documents?: number;
+  images?: number;
+  notes?: number;
+  collections?: number;
+  captures?: number;
+  automations?: number;
+  artifacts?: number;
 }
 
 export interface CustomerDetail {
@@ -687,17 +704,9 @@ export interface CustomerDetail {
   lastActiveAt: string;
   partialProfile?: boolean;
   hasUsageStats?: boolean;
+  usageStatsUnavailableFields?: (keyof CustomerUsageStats)[];
   // Current month-to-date, computed from Firestore (see server _compute_recap_stats)
-  usageStats: {
-    searches?: number;
-    documents?: number;
-    images?: number;
-    notes?: number;
-    collections?: number;
-    captures?: number;
-    automations?: number;
-    artifacts?: number;
-  };
+  usageStats: CustomerUsageStats;
   emailHistory: {
     emailType?: string;
     sentAt?: string;
@@ -732,8 +741,12 @@ export interface UserActivityMetrics {
   lastSeen: string | null;
   byCategory: { category: string; events: number }[];
   topEvents: { event: string; count: number }[];
+  usageStats: CustomerUsageStats;
+  monthToDateUsageStats: CustomerUsageStats;
   dateRange: { from: string; to: string };
   dataUnavailable?: boolean;
+  servedStale?: boolean;
+  dataAsOf?: string | null;
   lastUpdated: string;
 }
 

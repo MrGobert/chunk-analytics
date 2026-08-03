@@ -182,6 +182,84 @@ def _count(query) -> int:
     return int(result[0][0].value) if result else 0
 
 
+def _compute_recap_stats_impl(
+    db, uid: str, window: tuple = None, tolerate_errors: bool = False
+) -> tuple[dict, list[str]]:
+    """Compute usage stats, optionally retaining fields whose reads succeed."""
+    month_start, month_end, month_key, next_month_key = window or _previous_month_window()
+    user_ref = db.collection("users").document(uid)
+    stats = {}
+    unavailable = []
+
+    def load(fields, fn):
+        try:
+            values = fn()
+            if len(fields) == 1:
+                stats[fields[0]] = int(values or 0)
+            else:
+                for field in fields:
+                    stats[field] = int((values or {}).get(field, 0) or 0)
+        except Exception:
+            if not tolerate_errors:
+                raise
+            unavailable.extend(fields)
+
+    def load_counters():
+        counter_doc = user_ref.collection("usage_monthly").document(month_key).get()
+        return counter_doc.to_dict() if counter_doc.exists else {}
+
+    load(("searches", "captures"), load_counters)
+    epoch_start, epoch_end = month_start.timestamp(), month_end.timestamp()
+
+    load(("documents",), lambda: _count(
+        db.collection("document_metadata")
+        .document(uid)
+        .collection("files_metadata")
+        .where("timestamp", ">=", epoch_start)
+        .where("timestamp", "<", epoch_end)
+    ))
+    load(("images",), lambda: _count(
+        user_ref.collection("generated_images")
+        .where("timestamp", ">=", epoch_start)
+        .where("timestamp", "<", epoch_end)
+    ))
+    load(("notes",), lambda: _count(
+        user_ref.collection("notes")
+        .where("createdAt", ">=", month_start)
+        .where("createdAt", "<", month_end)
+    ))
+    load(("collections",), lambda: _count(
+        user_ref.collection("collections")
+        .where("createdAt", ">=", month_start)
+        .where("createdAt", "<", month_end)
+    ))
+    load(("artifacts",), lambda: _count(
+        user_ref.collection("transforms")
+        .where("created_at", ">=", month_key)
+        .where("created_at", "<", next_month_key)
+    ))
+
+    def count_automations():
+        total = 0
+        for monitor_ref in user_ref.collection("monitors").list_documents():
+            total += _count(
+                monitor_ref.collection("runs")
+                .where("created_at", ">=", month_key)
+                .where("created_at", "<", next_month_key)
+            )
+        return total
+
+    load(("automations",), count_automations)
+    return stats, unavailable
+
+
+def _compute_recap_stats_with_availability(
+    db, uid: str, window: tuple = None
+) -> tuple[dict, list[str]]:
+    """Month stats plus names of fields whose independent reads failed."""
+    return _compute_recap_stats_impl(db, uid, window, tolerate_errors=True)
+
+
 def _compute_recap_stats(db, uid: str, window: tuple = None) -> dict:
     """Usage stats for one user over a calendar-month window, straight from
     Firestore. Defaults to the previous calendar month (the recap email's
@@ -202,54 +280,8 @@ def _compute_recap_stats(db, uid: str, window: tuple = None) -> dict:
     Raises on failure — the caller's retry handles it. Never degrade to
     zeros: a silent zero suppresses the email via the skip rule.
     """
-    month_start, month_end, month_key, next_month_key = window or _previous_month_window()
-    user_ref = db.collection("users").document(uid)
-
-    counter_doc = user_ref.collection("usage_monthly").document(month_key).get()
-    counters = counter_doc.to_dict() if counter_doc.exists else {}
-
-    epoch_start, epoch_end = month_start.timestamp(), month_end.timestamp()
-
-    automations = 0
-    for monitor_ref in user_ref.collection("monitors").list_documents():
-        automations += _count(
-            monitor_ref.collection("runs")
-            .where("created_at", ">=", month_key)
-            .where("created_at", "<", next_month_key)
-        )
-
-    return {
-        "searches": int(counters.get("searches", 0)),
-        "captures": int(counters.get("captures", 0)),
-        "documents": _count(
-            db.collection("document_metadata")
-            .document(uid)
-            .collection("files_metadata")
-            .where("timestamp", ">=", epoch_start)
-            .where("timestamp", "<", epoch_end)
-        ),
-        "images": _count(
-            user_ref.collection("generated_images")
-            .where("timestamp", ">=", epoch_start)
-            .where("timestamp", "<", epoch_end)
-        ),
-        "notes": _count(
-            user_ref.collection("notes")
-            .where("createdAt", ">=", month_start)
-            .where("createdAt", "<", month_end)
-        ),
-        "collections": _count(
-            user_ref.collection("collections")
-            .where("createdAt", ">=", month_start)
-            .where("createdAt", "<", month_end)
-        ),
-        "artifacts": _count(
-            user_ref.collection("transforms")
-            .where("created_at", ">=", month_key)
-            .where("created_at", "<", next_month_key)
-        ),
-        "automations": automations,
-    }
+    stats, _ = _compute_recap_stats_impl(db, uid, window, tolerate_errors=False)
+    return stats
 
 
 def _recap_should_send(stats: dict) -> bool:

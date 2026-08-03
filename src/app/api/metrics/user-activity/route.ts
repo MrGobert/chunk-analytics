@@ -5,6 +5,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { fetchMixpanelEventsWithStatus, getLastUpdated, normalizeEventName } from '@/lib/mixpanel';
 import { getDateRange, formatDate } from '@/lib/utils';
 import { categorizeEvent } from '@/lib/feature-categories';
+import {
+  countCustomerUsage,
+  eventsOnOrAfter,
+  filterCustomerEvents,
+} from '@/lib/customer-activity';
 
 export async function GET(request: NextRequest) {
   try {
@@ -18,9 +23,19 @@ export async function GET(request: NextRequest) {
     const to = searchParams.get('to');
 
     const dateRange = from && to ? { from, to } : getDateRange(range);
+    const monthStart = `${dateRange.to.slice(0, 7)}-01`;
+    const exportFrom = monthStart < dateRange.from ? monthStart : dateRange.from;
     // Full export — shares the from:to cache with /users, /power-users, etc.
-    const { events: raw, dataUnavailable } = await fetchMixpanelEventsWithStatus(dateRange.from, dateRange.to);
-    const events = raw.filter((e) => e.properties.distinct_id === uid);
+    // Include the whole calendar month even on day 31 so "This month's
+    // usage" never drops the first day while the activity card stays rolling.
+    const {
+      events: raw,
+      dataUnavailable,
+      servedStale,
+      fetchedAt,
+    } = await fetchMixpanelEventsWithStatus(exportFrom, dateRange.to);
+    const customerEvents = filterCustomerEvents(raw, uid);
+    const events = eventsOnOrAfter(customerEvents, dateRange.from);
 
     const activeDays = new Set<string>();
     const byCategory = new Map<string, number>();
@@ -40,7 +55,6 @@ export async function GET(request: NextRequest) {
       .map(([event, count]) => ({ event, count }))
       .sort((a, b) => b.count - a.count)
       .slice(0, 8);
-
     return NextResponse.json(
       {
         uid,
@@ -51,9 +65,13 @@ export async function GET(request: NextRequest) {
           .map(([category, count]) => ({ category, events: count }))
           .sort((a, b) => b.events - a.events),
         topEvents,
+        usageStats: countCustomerUsage(events),
+        monthToDateUsageStats: countCustomerUsage(eventsOnOrAfter(customerEvents, monthStart)),
         dateRange,
         dataUnavailable,
-        lastUpdated: getLastUpdated(),
+        servedStale,
+        dataAsOf: fetchedAt,
+        lastUpdated: fetchedAt || getLastUpdated(),
       },
       { headers: { 'Cache-Control': 'public, s-maxage=300, stale-while-revalidate=600' } },
     );

@@ -56,6 +56,89 @@ def _safe_isoformat(val) -> str:
     return dt.isoformat() if dt else ""
 
 
+def _get_display_name(user_data: dict) -> str:
+    """Return the best available profile name across app/Auth schemas."""
+    for field in ("displayName", "display_name", "name", "fullName"):
+        value = user_data.get(field)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    parts = []
+    for field in ("firstName", "lastName"):
+        value = user_data.get(field)
+        if isinstance(value, str) and value.strip():
+            parts.append(value.strip())
+    return " ".join(parts)
+
+
+def _auth_identity_from_record(record) -> dict:
+    """Convert a Firebase Auth UserRecord into the profile fields we consume."""
+    metadata = getattr(record, "user_metadata", None)
+    return {
+        "uid": getattr(record, "uid", "") or "",
+        "email": getattr(record, "email", None) or "",
+        "displayName": getattr(record, "display_name", None) or "",
+        "authCreatedAt": getattr(metadata, "creation_timestamp", None),
+        "authLastSignInAt": getattr(metadata, "last_sign_in_timestamp", None),
+    }
+
+
+def _firebase_auth_identity(uid: str) -> dict:
+    """Best-effort Firebase Auth identity lookup for sparse native profiles."""
+    try:
+        from firebase_admin import auth
+        return _auth_identity_from_record(auth.get_user(uid))
+    except Exception as exc:
+        if exc.__class__.__name__ != "UserNotFoundError":
+            logging.warning(f"[ANALYTICS_API] Firebase Auth lookup failed for {uid}: {exc}")
+        return {}
+
+
+def _firebase_auth_identity_by_email(email: str) -> dict:
+    """Resolve an email to Firebase Auth's canonical uid."""
+    try:
+        from firebase_admin import auth
+        return _auth_identity_from_record(auth.get_user_by_email(email))
+    except Exception as exc:
+        if exc.__class__.__name__ != "UserNotFoundError":
+            logging.warning(f"[ANALYTICS_API] Firebase Auth email lookup failed: {exc}")
+        return {}
+
+
+def _merge_profile_identity(user_data: dict, identity: dict) -> dict:
+    """Merge profile presentation fields with canonical Firebase Auth identity."""
+    merged = dict(user_data or {})
+    # Cerebral treats Firebase Auth as canonical when the Firestore mirror
+    # drifts, so a current Auth email must replace a stale mirrored value.
+    if identity.get("email"):
+        merged["email"] = identity["email"]
+    if identity.get("displayName") and not _get_display_name(merged):
+        merged["displayName"] = identity["displayName"]
+    if identity.get("authCreatedAt"):
+        merged["authCreatedAt"] = identity["authCreatedAt"]
+    if identity.get("authLastSignInAt"):
+        merged["authLastSignInAt"] = identity["authLastSignInAt"]
+    return merged
+
+
+def _get_firestore_user_doc(users_ref, uid: str):
+    """Best-effort user document lookup for an opaque Firebase Auth UID.
+
+    Firestore document IDs cannot contain ``/`` or be exactly ``.``/``..``,
+    while custom Firebase Auth UIDs can. In that case there cannot be a
+    matching ``users/{uid}`` document, but Auth, RevenueCat, email tracking,
+    and event mirrors can still supply a useful customer detail page.
+    """
+    if not uid or "/" in uid or uid in (".", ".."):
+        return None
+    try:
+        return users_ref.document(uid).get()
+    except Exception as exc:
+        logging.warning(
+            f"[ANALYTICS_API] Firestore user lookup failed for {uid}: {exc}"
+        )
+        return None
+
+
 def _get_redis():
     """Get Redis client, return None if unavailable."""
     try:
@@ -107,7 +190,8 @@ def _subscription_events_since(db, cutoff: datetime) -> list[dict]:
         return [
             doc.to_dict()
             for doc in docs
-            if (doc.to_dict().get("environment") or "PRODUCTION") != "SANDBOX"
+            if str(doc.to_dict().get("environment") or "PRODUCTION").upper()
+            != "SANDBOX"
         ]
     except Exception as exc:
         # The collection is new; deployments remain backward compatible while
@@ -152,7 +236,7 @@ def _customer_subscription_events(db, uid: str) -> list[dict]:
         events = []
         for doc in docs:
             data = doc.to_dict()
-            if (data.get("environment") or "PRODUCTION") == "SANDBOX":
+            if str(data.get("environment") or "PRODUCTION").upper() == "SANDBOX":
                 continue
             occurred = _event_occurred_at(data)
             if not occurred:
@@ -216,19 +300,87 @@ def safe_analytics(empty_response):
 
 def _get_creation_date(user_data: dict) -> datetime:
     """Get account creation date, checking common field name variants."""
-    return (
-        _to_datetime(user_data.get("createdAt"))
-        or _to_datetime(user_data.get("created_at"))
-        or _to_datetime(user_data.get("signupDate"))
-    )
+    candidates = [
+        _to_datetime(user_data.get("createdAt")),
+        _to_datetime(user_data.get("created_at")),
+        _to_datetime(user_data.get("signupDate")),
+        _to_datetime(user_data.get("authCreatedAt")),
+    ]
+    known = [value for value in candidates if value]
+    return min(known) if known else None
+
+
+def _get_last_active_date(user_data: dict) -> datetime:
+    """Get profile/Auth activity timestamp across known field variants."""
+    candidates = [
+        _to_datetime(user_data.get("lastActiveAt")),
+        _to_datetime(user_data.get("last_active_at")),
+        _to_datetime(user_data.get("lastActive")),
+        _to_datetime(user_data.get("authLastSignInAt")),
+        _to_datetime(user_data.get("revenueCatLastSeenAt")),
+    ]
+    known = [value for value in candidates if value]
+    return max(known) if known else None
+
+
+def _effective_last_active(user_data: dict, usage_monthly: dict = None) -> datetime:
+    """Latest profile/Auth activity or cerebral usage-month write."""
+    profile_activity = _get_last_active_date(user_data)
+    usage_activity = _to_datetime((usage_monthly or {}).get("_lastActiveAt"))
+    candidates = [value for value in (profile_activity, usage_activity) if value]
+    return max(candidates) if candidates else None
 
 
 def _get_tenure_date(user_data: dict) -> datetime:
-    """Get subscription start date for tenure calculation (always a past date)."""
-    # Prefer creation/signup date — renewalDate is typically a future billing date
+    """Get the earliest known account/subscription start date.
+
+    ``trialEndDate`` used to be the fallback here, but it is normally in the
+    future and produced negative tenure for sparse native profiles.
+    """
     return (
         _get_creation_date(user_data)
-        or _to_datetime(user_data.get("trialEndDate"))
+        or _to_datetime(user_data.get("trialStartedAt"))
+        or _to_datetime(user_data.get("trialStartDate"))
+        or _to_datetime(user_data.get("initialPurchaseAt"))
+        or _to_datetime(user_data.get("trialConvertedAt"))
+    )
+
+
+def _has_current_subscription_access(user_data: dict, now: datetime) -> bool:
+    """Mirror cerebral's entitlement semantics for Firestore subscription state."""
+    status = str(user_data.get("subscriptionStatus") or "").strip().lower()
+    if status in ("active", "trial"):
+        return True
+    if status in ("cancelled", "canceled"):
+        expiration = _to_datetime(user_data.get("expirationDate"))
+        return bool(expiration and expiration > now)
+    return False
+
+
+def _is_trial_subscription(user_data: dict) -> bool:
+    """Identify a current or ended trial without treating it as paid access."""
+    status = str(user_data.get("subscriptionStatus") or "").strip().lower()
+    if status in ("trial", "trialing"):
+        return True
+
+    # Cancellation/expiration overwrites the prior status in Firestore. For a
+    # trial that never converted, RevenueCat's expiration remains aligned with
+    # trialEndDate; a converted paid period ends on a later date.
+    trial_end = _to_datetime(user_data.get("trialEndDate"))
+    expiration = _to_datetime(user_data.get("expirationDate"))
+    return bool(
+        trial_end
+        and expiration
+        and abs((trial_end - expiration).total_seconds()) < 86400 * 2
+    )
+
+
+def _subscription_start_date(user_data: dict) -> datetime:
+    """Best available paid-subscription start, then account/tenure fallback."""
+    return (
+        _to_datetime(user_data.get("initialPurchaseAt"))
+        or _to_datetime(user_data.get("trialConvertedAt"))
+        or _get_tenure_date(user_data)
     )
 
 
@@ -291,9 +443,16 @@ def _fetch_usage_monthly(db, uids: list, now: datetime) -> dict:
                 continue
             uid = snap.reference.parent.parent.id
             data = snap.to_dict() or {}
-            agg = usage.setdefault(uid, {"searches": 0, "captures": 0})
+            agg = usage.setdefault(
+                uid, {"searches": 0, "captures": 0, "_lastActiveAt": None}
+            )
             for field in USAGE_FEATURE_SIGNALS:
                 agg[field] += int(data.get(field, 0) or 0)
+            updated_at = _to_datetime(data.get("updated_at") or data.get("updatedAt"))
+            if updated_at and (
+                agg["_lastActiveAt"] is None or updated_at > agg["_lastActiveAt"]
+            ):
+                agg["_lastActiveAt"] = updated_at
     return usage
 
 
@@ -305,7 +464,7 @@ def _compute_health_score(user_data: dict, now: datetime, usage_monthly: dict = 
     """
 
     # Factor 1: Recency (35% weight) - How recently was user active?
-    last_active = _to_datetime(user_data.get("lastActiveAt"))
+    last_active = _effective_last_active(user_data, usage_monthly)
     if last_active:
         days_since = (now - last_active).days
         recency = max(0, 100 - (days_since * 3.3))  # 0 after 30 days
@@ -315,7 +474,7 @@ def _compute_health_score(user_data: dict, now: datetime, usage_monthly: dict = 
     # Factor 2: Tenure (10% weight) - How long subscribed?
     tenure_date = _get_tenure_date(user_data)
     if tenure_date:
-        tenure_days = (now - tenure_date).days
+        tenure_days = max(0, (now - tenure_date).days)
         tenure = min(100, tenure_days * 0.67)  # Maxes at ~150 days
     else:
         tenure = 50  # Unknown
@@ -354,6 +513,45 @@ def _compute_health_score(user_data: dict, now: datetime, usage_monthly: dict = 
             "tenure": round(tenure),
             "emailEngagement": round(email_engagement),
         }
+    }
+
+
+def _health_with_email_history(health: dict, email_history: list[dict]) -> dict:
+    """Replace sent-marker proxy scoring with observed open/click engagement."""
+    if not health or not email_history:
+        return health
+
+    trackable = [
+        email for email in email_history
+        if (
+            email.get("sentAt")
+            or email.get("delivered")
+            or email.get("opened")
+            or email.get("clicked")
+        )
+    ]
+    if not trackable:
+        return health
+
+    engaged = sum(
+        1 for email in trackable
+        if email.get("opened") or email.get("clicked") or email.get("converted")
+    )
+    factors = dict(health["factors"])
+    factors["emailEngagement"] = round(engaged / len(trackable) * 100)
+    score = round(
+        factors["recency"] * 0.35
+        + factors["frequency"] * 0.25
+        + factors["featureDepth"] * 0.20
+        + factors["tenure"] * 0.10
+        + factors["emailEngagement"] * 0.10
+    )
+    return {
+        "healthScore": score,
+        "healthStatus": (
+            "healthy" if score >= 60 else "atRisk" if score >= 30 else "churning"
+        ),
+        "factors": factors,
     }
 
 
@@ -400,8 +598,21 @@ def _compute_revenue_summary(days: int) -> dict:
         if len(docs) == 5000:
             logging.warning(f"[ANALYTICS_API] revenue_summary: '{label}' query returned exactly 5000 docs — results may be truncated")
 
-    total_subscribers = len(active_docs)
-    trial_users = len(trial_docs)
+    unexpired_cancelled_docs = [
+        doc for doc in cancelled_docs
+        if _has_current_subscription_access(doc.to_dict(), now)
+    ]
+    unexpired_cancelled_trial_docs = [
+        doc for doc in unexpired_cancelled_docs
+        if _is_trial_subscription(doc.to_dict())
+    ]
+    unexpired_cancelled_paid_docs = [
+        doc for doc in unexpired_cancelled_docs
+        if not _is_trial_subscription(doc.to_dict())
+    ]
+    current_subscriber_docs = active_docs + unexpired_cancelled_paid_docs
+    total_subscribers = len(current_subscriber_docs)
+    trial_users = len(trial_docs) + len(unexpired_cancelled_trial_docs)
 
     # MRR calculation from active subscribers
     by_platform = {}
@@ -409,7 +620,7 @@ def _compute_revenue_summary(days: int) -> dict:
     subs_by_product = {}
     mrr = 0.0
 
-    for doc in active_docs:
+    for doc in current_subscriber_docs:
         data = doc.to_dict()
         price = float(data.get("subscriptionPrice", DEFAULT_MONTHLY_PRICE) or DEFAULT_MONTHLY_PRICE)
 
@@ -433,18 +644,23 @@ def _compute_revenue_summary(days: int) -> dict:
 
     # New subscribers in period
     new_subscribers = 0
-    for doc in active_docs:
+    for doc in current_subscriber_docs:
         data = doc.to_dict()
-        created = _get_creation_date(data)
-        if created and created >= cutoff:
+        subscription_start = _subscription_start_date(data)
+        if subscription_start and subscription_start >= cutoff:
             new_subscribers += 1
 
-    # Churned in period
+    # Churned paid subscribers in period. Trial expirations are conversion
+    # fallout, not subscriber churn.
     churned = 0
     for doc in expired_docs + cancelled_docs:
         data = doc.to_dict()
         exp_date = _to_datetime(data.get("expirationDate"))
-        if exp_date and exp_date >= cutoff:
+        if (
+            not _is_trial_subscription(data)
+            and exp_date
+            and cutoff <= exp_date <= now
+        ):
             churned += 1
 
     net_new = new_subscribers - churned
@@ -533,7 +749,7 @@ def _compute_revenue_summary(days: int) -> dict:
     # event. It is intentionally used only when there are no mirrored paid
     # transactions, never added on top of authoritative RevenueCat revenue.
     if not today_transactions:
-        for doc in active_docs:
+        for doc in current_subscriber_docs:
             data = doc.to_dict()
             purchased = _to_datetime(data.get("initialPurchaseAt"))
             if purchased and purchased >= today_start:
@@ -657,9 +873,13 @@ def _compute_subscriber_funnel(days: int) -> dict:
         has_trial_history = bool(started_at or data.get("hasStartedTrial"))
         if converted_at:
             conversions.setdefault(uid, converted_at)
-        elif has_trial_history and data.get("subscriptionStatus") == "active":
+        elif (
+            has_trial_history
+            and _has_current_subscription_access(data, now)
+            and not _is_trial_subscription(data)
+        ):
             # Exact conversion time was not retained historically, but current
-            # active status plus an explicit trial marker proves conversion.
+            # paid access plus an explicit trial marker proves conversion.
             conversions.setdefault(uid, started_at or now)
 
     cohort_starts = {uid: when for uid, when in trial_starts.items() if when >= cutoff}
@@ -682,11 +902,20 @@ def _compute_subscriber_funnel(days: int) -> dict:
         platform_trials[platform] = platform_trials.get(platform, 0) + 1
         if uid in cohort_conversions:
             platform_conversions[platform] = platform_conversions.get(platform, 0) + 1
-        if data.get("subscriptionStatus") == "active":
-            last_active = _to_datetime(data.get("lastActiveAt"))
+        if (
+            uid in cohort_conversions
+            and _has_current_subscription_access(data, now)
+            and not _is_trial_subscription(data)
+        ):
+            last_active = _get_last_active_date(data)
             if last_active and last_active >= (now - timedelta(days=30)):
                 active_30d += 1
-        if data.get("subscriptionStatus") in ("expired", "cancelled"):
+        exp_date = _to_datetime(data.get("expirationDate"))
+        if (
+            uid in cohort_conversions
+            and data.get("subscriptionStatus") in ("expired", "cancelled")
+            and (exp_date is None or exp_date <= now)
+        ):
             churned_count += 1
 
     # Build funnel stages
@@ -791,7 +1020,7 @@ def _classify_churn_reason(data: dict, now: datetime, usage_monthly: dict = None
     # Check if this was a trial user
     trial_end = _to_datetime(data.get("trialEndDate"))
     exp_date = _to_datetime(data.get("expirationDate"))
-    created = _get_creation_date(data)
+    created = _get_tenure_date(data)
     is_trial_churn = (
         trial_end and exp_date
         and abs((trial_end - exp_date).total_seconds()) < 86400 * 2  # expiration ≈ trial end
@@ -818,7 +1047,7 @@ def _classify_churn_reason(data: dict, now: datetime, usage_monthly: dict = None
         return "Low usage"
 
     # Priority 7: Went inactive before churning
-    last_active = _to_datetime(data.get("lastActiveAt"))
+    last_active = _effective_last_active(data, usage_monthly)
     if last_active and exp_date and (exp_date - last_active).days >= 30:
         return "Went inactive"
 
@@ -857,12 +1086,22 @@ def _compute_churn_intelligence(days: int) -> dict:
         if len(docs) == 5000:
             logging.warning(f"[ANALYTICS_API] churn_intelligence: '{label}' query returned exactly 5000 docs — results may be truncated")
 
+    unexpired_cancelled_docs = [
+        doc for doc in cancelled_docs
+        if _has_current_subscription_access(doc.to_dict(), now)
+    ]
+    unexpired_cancelled_paid_docs = [
+        doc for doc in unexpired_cancelled_docs
+        if not _is_trial_subscription(doc.to_dict())
+    ]
+    current_customer_docs = active_docs + trial_docs + unexpired_cancelled_docs
+
     churned_in_period = []
     for doc in expired_docs + cancelled_docs:
         data = doc.to_dict()
         data["_uid"] = doc.id
         exp_date = _to_datetime(data.get("expirationDate"))
-        if exp_date and exp_date >= cutoff:
+        if exp_date and cutoff <= exp_date <= now:
             churned_in_period.append(data)
 
     # Separate trial expirations from subscriber churn for accurate churn rate
@@ -871,10 +1110,7 @@ def _compute_churn_intelligence(days: int) -> dict:
     for data in churned_in_period:
         trial_end = _to_datetime(data.get("trialEndDate"))
         exp_date = _to_datetime(data.get("expirationDate"))
-        is_trial_expiry = (
-            trial_end and exp_date
-            and abs((trial_end - exp_date).total_seconds()) < 86400 * 2
-        )
+        is_trial_expiry = _is_trial_subscription(data)
         if is_trial_expiry:
             trial_churned.append(data)
         else:
@@ -885,18 +1121,20 @@ def _compute_churn_intelligence(days: int) -> dict:
     # burst of new signups doesn't understate churn.
     total_subscriber_churned = len(subscriber_churned)
     new_active_in_period = 0
-    for doc in active_docs:
-        created = _get_creation_date(doc.to_dict())
-        if created and created >= cutoff:
+    for doc in active_docs + unexpired_cancelled_paid_docs:
+        subscription_start = _subscription_start_date(doc.to_dict())
+        if subscription_start and subscription_start >= cutoff:
             new_active_in_period += 1
-    existing_active_at_start = len(active_docs) - new_active_in_period
+    existing_active_at_start = (
+        len(active_docs) + len(unexpired_cancelled_paid_docs) - new_active_in_period
+    )
     start_active = existing_active_at_start + total_subscriber_churned
     churn_rate = round((total_subscriber_churned / start_active * 100) if start_active > 0 else 0, 1)
 
     # One batched usage read for everyone scored or classified below
     usage_by_uid = {}
     try:
-        scored_uids = [d.id for d in active_docs + trial_docs]
+        scored_uids = [d.id for d in current_customer_docs]
         scored_uids += [d["_uid"] for d in churned_in_period]
         usage_by_uid = _fetch_usage_monthly(db, scored_uids, now)
     except Exception as e:
@@ -906,15 +1144,16 @@ def _compute_churn_intelligence(days: int) -> dict:
     at_risk_users = []
     trial_at_risk_count = 0
     engaged_candidates = []
-    for doc in active_docs + trial_docs:
+    for doc in current_customer_docs:
         data = doc.to_dict()
-        last_active = _to_datetime(data.get("lastActiveAt"))
+        last_active = _effective_last_active(data, usage_by_uid.get(doc.id))
         health = _compute_health_score(data, now, usage_by_uid.get(doc.id))
         tenure_date = _get_tenure_date(data)
-        sub_age = (now - tenure_date).days if tenure_date else None
+        sub_age = max(0, (now - tenure_date).days) if tenure_date else None
         platform = data.get("platform", "unknown") or "unknown"
         sub_status = data.get("subscriptionStatus", "active")
-        is_trial = sub_status == "trial"
+        is_trial = _is_trial_subscription(data)
+        is_scheduled_cancellation = sub_status in ("cancelled", "canceled")
 
         # Trial-specific: days until trial ends
         trial_end = _to_datetime(data.get("trialEndDate"))
@@ -923,7 +1162,12 @@ def _compute_churn_intelligence(days: int) -> dict:
         # Trial users within 3 days of expiration are at-risk regardless of activity
         trial_expiring_soon = is_trial and trial_ends_in is not None and trial_ends_in <= 3
 
-        if trial_expiring_soon or last_active is None or last_active < seven_days_ago:
+        if (
+            trial_expiring_soon
+            or is_scheduled_cancellation
+            or last_active is None
+            or last_active < seven_days_ago
+        ):
             # At-risk: inactive 7+ days OR trial expiring soon
             at_risk_users.append({
                 "uid": doc.id,
@@ -933,10 +1177,14 @@ def _compute_churn_intelligence(days: int) -> dict:
                 "healthScore": health["healthScore"],
                 "subscriptionAge": sub_age,
                 "platform": platform,
-                "subscriptionType": "trial" if is_trial else "active",
+                "subscriptionType": (
+                    "trial" if is_trial
+                    else "cancelled" if is_scheduled_cancellation
+                    else "active"
+                ),
                 "trialEndsIn": trial_ends_in if is_trial else None,
             })
-            if trial_expiring_soon:
+            if is_trial and (trial_expiring_soon or is_scheduled_cancellation):
                 trial_at_risk_count += 1
         elif not is_trial and health["healthScore"] >= 40 and last_active and last_active >= fourteen_days_ago:
             # Engaged: active paying subscribers within 14 days with decent health
@@ -1003,9 +1251,9 @@ def _compute_churn_intelligence(days: int) -> dict:
     churned_users = []
     for data in churned_subset:
         uid = data["_uid"]
-        created = _get_creation_date(data)
+        created = _get_tenure_date(data)
         exp_date = _to_datetime(data.get("expirationDate"))
-        tenure = (exp_date - created).days if (exp_date and created) else 0
+        tenure = max(0, (exp_date - created).days) if (exp_date and created) else 0
 
         user_emails = email_by_user.get(uid, {"received": [], "opened": []})
         usage = usage_by_uid.get(uid, {})
@@ -1056,10 +1304,10 @@ def _compute_churn_intelligence(days: int) -> dict:
     # Average tenure before churn
     tenures = []
     for data in churned_in_period:
-        created = _get_creation_date(data)
+        created = _get_tenure_date(data)
         exp_date = _to_datetime(data.get("expirationDate"))
         if created and exp_date:
-            tenures.append((exp_date - created).days)
+            tenures.append(max(0, (exp_date - created).days))
 
     avg_tenure = round(sum(tenures) / len(tenures), 1) if tenures else 0
 
@@ -1134,7 +1382,8 @@ def _compute_customer_health() -> dict:
     now = datetime.now(timezone.utc)
     users_ref = db.collection("users")
 
-    # Paginate through active + trial users
+    # Paginate through customers who may still have current access. A
+    # cancellation only disables renewal; entitlement continues to period end.
     batch_size = 500
     last_doc = None
     customers = []
@@ -1143,7 +1392,7 @@ def _compute_customer_health() -> dict:
 
     while True:
         query = (users_ref
-                 .where("subscriptionStatus", "in", ["active", "trial"])
+                 .where("subscriptionStatus", "in", ["active", "trial", "cancelled"])
                  .order_by("__name__")
                  .limit(batch_size))
         if last_doc:
@@ -1161,20 +1410,25 @@ def _compute_customer_health() -> dict:
 
         for doc in docs:
             data = doc.to_dict()
+            if not _has_current_subscription_access(data, now):
+                continue
             health = _compute_health_score(data, now, usage_by_uid.get(doc.id))
-            created = _get_creation_date(data)
-            subscribed_days = (now - created).days if created else 0
+            created = _get_tenure_date(data)
+            subscribed_days = max(0, (now - created).days) if created else 0
 
+            effective_last_active = _effective_last_active(
+                data, usage_by_uid.get(doc.id)
+            )
             customer = {
                 "uid": doc.id,
                 "email": data.get("email", ""),
-                "name": data.get("displayName") or data.get("name", ""),
+                "name": _get_display_name(data),
                 "healthScore": health["healthScore"],
                 "healthStatus": health["healthStatus"],
                 "factors": health["factors"],
                 "subscriptionStatus": data.get("subscriptionStatus", ""),
                 "platform": data.get("platform", "unknown") or "unknown",
-                "lastActiveAt": _safe_isoformat(data.get("lastActiveAt")),
+                "lastActiveAt": _safe_isoformat(effective_last_active),
                 "subscribedDays": subscribed_days,
             }
             customers.append(customer)
@@ -1195,18 +1449,127 @@ def _compute_customer_health() -> dict:
 
 
 # ============================================================
-# Endpoint 5: Customer Detail
+# Endpoint 5: Customer Search + Detail
 # ============================================================
 
 
-@analytics_api_bp.route("/customer/<uid>", methods=["GET"])
+def _customer_profile_basics(uid: str, data: dict) -> dict:
+    return {
+        "uid": uid,
+        "email": data.get("email", "") or "",
+        "name": _get_display_name(data),
+        "subscriptionStatus": data.get("subscriptionStatus", "") or "",
+        "platform": data.get("platform", "unknown") or "unknown",
+        "createdAt": _safe_isoformat(_get_creation_date(data)),
+        "lastActiveAt": _safe_isoformat(_get_last_active_date(data)),
+    }
+
+
+def _find_customer(query: str) -> dict:
+    """Resolve exact UID/email through Firestore, Auth, then RevenueCat."""
+    from firebase_setup import db
+
+    value = (query or "").strip()
+    if not value:
+        return None
+    users_ref = db.collection("users")
+
+    # A document id is already canonical and always wins, even if it contains @.
+    direct_doc = _get_firestore_user_doc(users_ref, value)
+    if direct_doc and direct_doc.exists:
+        identity = _firebase_auth_identity(value)
+        data = _merge_profile_identity(direct_doc.to_dict() or {}, identity)
+        return _customer_profile_basics(value, data)
+
+    # UID matching is exact and wins even when a valid custom UID contains @.
+    identity = _firebase_auth_identity(value)
+    if identity.get("uid"):
+        return _customer_profile_basics(identity["uid"], identity)
+
+    # Firebase Auth is authoritative for case-insensitive email -> uid mapping,
+    # and also finds Auth users whose sparse native profile has no email field.
+    if "@" in value:
+        normalized_email = value.casefold()
+        identity = _firebase_auth_identity_by_email(normalized_email)
+        if identity.get("uid"):
+            uid = identity["uid"]
+            profile_doc = _get_firestore_user_doc(users_ref, uid)
+            profile = (
+                profile_doc.to_dict()
+                if profile_doc and profile_doc.exists
+                else {}
+            )
+            return _customer_profile_basics(
+                uid, _merge_profile_identity(profile or {}, identity)
+            )
+
+        # Auth can be temporarily unavailable; retain an index-friendly
+        # Firestore fallback without scanning the users collection.
+        matches = {}
+        for email_value in dict.fromkeys((normalized_email, value)):
+            docs = list(
+                users_ref.where("email", "==", email_value).limit(20).stream()
+            )
+            for doc in docs:
+                matches[doc.id] = doc
+        if matches:
+            uid = sorted(matches)[0]
+            doc = matches[uid]
+            identity = _firebase_auth_identity(uid)
+            data = _merge_profile_identity(doc.to_dict() or {}, identity)
+            return _customer_profile_basics(uid, data)
+
+    # A RevenueCat-only customer can exist when both profile mirrors failed.
+    # Its v2 search matches exact $email and App User IDs.
+    try:
+        import revenuecat_client
+        revenuecat_customer = revenuecat_client.search_customer(value)
+    except Exception as exc:
+        logging.warning(
+            f"[ANALYTICS_API] RevenueCat customer search failed for {value}: {exc}"
+        )
+        revenuecat_customer = None
+    if revenuecat_customer and revenuecat_customer.get("uid"):
+        return _customer_profile_basics(
+            revenuecat_customer["uid"], revenuecat_customer
+        )
+    return None
+
+
+@analytics_api_bp.route("/customer-search", methods=["GET"])
 @require_analytics_auth
-@safe_analytics({"error": "Customer not found"})
-def customer_detail(uid: str):
+@safe_analytics({"error": "Customer search unavailable"})
+def customer_search():
+    query = (request.args.get("q") or "").strip()
+    if not query:
+        return jsonify({"error": "Missing required query parameter: q"}), 400
+    result = _find_customer(query)
+    if result is None:
+        return jsonify({"error": "Customer not found"}), 404
+    return jsonify(result), 200
+
+
+def _customer_detail_response(uid: str):
+    if not uid:
+        return jsonify({"error": "Customer UID is required"}), 400
     result = _get_customer_detail(uid)
     if result is None:
         return jsonify({"error": "Customer not found"}), 404
     return jsonify(result), 200
+
+
+@analytics_api_bp.route("/customer/<path:uid>", methods=["GET"])
+@require_analytics_auth
+@safe_analytics({"error": "Customer not found"})
+def customer_detail(uid: str):
+    return _customer_detail_response(uid)
+
+
+@analytics_api_bp.route("/customer-detail", methods=["GET"])
+@require_analytics_auth
+@safe_analytics({"error": "Customer not found"})
+def customer_detail_query():
+    return _customer_detail_response(request.args.get("uid") or "")
 
 
 def _derived_subscription_history(data: dict) -> list[dict]:
@@ -1223,7 +1586,17 @@ def _derived_subscription_history(data: dict) -> list[dict]:
             "source": "derived",
         })
 
-    trial_end = _to_datetime(data.get("trialEndDate"))
+    trial_started = _to_datetime(
+        data.get("trialStartedAt") or data.get("trialStartDate")
+    )
+    if trial_started:
+        history.append({
+            "event": "trial_started",
+            "date": trial_started.isoformat(),
+            "source": "derived",
+        })
+
+    trial_end = _to_datetime(data.get("trialEndDate") or data.get("lastTrialEndDate"))
     if trial_end:
         history.append({
             "event": "trial_ends",
@@ -1231,10 +1604,26 @@ def _derived_subscription_history(data: dict) -> list[dict]:
             "source": "derived",
         })
 
+    initial_purchase = _to_datetime(data.get("initialPurchaseAt"))
+    if initial_purchase:
+        history.append({
+            "event": "initial_purchase",
+            "date": initial_purchase.isoformat(),
+            "source": "derived",
+        })
+
+    converted = _to_datetime(data.get("trialConvertedAt"))
+    if converted:
+        history.append({
+            "event": "trial_converted",
+            "date": converted.isoformat(),
+            "source": "derived",
+        })
+
     renewal_date = _to_datetime(data.get("renewalDate"))
     if renewal_date:
         history.append({
-            "event": "subscription_active",
+            "event": "renews",
             "date": renewal_date.isoformat(),
             "source": "derived",
         })
@@ -1257,22 +1646,29 @@ def _customer_email_history(db, uid: str) -> list[dict]:
         email_docs = list(
             db.collection("emailTracking")
             .where("userId", "==", uid)
-            .order_by("sentAt")
-            .limit(200)
+            .limit(500)
             .stream()
         )
+        if len(email_docs) == 500:
+            logging.warning(
+                f"[ANALYTICS_API] email history hit the 500-doc limit for {uid}"
+            )
         for edoc in email_docs:
             edata = edoc.to_dict()
             email_history.append({
+                "email": edata.get("email", ""),
                 "emailType": edata.get("emailType", ""),
                 "sentAt": _safe_isoformat(edata.get("sentAt")),
                 "converted": bool(edata.get("converted")),
+                "delivered": bool(edata.get("delivered")),
                 "opened": bool(edata.get("opened")),
                 "clicked": bool(edata.get("clicked")),
+                "bounced": bool(edata.get("bounced")),
             })
-    except Exception:
-        pass
-    return email_history
+        email_history.sort(key=lambda row: row["sentAt"])
+    except Exception as exc:
+        logging.warning(f"[ANALYTICS_API] email history unavailable for {uid}: {exc}")
+    return email_history[-200:]
 
 
 def _current_subscription(uid: str, data: dict) -> dict:
@@ -1285,28 +1681,65 @@ def _current_subscription(uid: str, data: dict) -> dict:
         logging.warning(f"[ANALYTICS_API] RevenueCat lookup failed for {uid}: {exc}")
         live = None
 
-    if live is not None:
-        # v2 sends period timestamps as epoch milliseconds
-        live["currentPeriodStartsAt"] = _safe_isoformat(live.get("currentPeriodStartsAt")) or None
-        live["currentPeriodEndsAt"] = _safe_isoformat(live.get("currentPeriodEndsAt")) or None
-        live["source"] = "revenuecat"
-        return live
+    mirror_fields = (
+        "subscriptionStatus", "subscriptionStore", "productId", "renewalDate",
+        "expirationDate", "subscriptionPrice", "subscriptionCurrency",
+    )
+    has_mirror = any(data.get(field) is not None for field in mirror_fields)
 
-    if not data:
-        return None
-
-    return {
+    status = str(data.get("subscriptionStatus") or "").strip().lower()
+    period_end = (
+        data.get("expirationDate") or data.get("renewalDate")
+        if status in ("cancelled", "canceled", "expired")
+        else data.get("renewalDate") or data.get("expirationDate")
+    )
+    fallback = {
         "source": "firestore",
+        "isSubscribed": _has_current_subscription_access(
+            data, datetime.now(timezone.utc)
+        ),
         "status": data.get("subscriptionStatus"),
-        "willRenew": data.get("subscriptionStatus") in ("active", "trial"),
+        "willRenew": status in ("active", "trial"),
         "store": data.get("subscriptionStore"),
         "productId": data.get("productId"),
-        "currentPeriodEndsAt": _safe_isoformat(
-            data.get("renewalDate") or data.get("expirationDate")
+        "currentPeriodStartsAt": _safe_isoformat(
+            data.get("initialPurchaseAt")
+            or data.get("trialStartedAt")
+            or data.get("trialStartDate")
         ) or None,
+        "currentPeriodEndsAt": _safe_isoformat(period_end) or None,
         "price": data.get("subscriptionPrice"),
         "currency": data.get("subscriptionCurrency"),
     }
+
+    if live is not None and live.get("userExists") is not False:
+        # Overlay authoritative live fields while retaining richer webhook
+        # mirror fields (notably transaction price/currency). RevenueCat's v2
+        # subscription resource sends period timestamps as epoch milliseconds.
+        merged = dict(fallback)
+        for key, value in live.items():
+            if value is not None:
+                merged[key] = value
+        if "willRenew" in live:
+            # None is meaningful: RevenueCat did not report renewal state.
+            merged["willRenew"] = live["willRenew"]
+        merged["currentPeriodStartsAt"] = (
+            _safe_isoformat(live.get("currentPeriodStartsAt"))
+            or fallback["currentPeriodStartsAt"]
+        )
+        merged["currentPeriodEndsAt"] = (
+            _safe_isoformat(live.get("currentPeriodEndsAt"))
+            or fallback["currentPeriodEndsAt"]
+        )
+        merged["source"] = "revenuecat"
+        return merged
+
+    if not has_mirror:
+        return live if live and live.get("userExists") is False else None
+
+    if live and live.get("userExists") is False:
+        fallback["revenueCatUserExists"] = False
+    return fallback
 
 
 def _get_customer_detail(uid: str) -> dict:
@@ -1314,63 +1747,100 @@ def _get_customer_detail(uid: str) -> dict:
 
     now = datetime.now(timezone.utc)
 
-    user_doc = db.collection("users").document(uid).get()
+    users_ref = db.collection("users")
+    user_doc = _get_firestore_user_doc(users_ref, uid)
+    firestore_data = (
+        (user_doc.to_dict() or {})
+        if user_doc and user_doc.exists
+        else {}
+    )
+    try:
+        import revenuecat_client
+        revenuecat_profile = revenuecat_client.get_customer_profile(uid)
+    except Exception as exc:
+        logging.warning(
+            f"[ANALYTICS_API] RevenueCat profile lookup failed for {uid}: {exc}"
+        )
+        revenuecat_profile = None
+
+    identity = _firebase_auth_identity(uid)
+    data = _merge_profile_identity(firestore_data, identity)
+
+    # RevenueCat is the fallback identity source beneath Firestore/Auth.
+    # Its last-seen timestamp remains a separate candidate so the newest
+    # cross-system activity wins without overwriting a canonical profile field.
+    rc_profile = revenuecat_profile or {}
+    if not data.get("email") and rc_profile.get("email"):
+        data["email"] = rc_profile["email"]
+    if not _get_display_name(data) and rc_profile.get("displayName"):
+        data["displayName"] = rc_profile["displayName"]
+    if (
+        (not data.get("platform") or data.get("platform") == "unknown")
+        and rc_profile.get("platform")
+    ):
+        data["platform"] = rc_profile["platform"]
+    if not _get_creation_date(data) and rc_profile.get("createdAt"):
+        data["createdAt"] = rc_profile["createdAt"]
+    if rc_profile.get("lastActiveAt"):
+        data["revenueCatLastSeenAt"] = rc_profile["lastActiveAt"]
     email_history = _customer_email_history(db, uid)
     events = _customer_subscription_events(db, uid)
+    current_subscription = _current_subscription(uid, data)
 
-    if not user_doc.exists:
-        # No Firestore profile (e.g. a Mixpanel distinct_id that never signed
-        # up, or a deleted account) — return whatever linked data exists.
-        if not email_history and not events:
-            return None
-        return {
-            "uid": uid,
-            "partialProfile": True,
-            "email": "",
-            "name": "",
-            "subscriptionStatus": "",
-            "platform": "unknown",
-            "createdAt": "",
-            "lastActiveAt": "",
-            "healthScore": None,
-            "healthStatus": None,
-            "healthFactors": None,
-            "hasUsageStats": False,
-            "usageStats": {},
-            "emailHistory": email_history,
-            "subscriptionHistory": events,
-            "subscriptionHistorySource": "events",
-            "currentSubscription": _current_subscription(uid, {}),
-        }
+    # A RevenueCat-only or Firebase-Auth-only customer is still a real linked
+    # customer. Previously both paths incorrectly returned a 404 here.
+    revenuecat_linked = bool(
+        current_subscription
+        and current_subscription.get("source") == "revenuecat"
+        and current_subscription.get("userExists") is True
+    )
+    if (
+        not (user_doc and user_doc.exists)
+        and not identity
+        and not revenuecat_profile
+        and not email_history
+        and not events
+        and not revenuecat_linked
+    ):
+        return None
 
-    data = user_doc.to_dict()
     try:
         usage_monthly = _fetch_usage_monthly(db, [uid], now).get(uid)
     except Exception as e:
         logging.warning(f"[ANALYTICS_API] usage_monthly fetch failed for {uid}: {e}")
         usage_monthly = None
-    health = _compute_health_score(data, now, usage_monthly)
+    health = _compute_health_score(data, now, usage_monthly) if data else None
+    health = _health_with_email_history(health, email_history)
 
     # Full current-month feature counts for the usage panel. On-demand,
     # single-user endpoint — the ~8 count queries are affordable here (they
     # are NOT affordable on the 15-min all-users snapshot paths above).
     try:
-        from email_tasks import _compute_recap_stats, _current_month_window
+        from email_tasks import (
+            _compute_recap_stats_with_availability,
+            _current_month_window,
+        )
 
-        usage_stats = _compute_recap_stats(db, uid, window=_current_month_window(now))
+        usage_stats, usage_unavailable = _compute_recap_stats_with_availability(
+            db, uid, window=_current_month_window(now)
+        )
     except Exception as e:
         logging.warning(f"[ANALYTICS_API] usage stats computation failed for {uid}: {e}")
-        usage_stats = None
+        usage_stats = {}
+        usage_unavailable = [
+            "searches", "captures", "documents", "images", "notes",
+            "collections", "artifacts", "automations",
+        ]
 
     if events:
-        subscription_history = events
-        created = _get_creation_date(data)
-        if created:
-            subscription_history = [{
-                "event": "created",
-                "date": created.isoformat(),
-                "source": "derived",
-            }] + subscription_history
+        # Retain durable pre-mirror lifecycle markers and let authoritative
+        # RevenueCat events replace exact derived duplicates.
+        by_event_date = {}
+        for item in _derived_subscription_history(data) + events:
+            by_event_date[(item.get("event"), item.get("date"))] = item
+        subscription_history = sorted(
+            by_event_date.values(), key=lambda item: item.get("date") or ""
+        )
         history_source = "events"
     else:
         subscription_history = _derived_subscription_history(data)
@@ -1378,21 +1848,31 @@ def _get_customer_detail(uid: str) -> dict:
 
     return {
         "uid": uid,
-        "email": data.get("email", ""),
-        "name": data.get("displayName") or data.get("name", ""),
-        "subscriptionStatus": data.get("subscriptionStatus", ""),
+        "partialProfile": not (user_doc and user_doc.exists),
+        "email": data.get("email", "") or next(
+            (row.get("email") for row in email_history if row.get("email")), ""
+        ),
+        "name": _get_display_name(data),
+        "subscriptionStatus": (
+            (current_subscription or {}).get("status")
+            if (current_subscription or {}).get("source") == "revenuecat"
+            else None
+        )
+        or data.get("subscriptionStatus", ""),
         "platform": data.get("platform", "unknown") or "unknown",
-        "createdAt": _safe_isoformat(data.get("createdAt")),
-        "lastActiveAt": _safe_isoformat(data.get("lastActiveAt")),
-        "healthScore": health["healthScore"],
-        "healthStatus": health["healthStatus"],
-        "healthFactors": health["factors"],
-        "hasUsageStats": usage_stats is not None,
-        "usageStats": usage_stats or {},
+        "createdAt": _safe_isoformat(_get_creation_date(data)),
+        "lastActiveAt": _safe_isoformat(_effective_last_active(data, usage_monthly)),
+        "healthScore": health["healthScore"] if health else None,
+        "healthStatus": health["healthStatus"] if health else None,
+        "healthFactors": health["factors"] if health else None,
+        "hasUsageStats": bool(usage_stats),
+        "usageStats": usage_stats,
+        "usageStatsUnavailableFields": usage_unavailable,
         "emailHistory": email_history,
         "subscriptionHistory": subscription_history,
         "subscriptionHistorySource": history_source,
-        "currentSubscription": _current_subscription(uid, data),
+        "currentSubscription": current_subscription,
+        "lastUpdated": now.isoformat(),
     }
 
 

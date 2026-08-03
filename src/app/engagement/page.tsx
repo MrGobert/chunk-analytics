@@ -15,6 +15,7 @@ import { SkeletonPage, SkeletonChartCard } from '@/components/ui/Skeleton';
 import { useAnalytics } from '@/hooks/useAnalytics';
 import { EngagementMetrics, HelpCenterMetrics } from '@/types/mixpanel';
 import { chart } from '@/lib/chartTheme';
+import { customerDetailHref } from '@/lib/customer-links';
 
 function formatDuration(duration: number) {
   const mins = Math.floor(duration / 60);
@@ -212,7 +213,7 @@ export default function EngagementPage() {
           {topUsersData.length > 0 ? (
             <DataTable
               data={topUsersData}
-              getRowHref={(r) => (r.uid ? `/customers/${r.uid}` : null)}
+              getRowHref={(r) => (r.uid ? customerDetailHref(r.uid) : null)}
               columns={[
                 { key: 'user', header: 'User' },
                 { key: 'tier', header: 'Tier' },

@@ -9,9 +9,11 @@ import ChartCard from '@/components/cards/ChartCard';
 import LineChart from '@/components/charts/LineChart';
 import BarChart from '@/components/charts/BarChart';
 import DataTable from '@/components/charts/DataTable';
-import { SkeletonPage } from '@/components/ui/Skeleton';
+import { SkeletonChartCard, SkeletonStatCard } from '@/components/ui/Skeleton';
+import CustomerSearch from '@/components/customers/CustomerSearch';
 import { useAnalytics } from '@/hooks/useAnalytics';
 import { getDaysFromRange } from '@/lib/utils';
+import { customerDetailHref } from '@/lib/customer-links';
 import { chart } from '@/lib/chartTheme';
 import type { ChurnIntelligence, CustomerHealth } from '@/types/mixpanel';
 import { HeartPulse, AlertTriangle, ShieldCheck, Activity } from 'lucide-react';
@@ -45,7 +47,11 @@ export default function CustomersPage() {
     return users.map((u) => ({
       uid: u.uid,
       email: u.email || u.uid,
-      type: u.subscriptionType === 'trial' ? `Trial${u.trialEndsIn != null ? ` (${u.trialEndsIn}d left)` : ''}` : 'Active',
+      type: u.subscriptionType === 'trial'
+        ? `Trial${u.trialEndsIn != null ? ` (${u.trialEndsIn}d left)` : ''}`
+        : u.subscriptionType === 'cancelled'
+          ? 'Cancels at period end'
+          : 'Active',
       health: u.healthScore,
       lastActive: u.daysSinceActive != null ? `${u.daysSinceActive}d ago` : 'Never',
       platform: u.platform,
@@ -105,41 +111,73 @@ export default function CustomersPage() {
     }
   }, [isLoading, churn]);
 
+  const pageHeader = (
+    <PageHeader
+      title="Customers"
+      subtitle="Health scores, at-risk accounts, and churn — click any row to drill in"
+      dateRange={dateRange}
+      onDateRangeChange={setDateRange}
+      lastUpdated={lastUpdated}
+      isRefreshing={isRefreshing}
+    />
+  );
+
   if (isLoading) {
-    return <SkeletonPage statCards={4} statCardCols="grid-cols-1 md:grid-cols-2 lg:grid-cols-4" chartCards={3} />;
+    return (
+      <div ref={containerRef} className="animate-in fade-in duration-200">
+        {pageHeader}
+        <CustomerSearch />
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+          {Array.from({ length: 4 }).map((_, index) => (
+            <SkeletonStatCard key={index} />
+          ))}
+        </div>
+        <div className="grid grid-cols-1 gap-6 mb-8">
+          <SkeletonChartCard />
+        </div>
+      </div>
+    );
   }
 
   if (error) {
     return (
-      <div className="text-center py-20">
-        <div className="text-ember-deep mb-4">{error}</div>
-        <p className="text-ink-faint text-sm font-mono">Make sure CEREBRAL_AUTH_TOKEN is configured.</p>
+      <div ref={containerRef} className="animate-in fade-in duration-200">
+        {pageHeader}
+        <CustomerSearch />
+        <div className="card-surface text-center py-16 px-6">
+          <div className="text-ember-deep mb-4">{error}</div>
+          <p className="text-ink-faint text-sm font-mono">Make sure CEREBRAL_AUTH_TOKEN is configured.</p>
+        </div>
       </div>
     );
   }
 
   if (!churn) {
-    return <div className="empty-state py-20">Failed to load customer data. Please try again.</div>;
+    return (
+      <div ref={containerRef} className="animate-in fade-in duration-200">
+        {pageHeader}
+        <CustomerSearch />
+        <div className="card-surface empty-state py-20">
+          Failed to load customer data. Please try again.
+        </div>
+      </div>
+    );
   }
 
   const dataUnavailable = churn.dataUnavailable === true;
   const dist = health?.distribution;
 
-  const uidLink = (row: { uid?: string }) => (row.uid ? `/customers/${row.uid}` : null);
+  const uidLink = (row: { uid?: string }) => (
+    row.uid ? customerDetailHref(row.uid) : null
+  );
   const healthCell = (v: unknown) => (
     <span className="font-mono tabular-nums">{healthDot(Number(v))}{String(v)}</span>
   );
 
   return (
     <div ref={containerRef} className="animate-in fade-in duration-300">
-      <PageHeader
-        title="Customers"
-        subtitle="Health scores, at-risk accounts, and churn — click any row to drill in"
-        dateRange={dateRange}
-        onDateRangeChange={setDateRange}
-        lastUpdated={lastUpdated}
-        isRefreshing={isRefreshing}
-      />
+      {pageHeader}
+      <CustomerSearch />
 
       {dataUnavailable && churn.note && (
         <div className="mb-6 p-4 bg-butter-tint border border-butter rounded-card flex items-center gap-3 text-ink">
@@ -174,7 +212,7 @@ export default function CustomersPage() {
       <div className="card-animate card-surface p-6 sm:p-8 mb-8">
         <div className="mb-6 border-b border-line pb-4">
           <h3 className="font-display text-xl sm:text-2xl text-ink">At-Risk Customers</h3>
-          <p className="text-sm font-mono text-ink-faint mt-2">Inactive 7+ days or trials about to expire — lowest health first</p>
+          <p className="text-sm font-mono text-ink-faint mt-2">Inactive 7+ days, scheduled cancellations, or trials about to expire — lowest health first</p>
         </div>
         <div className="h-[320px]">
           {atRiskTableData.length > 0 ? (
