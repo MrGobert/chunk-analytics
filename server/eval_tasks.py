@@ -21,7 +21,7 @@ from celery.exceptions import SoftTimeLimitExceeded
 logging.basicConfig(level=logging.INFO)
 
 LOCK_KEY = "eval_suite:lock"
-LOCK_TTL = 2700  # matches the task hard time limit
+LOCK_TTL = 3900  # matches the task hard time limit
 DAILY_COUNT_KEY = "eval_suite:runs:{day}"
 
 
@@ -71,15 +71,25 @@ def _daily_budget_ok(redis) -> bool:
         return True
 
 
+# Budget: the non-research cases run ~15 min; a deep research case can poll for
+# up to 20 min (cerebral kills generate_report at 1050s) and a detailed one for
+# up to 15. Both research toggles on is therefore ~50 min worst case, so the
+# soft limit is 60 min and the hard limit 65 — LOCK_TTL and
+# analytics_api.EVAL_RUN_STALE_MINUTES are coupled to it.
 @shared_task(
     bind=True,
     name="run_eval_suite",
     ignore_result=True,
-    soft_time_limit=2400,
-    time_limit=2700,
+    soft_time_limit=3600,
+    time_limit=3900,
 )
-def run_eval_suite_task(self, run_id: str, trigger: str = "manual"):
-    """Execute the eval suite for an already-created eval_runs/{run_id} doc."""
+def run_eval_suite_task(self, run_id: str, trigger: str = "manual", research_types=None):
+    """Execute the eval suite for an already-created eval_runs/{run_id} doc.
+
+    research_types is the dashboard's per-run research coverage selection
+    (None = defaults). Kept as a keyword arg so messages queued by an older
+    dispatcher stay valid.
+    """
     from evals import config
     from evals.runner import run_suite
 
@@ -111,7 +121,7 @@ def run_eval_suite_task(self, run_id: str, trigger: str = "manual"):
         return
 
     try:
-        run_suite(run_id, trigger=trigger)
+        run_suite(run_id, trigger=trigger, research_types=research_types)
     except SoftTimeLimitExceeded:
         logging.error(f"[EVAL_TASKS] run {run_id} hit the soft time limit")
         try:

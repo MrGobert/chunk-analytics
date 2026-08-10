@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { CheckCircle2, FlaskConical, Gauge, Play, Sparkles } from 'lucide-react';
+import { Check, CheckCircle2, FlaskConical, Gauge, Play, Plus, Sparkles } from 'lucide-react';
 import PageHeader from '@/components/layout/PageHeader';
 import StatCard from '@/components/cards/StatCard';
 import ChartCard from '@/components/cards/ChartCard';
@@ -10,7 +10,14 @@ import LoadingSpinner from '@/components/ui/LoadingSpinner';
 import EvalCaseTable from '@/components/evals/EvalCaseTable';
 import { EvalRunStatusPill } from '@/components/evals/EvalStatusPill';
 import { useEvalRunDetail, useEvalRuns, useStartEvalRun } from '@/hooks/useEvalRun';
-import { isRunActive, type EvalRun } from '@/types/evals';
+import {
+  DEFAULT_EVAL_RESEARCH_TYPES,
+  EVAL_RESEARCH_TYPES,
+  isRunActive,
+  researchTypeLabel,
+  type EvalResearchType,
+  type EvalRun,
+} from '@/types/evals';
 
 function formatRunTime(iso: string): string {
   if (!iso) return '—';
@@ -39,6 +46,19 @@ export default function EvalsPage() {
   const { startRun, isStarting } = useStartEvalRun();
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [startError, setStartError] = useState<string | null>(null);
+  const [researchTypes, setResearchTypes] = useState<EvalResearchType[]>(
+    DEFAULT_EVAL_RESEARCH_TYPES
+  );
+
+  // Keep the selection in EVAL_RESEARCH_TYPES order so what the button sends
+  // matches what the run doc records.
+  const toggleResearchType = (id: EvalResearchType) => {
+    setResearchTypes((current) =>
+      EVAL_RESEARCH_TYPES.filter((option) =>
+        option.id === id ? !current.includes(id) : current.includes(option.id)
+      ).map((option) => option.id)
+    );
+  };
 
   // Default the detail view to the newest run once the list loads.
   useEffect(() => {
@@ -69,7 +89,7 @@ export default function EvalsPage() {
 
   const handleStart = async () => {
     setStartError(null);
-    const result = await startRun();
+    const result = await startRun(researchTypes);
     if (result.error) {
       setStartError(result.error);
       return;
@@ -105,6 +125,49 @@ export default function EvalsPage() {
           {startError}
         </div>
       )}
+
+      {/* Research coverage — which report types the next run exercises. Deep is
+          on by default; each one adds real minutes and real API spend. */}
+      <div className="card-surface p-4 sm:p-5 mb-6 rounded-card flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h3 className="eyebrow text-ink">Research coverage</h3>
+          <p className="text-xs font-mono text-ink-faint mt-1">
+            {activeRun
+              ? 'Locked while a run is in progress — applies to the next run.'
+              : researchTypes.length === 0
+                ? 'Every research case will be skipped; the rest of the suite still runs.'
+                : 'Applies to the next run. Every other case always runs.'}
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {EVAL_RESEARCH_TYPES.map((option) => {
+            const enabled = researchTypes.includes(option.id);
+            return (
+              <button
+                key={option.id}
+                type="button"
+                onClick={() => toggleResearchType(option.id)}
+                disabled={Boolean(activeRun)}
+                aria-pressed={enabled}
+                title={option.description}
+                className={`inline-flex items-center gap-2 rounded-full border px-3.5 py-1.5 text-sm font-semibold shadow-card transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                  enabled
+                    ? 'bg-sage-tint border-sage/50 text-ink'
+                    : 'bg-card border-line text-ink-faint hover:text-ink'
+                }`}
+              >
+                {enabled ? (
+                  <Check size={13} className="text-sage-deep" />
+                ) : (
+                  <Plus size={13} />
+                )}
+                {option.label}
+                <span className="font-mono text-[0.7rem] text-ink-faint">{option.estimate}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
 
       {/* Stat row — last finished run */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-8">
@@ -168,6 +231,13 @@ export default function EvalsPage() {
               <p className="text-sm font-mono text-ink-faint mt-2">
                 {detail.run_id} · {detail.trigger}
                 {detail.duration_s ? ` · ${Math.round(detail.duration_s / 60)}m` : ''}
+                {detail.options?.research_types
+                  ? ` · research: ${
+                      detail.options.research_types.length
+                        ? detail.options.research_types.map(researchTypeLabel).join(', ')
+                        : 'none'
+                    }`
+                  : ''}
               </p>
             )}
           </div>

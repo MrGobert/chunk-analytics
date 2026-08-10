@@ -106,6 +106,16 @@ function CaseDetail({ caseResult }: { caseResult: EvalCaseResult }) {
             </a>
           </p>
         )}
+        {response?.research_state && (
+          <p className="text-xs font-mono text-ink-faint mt-3">
+            {response.research_report_type || 'research'} · {response.research_state} ·{' '}
+            {response.research_words ?? 0} words · {response.research_sources ?? 0} sources ·{' '}
+            {Math.round(response.research_elapsed_s ?? 0)}s
+            {typeof response.research_cost === 'number'
+              ? ` · $${response.research_cost.toFixed(3)}`
+              : ''}
+          </p>
+        )}
         {response?.sentinel_summary && (
           <p className="text-xs font-mono text-ink-faint mt-3">
             sources {response.sources_count ?? 0} · grounded{' '}

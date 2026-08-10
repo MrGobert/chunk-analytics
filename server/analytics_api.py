@@ -2338,8 +2338,11 @@ def _compute_onboarding_categories() -> dict:
 # AI Chat Eval Suite
 # ============================================================
 
-# A run doc stuck in queued/running older than this is treated as dead.
-EVAL_RUN_STALE_MINUTES = 45
+# A run doc stuck in queued/running older than this is treated as dead. Must
+# stay above eval_tasks.run_eval_suite_task's hard time limit (3900s = 65 min)
+# or a legitimately long run — deep + detailed research both enabled — gets
+# auto-expired out from under itself while it is still working.
+EVAL_RUN_STALE_MINUTES = 75
 
 
 def _eval_runs_collection():
@@ -2361,6 +2364,7 @@ def _serialize_run(doc_id: str, data: dict, include_cases: bool = False) -> dict
         "duration_s": data.get("duration_s"),
         "progress": data.get("progress", {}),
         "summary": data.get("summary", {}),
+        "options": data.get("options", {}),
         "case_index": data.get("case_index", []),
     }
     if include_cases:
@@ -2417,6 +2421,12 @@ def evals_run():
     if active_id:
         return jsonify({"error": "A run is already in progress", "run_id": active_id}), 409
 
+    # Per-run research coverage from the dashboard toggles. Unknown entries are
+    # dropped and an absent field falls back to the defaults, so an older or
+    # newer client can never queue an unrunnable selection.
+    body = request.get_json(silent=True) or {}
+    research_types = eval_config.normalize_research_types(body.get("research_types"))
+
     run_id = (
         f"{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}-{_uuid.uuid4().hex[:6]}"
     )
@@ -2425,6 +2435,7 @@ def evals_run():
             "status": "queued",
             "trigger": "manual",
             "created_at": datetime.now(timezone.utc),
+            "options": {"research_types": research_types},
         }
     )
 
@@ -2439,7 +2450,11 @@ def evals_run():
     from celery_app import celery as celery_client
 
     try:
-        celery_client.send_task("run_eval_suite", args=[run_id, "manual"])
+        celery_client.send_task(
+            "run_eval_suite",
+            args=[run_id, "manual"],
+            kwargs={"research_types": research_types},
+        )
     except Exception as exc:
         logging.error(f"[ANALYTICS_API] eval dispatch failed: {exc}", exc_info=True)
         try:
@@ -2451,7 +2466,16 @@ def evals_run():
             pass
         return jsonify({"error": f"Could not queue eval run: {exc}"}), 503
 
-    return jsonify({"run_id": run_id, "status": "queued"}), 200
+    return (
+        jsonify(
+            {
+                "run_id": run_id,
+                "status": "queued",
+                "research_types": research_types,
+            }
+        ),
+        200,
+    )
 
 
 @analytics_api_bp.route("/evals/runs", methods=["GET"])

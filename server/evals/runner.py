@@ -191,8 +191,16 @@ def _execute_once(
         if result and result.kind == "task":
             task_id = (result.task_json or {}).get("task_id", "")
             if task_id:
+                # Timed here, not in the client: the research budget assertions
+                # measure dispatch → ready report, which is the number that has
+                # to fit inside cerebral's Celery soft_time_limit.
+                poll_started = time.monotonic()
                 execution.research = client.poll_research_result(
                     task_id, timeout_s=case.timeout_s
+                )
+                execution.extra["research_task_id"] = task_id
+                execution.extra["research_elapsed_s"] = round(
+                    time.monotonic() - poll_started, 1
                 )
             else:
                 execution.research = {"state": "FAILURE", "error": "202 without task_id"}
@@ -263,6 +271,14 @@ def _evaluate(case: EvalCase, execution: CaseExecution) -> dict:
             response_summary["answer_snippet"] = report[:ANSWER_SNIPPET_CHARS]
             response_summary["research_state"] = execution.research.get("state", "SUCCESS")
             response_summary["research_sources"] = len(execution.research.get("sources") or [])
+            response_summary["research_report_type"] = execution.research.get("report_type", "")
+            response_summary["research_words"] = len(report.split())
+            response_summary["research_elapsed_s"] = execution.extra.get(
+                "research_elapsed_s", 0
+            )
+            # gpt-researcher's own cost accounting — the drift signal for the
+            # now-uncapped gpt-5.6-sol writer.
+            response_summary["research_cost"] = execution.research.get("costs")
         if execution.image_url:
             response_summary["image_url"] = execution.image_url
     if execution.extra:
@@ -270,13 +286,20 @@ def _evaluate(case: EvalCase, execution: CaseExecution) -> dict:
         extra.pop("expected_token", None)  # not interesting in the dashboard
         response_summary["pipeline"] = json.loads(json.dumps(extra, default=str))
 
+    total_ms = result.total_ms if result else 0
+    if case.kind == "research":
+        # The POST only returns a 202 dispatch, so its total_ms says nothing
+        # about how long the research took. Report dispatch + poll so the
+        # dashboard's Total column is the real end-to-end number.
+        total_ms += int(float(execution.extra.get("research_elapsed_s", 0)) * 1000)
+
     return {
         "status": status,
         "assertions": assertion_rows,
         "judge": judge_result,
         "latency": {
             "ttfb_ms": result.ttfb_ms if result else 0,
-            "total_ms": result.total_ms if result else 0,
+            "total_ms": total_ms,
         },
         "response": response_summary,
     }
@@ -401,16 +424,41 @@ class RunWriter:
 # ---- suite ----
 
 
+def _skipped_case_doc(position: int, case: EvalCase, reason: str) -> dict:
+    return {
+        "idx": position,
+        "name": case.name,
+        "category": case.category,
+        "status": "skipped",
+        "skip_reason": reason,
+        "assertions": [],
+        "judge": None,
+        "latency": {"ttfb_ms": 0, "total_ms": 0},
+        "response": {},
+        "attempts": 0,
+    }
+
+
 def run_suite(
     run_id: str,
     trigger: str = "manual",
     case_filter: list | None = None,
     dry: bool = False,
+    research_types: list | None = None,
 ) -> dict:
-    """Run the suite. Returns the final run summary dict."""
+    """Run the suite. Returns the final run summary dict.
+
+    research_types selects which report types the research cases cover (the
+    dashboard's per-run toggles); None means the defaults. An explicit --case
+    selection bypasses the gate unless types were also named, so debugging a
+    single research case never silently skips it.
+    """
     writer = RunWriter(run_id, dry)
     started = _now()
     started_monotonic = time.monotonic()
+
+    selected_research = config.normalize_research_types(research_types)
+    apply_research_gate = research_types is not None or not case_filter
 
     cases = [c for c in ALL_CASES if not case_filter or c.id in case_filter]
     total = len(cases) + (2 if not case_filter else 0)  # + virtual cases on full runs
@@ -421,9 +469,11 @@ def run_suite(
             "trigger": trigger,
             "target_url": config.target_url(),
             "started_at": started,
+            "options": {"research_types": selected_research},
             "progress": {"total": total, "completed": 0, "current_case": ""},
         }
     )
+    logging.info(f"[EVALS] research coverage: {selected_research or 'none'}")
 
     try:
         identity = sign_in()
@@ -451,20 +501,24 @@ def run_suite(
             {"progress": {"total": total, "completed": position, "current_case": case.id}}
         )
 
+        if (
+            apply_research_gate
+            and case.research_type
+            and case.research_type not in selected_research
+        ):
+            doc = _skipped_case_doc(
+                position,
+                case,
+                f"research type '{case.research_type}' not enabled for this run",
+            )
+            case_docs[case.id] = doc
+            writer.write_case(case.id, doc)
+            case_index.append(_index_row(case.id, doc))
+            continue
+
         unmet = [req for req in case.requires if not requirements.get(req)]
         if unmet:
-            doc = {
-                "idx": position,
-                "name": case.name,
-                "category": case.category,
-                "status": "skipped",
-                "skip_reason": f"requires {', '.join(unmet)}",
-                "assertions": [],
-                "judge": None,
-                "latency": {"ttfb_ms": 0, "total_ms": 0},
-                "response": {},
-                "attempts": 0,
-            }
+            doc = _skipped_case_doc(position, case, f"requires {', '.join(unmet)}")
             case_docs[case.id] = doc
             writer.write_case(case.id, doc)
             case_index.append(_index_row(case.id, doc))
@@ -590,6 +644,15 @@ def _index_row(case_id: str, doc: dict) -> dict:
 def main():
     parser = argparse.ArgumentParser(description="Run the Chunk AI chat eval suite")
     parser.add_argument("--case", action="append", help="run only this case id (repeatable)")
+    parser.add_argument(
+        "--research-type",
+        action="append",
+        choices=list(config.SELECTABLE_RESEARCH_TYPES),
+        help=(
+            "research report types to cover (repeatable); default: "
+            f"{', '.join(config.DEFAULT_RESEARCH_TYPES)}"
+        ),
+    )
     parser.add_argument("--dry", action="store_true", help="don't write Firestore run docs")
     parser.add_argument("--list", action="store_true", help="list case ids and exit")
     args = parser.parse_args()
@@ -598,7 +661,8 @@ def main():
 
     if args.list:
         for case in ALL_CASES:
-            print(f"{case.id:28s} [{case.category}] {case.name}")
+            tag = f" (reportType={case.research_type})" if case.research_type else ""
+            print(f"{case.id:28s} [{case.category}] {case.name}{tag}")
         return
 
     if args.case:
@@ -614,7 +678,13 @@ def main():
         )
     print(f"run_id: {run_id}  target: {config.target_url()}  dry: {args.dry}")
 
-    summary = run_suite(run_id, trigger="cli", case_filter=args.case, dry=args.dry)
+    summary = run_suite(
+        run_id,
+        trigger="cli",
+        case_filter=args.case,
+        dry=args.dry,
+        research_types=args.research_type,
+    )
     print(json.dumps(summary, indent=2, default=str))
 
 

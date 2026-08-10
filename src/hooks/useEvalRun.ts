@@ -7,6 +7,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  type EvalResearchType,
   type EvalRun,
   type EvalRunDetail,
   isRunActive,
@@ -109,10 +110,19 @@ export function useEvalRunDetail(runId: string | null) {
 export function useStartEvalRun() {
   const [isStarting, setIsStarting] = useState(false);
 
-  const startRun = useCallback(async (): Promise<StartRunResult> => {
+  const startRun = useCallback(async (
+    researchTypes?: EvalResearchType[]
+  ): Promise<StartRunResult> => {
     setIsStarting(true);
     try {
-      const response = await fetch('/api/evals/run', { method: 'POST' });
+      // Always send the field (even empty) so the selection is explicit — an
+      // omitted field means "use the server defaults", which would silently
+      // re-enable a type the user just switched off.
+      const response = await fetch('/api/evals/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ research_types: researchTypes ?? [] }),
+      });
       const data = await response.json().catch(() => ({}));
       if (response.status === 409 && data.run_id) {
         return { runId: data.run_id, attached: true, error: null };

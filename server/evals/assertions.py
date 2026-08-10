@@ -297,6 +297,29 @@ def connector_terminal_ok(connector_id: str, ok_events: tuple = ("complete", "so
 # ---- research ----
 
 
+def _research_report(execution: CaseExecution) -> str:
+    return str((execution.research or {}).get("report", ""))
+
+
+def _research_source_urls(execution: CaseExecution) -> list:
+    """Valid http(s) URLs from a research result.
+
+    /api/research_result normalizes sources to plain URL strings, but the
+    Firestore-history fallback body can carry the original dicts — accept both.
+    """
+    sources = (execution.research or {}).get("sources") or []
+    urls = []
+    for source in sources:
+        url = source.get("url", "") if isinstance(source, dict) else str(source)
+        try:
+            parts = urlparse(url)
+        except ValueError:
+            continue
+        if parts.scheme in ("http", "https") and parts.netloc:
+            urls.append(url)
+    return urls
+
+
 def research_report_min_length(min_chars: int = 500) -> Assertion:
     def check(execution: CaseExecution):
         research = execution.research or {}
@@ -318,3 +341,97 @@ def research_sources_nonempty() -> Assertion:
         return bool(sources), f"{len(sources)} research sources"
 
     return Assertion("research_sources_nonempty", check)
+
+
+def research_succeeded() -> Assertion:
+    """The Celery task reached SUCCESS and returned an actual report.
+
+    Separates "the task died / never finished" from "the report is too short",
+    so a failed deep run reads as a pipeline failure in the dashboard instead
+    of a length miss.
+    """
+
+    def check(execution: CaseExecution):
+        research = execution.research or {}
+        if not research:
+            return False, "no research result recorded"
+        state = str(research.get("state", "")).upper()
+        if state in ("TIMEOUT", "FAILURE", "ERROR"):
+            return False, f"research task ended {state}: {str(research)[:200]}"
+        report = _research_report(execution)
+        if not report.strip():
+            return False, f"task returned no report (keys: {sorted(research)[:8]})"
+        return True, f"SUCCESS, {len(report)} chars"
+
+    return Assertion("research_succeeded", check)
+
+
+def research_sources_min(min_count: int) -> Assertion:
+    def check(execution: CaseExecution):
+        urls = _research_source_urls(execution)
+        return (
+            len(urls) >= min_count,
+            f"{len(urls)} valid source URLs (expected >= {min_count})",
+        )
+
+    return Assertion(f"research_sources_min({min_count})", check)
+
+
+def research_word_count_min(min_words: int) -> Assertion:
+    """Word floor for report-length checks.
+
+    Words, not characters: the point of `detailed_report` is a bigger word
+    budget (cerebral maps it to research_report with total_words 4500), and
+    that is what the writer prompt is denominated in.
+    """
+
+    def check(execution: CaseExecution):
+        words = len(_research_report(execution).split())
+        return words >= min_words, f"{words} words (expected >= {min_words})"
+
+    return Assertion(f"research_word_count_min({min_words})", check)
+
+
+def research_within_budget(max_seconds: int) -> Assertion:
+    """Wall-clock from task dispatch to a ready report.
+
+    Measured around the /api/research_result poll, so it includes Celery queue
+    wait — deliberately: it is the latency a user actually sees, and the client
+    gives up on it regardless of where the time went. The ceiling is cerebral's
+    generate_report soft_time_limit (900s), past which Celery kills the task,
+    so a run near it is the pipeline running out of budget rather than a slow
+    but healthy one.
+    """
+
+    def check(execution: CaseExecution):
+        elapsed = (execution.extra or {}).get("research_elapsed_s")
+        if elapsed is None:
+            return False, "research elapsed time not recorded"
+        return (
+            float(elapsed) <= max_seconds,
+            f"{float(elapsed):.0f}s to report (budget {max_seconds}s)",
+        )
+
+    return Assertion(f"research_within_budget({max_seconds}s)", check)
+
+
+def research_report_type(expected: str, deep: bool | None = None) -> Assertion:
+    """The result must echo the report type the client asked for.
+
+    cerebral maps unknown/aliased types internally (detailed_report →
+    research_report + a boosted word budget) but keeps the CLIENT string in the
+    result payload. A mismatch here means the wire contract drifted — which is
+    exactly how "Detailed" silently degraded to a standard report.
+    """
+
+    def check(execution: CaseExecution):
+        research = execution.research or {}
+        actual = str(research.get("report_type", ""))
+        is_deep = bool(research.get("is_deep_research", False))
+        if actual != expected:
+            return False, f"report_type={actual!r} (expected {expected!r})"
+        if deep is not None and is_deep != deep:
+            return False, f"is_deep_research={is_deep} (expected {deep})"
+        return True, f"report_type={actual} is_deep_research={is_deep}"
+
+    return Assertion(f"research_report_type({expected})", check)

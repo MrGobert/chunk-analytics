@@ -5,7 +5,7 @@ export const maxDuration = 60;
 const ANALYTICS_API_URL = process.env.ANALYTICS_API_URL || 'https://cerebral-analytics-eff2e86d22c4.herokuapp.com';
 const CEREBRAL_AUTH_TOKEN = process.env.CEREBRAL_AUTH_TOKEN || '';
 
-export async function POST() {
+export async function POST(request: Request) {
   if (!CEREBRAL_AUTH_TOKEN) {
     console.error('CEREBRAL_AUTH_TOKEN not configured');
     return NextResponse.json(
@@ -13,6 +13,15 @@ export async function POST() {
       { status: 500 }
     );
   }
+
+  // Per-run options (research coverage toggles). The backend validates the
+  // list, so an unparseable body just falls through to its defaults.
+  const body = await request.json().catch(() => null);
+  const researchTypes = Array.isArray((body as { research_types?: unknown })?.research_types)
+    ? ((body as { research_types: unknown[] }).research_types.filter(
+        (value): value is string => typeof value === 'string'
+      ))
+    : undefined;
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 55000);
@@ -24,6 +33,7 @@ export async function POST() {
         'Authorization': CEREBRAL_AUTH_TOKEN,
         'Content-Type': 'application/json',
       },
+      body: JSON.stringify(researchTypes ? { research_types: researchTypes } : {}),
       signal: controller.signal,
       cache: 'no-store',
     });

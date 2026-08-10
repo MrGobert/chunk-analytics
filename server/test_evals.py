@@ -8,7 +8,15 @@ from unittest.mock import Mock, patch
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from evals import assertions as A
-from evals.cases import ALL_CASES, get_case
+from evals import config as eval_config
+from evals import runner as eval_runner
+from evals.cases import (
+    ALL_CASES,
+    DETAILED_REPORT_HARD_FLOOR_WORDS,
+    RESEARCH_SOFT_BUDGET_S,
+    STANDARD_REPORT_TARGET_WORDS,
+    get_case,
+)
 from evals.chat_client import ChatClient, ChatResult, default_chat_body
 from evals.judge import JudgeSpec, judge_answer
 from evals.stream_parser import ZERO_WIDTH_SPACE, parse_stream
@@ -271,6 +279,75 @@ class TestAssertions(unittest.TestCase):
         execution.research = {"state": "TIMEOUT"}
         self.assertFalse(A.research_report_min_length(500).evaluate(execution)[0])
 
+    def test_research_succeeded_separates_failure_from_short_report(self):
+        timed_out = A.CaseExecution()
+        timed_out.research = {"state": "TIMEOUT", "last": {}}
+        self.assertFalse(A.research_succeeded().evaluate(timed_out)[0])
+
+        empty = A.CaseExecution()
+        empty.research = {"report": "   ", "sources": []}
+        passed, detail = A.research_succeeded().evaluate(empty)
+        self.assertFalse(passed)
+        self.assertIn("no report", detail)
+
+        good = A.CaseExecution()
+        good.research = {"report": "a real report", "sources": []}
+        self.assertTrue(A.research_succeeded().evaluate(good)[0])
+
+    def test_research_sources_min_accepts_strings_and_dicts(self):
+        execution = A.CaseExecution()
+        execution.research = {
+            "report": "x",
+            "sources": [
+                "https://a.com/1",
+                {"url": "https://b.com/2"},
+                "not-a-url",
+                {"title": "no url"},
+            ],
+        }
+        self.assertTrue(A.research_sources_min(2).evaluate(execution)[0])
+        self.assertFalse(A.research_sources_min(3).evaluate(execution)[0])
+
+    def test_research_word_count_min(self):
+        execution = A.CaseExecution()
+        execution.research = {"report": " ".join(["word"] * 1900)}
+        self.assertTrue(A.research_word_count_min(1800).evaluate(execution)[0])
+        self.assertFalse(A.research_word_count_min(3000).evaluate(execution)[0])
+
+    def test_research_within_budget(self):
+        execution = A.CaseExecution()
+        execution.research = {"report": "x"}
+        execution.extra["research_elapsed_s"] = 612.4
+        self.assertTrue(A.research_within_budget(900).evaluate(execution)[0])
+        self.assertFalse(A.research_within_budget(600).evaluate(execution)[0])
+
+        # A missing timing is a harness bug, not a pass.
+        unmeasured = A.CaseExecution()
+        unmeasured.research = {"report": "x"}
+        self.assertFalse(A.research_within_budget(900).evaluate(unmeasured)[0])
+
+    def test_research_report_type_echo(self):
+        deep = A.CaseExecution()
+        deep.research = {"report": "x", "report_type": "deep", "is_deep_research": True}
+        self.assertTrue(A.research_report_type("deep", deep=True).evaluate(deep)[0])
+
+        # The exact 2026-08-10 regression: "detailed_report" silently served as
+        # a plain research_report.
+        degraded = A.CaseExecution()
+        degraded.research = {
+            "report": "x",
+            "report_type": "research_report",
+            "is_deep_research": False,
+        }
+        passed, detail = A.research_report_type("detailed_report", deep=False).evaluate(degraded)
+        self.assertFalse(passed)
+        self.assertIn("research_report", detail)
+
+        # Right label, but the deep pipeline never engaged.
+        shallow = A.CaseExecution()
+        shallow.research = {"report": "x", "report_type": "deep", "is_deep_research": False}
+        self.assertFalse(A.research_report_type("deep", deep=True).evaluate(shallow)[0])
+
     def test_assertion_crash_is_failure_not_raise(self):
         def broken(_execution):
             raise RuntimeError("boom")
@@ -299,8 +376,8 @@ class TestCases(unittest.TestCase):
         self.assertEqual(len(ids), len(set(ids)))
 
     def test_expected_case_count(self):
-        # 19 executed cases + 2 virtual (computed by the runner) = 21 total
-        self.assertEqual(len(ALL_CASES), 19)
+        # 21 executed cases + 2 virtual (computed by the runner) = 23 total
+        self.assertEqual(len(ALL_CASES), 21)
 
     def test_every_case_has_turns_and_hard_assertions(self):
         for case in ALL_CASES:
@@ -311,12 +388,144 @@ class TestCases(unittest.TestCase):
         self.assertIsNotNone(get_case("web_search"))
         self.assertIsNone(get_case("nope"))
 
+    def test_every_selectable_research_type_has_exactly_one_case(self):
+        by_type = {}
+        for case in ALL_CASES:
+            if case.research_type:
+                by_type.setdefault(case.research_type, []).append(case.id)
+        self.assertEqual(
+            sorted(by_type), sorted(eval_config.SELECTABLE_RESEARCH_TYPES)
+        )
+        for research_type, ids in by_type.items():
+            self.assertEqual(len(ids), 1, f"{research_type} covered by {ids}")
+
+    def test_research_cases_send_their_report_type_and_outlive_the_task_budget(self):
+        for case in ALL_CASES:
+            if not case.research_type:
+                continue
+            overrides = case.turns[-1].overrides
+            self.assertEqual(overrides.get("search_mode"), "RESEARCH", case.id)
+            self.assertEqual(overrides.get("reportType"), case.research_type, case.id)
+            self.assertEqual(case.kind, "research", case.id)
+            # The full-report types can legitimately run to the edge of
+            # cerebral's soft limit, so their poll has to outlive it — otherwise
+            # the runner reports its own TIMEOUT instead of the real outcome.
+            # The quick outline never gets near it and keeps a tighter leash.
+            if case.research_type != eval_config.RESEARCH_TYPE_QUICK:
+                self.assertGreaterEqual(case.timeout_s, RESEARCH_SOFT_BUDGET_S, case.id)
+
+    def test_detailed_floor_sits_between_outline_and_standard_target(self):
+        self.assertLess(DETAILED_REPORT_HARD_FLOOR_WORDS, STANDARD_REPORT_TARGET_WORDS)
+
     def test_default_chat_body_safety_fields(self):
         body = default_chat_body("uid123", "run1", "case1")
         self.assertEqual(body["platform"], "web")
         self.assertFalse(body["memoryEnabled"])
         self.assertEqual(body["conversation_id"], "eval-run1-case1")
         self.assertTrue(body["request_id"])
+
+
+class TestResearchTypeSelection(unittest.TestCase):
+    def test_normalize_defaults_and_filtering(self):
+        self.assertEqual(
+            eval_config.normalize_research_types(None),
+            list(eval_config.DEFAULT_RESEARCH_TYPES),
+        )
+        # Deep is on by default; detailed is opt-in.
+        self.assertIn(eval_config.RESEARCH_TYPE_DEEP, eval_config.DEFAULT_RESEARCH_TYPES)
+        self.assertNotIn(
+            eval_config.RESEARCH_TYPE_DETAILED, eval_config.DEFAULT_RESEARCH_TYPES
+        )
+
+        # An explicit empty selection is honoured, not replaced by defaults.
+        self.assertEqual(eval_config.normalize_research_types([]), [])
+
+        # Unknown entries are dropped, order is canonical, junk falls back.
+        self.assertEqual(
+            eval_config.normalize_research_types(["deep", "nope", "outline_report"]),
+            ["outline_report", "deep"],
+        )
+        self.assertEqual(
+            eval_config.normalize_research_types("deep"), ["deep"]
+        )
+        self.assertEqual(
+            eval_config.normalize_research_types(42),
+            list(eval_config.DEFAULT_RESEARCH_TYPES),
+        )
+
+
+class TestResearchCoverageGate(unittest.TestCase):
+    """run_suite must skip research cases whose type wasn't selected."""
+
+    def _run(self, **kwargs) -> list:
+        executed: list = []
+
+        def fake_execute(client, case, identity, run_id):
+            executed.append(case.id)
+            return (
+                {
+                    "status": "pass",
+                    "assertions": [],
+                    "judge": None,
+                    "latency": {"ttfb_ms": 0, "total_ms": 0},
+                    "response": {},
+                    "attempts": 1,
+                },
+                A.CaseExecution(),
+            )
+
+        identity = Mock()
+        identity.uid = "eval-uid"
+        with patch("evals.runner.sign_in", return_value=identity), patch(
+            "evals.runner.check_requirements", return_value={}
+        ), patch("evals.runner.ChatClient"), patch(
+            "evals.runner.execute_case", side_effect=fake_execute
+        ):
+            eval_runner.run_suite("test-run", dry=True, **kwargs)
+        return [case_id for case_id in executed if case_id.startswith("research_")]
+
+    def test_defaults_run_quick_and_deep_only(self):
+        self.assertEqual(self._run(), ["research_quick", "research_deep"])
+
+    def test_selection_is_honoured(self):
+        self.assertEqual(
+            self._run(research_types=["detailed_report"]), ["research_detailed"]
+        )
+        self.assertEqual(self._run(research_types=[]), [])
+
+    def test_explicit_case_filter_bypasses_the_gate(self):
+        # --case research_detailed must run it even though it is off by default.
+        self.assertEqual(self._run(case_filter=["research_detailed"]), ["research_detailed"])
+
+    def test_skipped_research_cases_are_recorded_not_dropped(self):
+        writes: dict = {}
+
+        def fake_write_case(self_writer, case_id, fields):
+            writes[case_id] = fields
+
+        with patch.object(eval_runner.RunWriter, "write_case", fake_write_case), patch(
+            "evals.runner.sign_in", return_value=Mock(uid="eval-uid")
+        ), patch("evals.runner.check_requirements", return_value={}), patch(
+            "evals.runner.ChatClient"
+        ), patch(
+            "evals.runner.execute_case",
+            side_effect=lambda *a, **k: (
+                {
+                    "status": "pass",
+                    "assertions": [],
+                    "judge": None,
+                    "latency": {"ttfb_ms": 0, "total_ms": 0},
+                    "response": {},
+                    "attempts": 1,
+                },
+                A.CaseExecution(),
+            ),
+        ):
+            eval_runner.run_suite("test-run", dry=True)
+
+        skipped = writes.get("research_detailed", {})
+        self.assertEqual(skipped.get("status"), "skipped")
+        self.assertIn("detailed_report", skipped.get("skip_reason", ""))
 
 
 class TestResearchPoll(unittest.TestCase):

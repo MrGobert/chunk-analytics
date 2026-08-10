@@ -10,6 +10,11 @@ executed cases by the runner and are not defined here.
 from dataclasses import dataclass, field
 
 from evals import assertions as A
+from evals.config import (
+    RESEARCH_TYPE_DEEP,
+    RESEARCH_TYPE_DETAILED,
+    RESEARCH_TYPE_QUICK,
+)
 from evals.judge import JudgeSpec
 
 # Facts planted by seed.py — documents_only can only answer from the seeded doc.
@@ -29,6 +34,26 @@ Key facts:
 
 The unique codename for this fixture is MERIDIAN-SEVEN-FIXTURE.
 """
+
+
+# ---- research thresholds ----
+#
+# cerebral's generate_report budget (tasks.py): soft_time_limit 900s, hard 1050s.
+# Past the soft limit Celery kills the task, so 900 is a hard ceiling for a
+# healthy run and 720 (80%) is the early-warning line.
+RESEARCH_SOFT_BUDGET_S = 900
+RESEARCH_WARN_BUDGET_S = 720
+
+# gpt_researcher_config.json sets TOTAL_WORDS 3000 for a standard
+# research_report; services/research/report_types.py boosts detailed_report to
+# 4500. Writers routinely undershoot a word target, so the HARD floor sits
+# between an outline (~700-1000 words) and the standard target — a "detailed"
+# report below it has degraded to something shorter than a standard one, which
+# is the exact regression this case exists to catch. Clearing the SOFT floor
+# (the standard target itself) is the positive proof the 4500 boost reached the
+# writer.
+STANDARD_REPORT_TARGET_WORDS = 3000
+DETAILED_REPORT_HARD_FLOOR_WORDS = 1800
 
 
 @dataclass
@@ -51,6 +76,10 @@ class EvalCase:
     timeout_s: int = 120
     retry_flaky: bool = False
     requires: tuple = ()
+    # Research cases only: the `reportType` wire string this case exercises.
+    # The runner skips cases whose type wasn't selected for the run (the
+    # dashboard's per-run toggles), so a full run stays affordable.
+    research_type: str | None = None
 
 
 def _dynamic_token_assertion() -> A.Assertion:
@@ -299,10 +328,79 @@ ALL_CASES: list = [
             )
         ],
         kind="research",
+        research_type=RESEARCH_TYPE_QUICK,
         hard=[A.research_report_min_length(500)],
         soft=[A.research_sources_nonempty()],
         judge=JudgeSpec(min_score=6),
         timeout_s=480,
+    ),
+    EvalCase(
+        id="research_detailed",
+        name="Research report (detailed — boosted word budget)",
+        category="research",
+        # Same prompt as research_quick on purpose: within one run the two
+        # cases differ only by report type, so the word counts are directly
+        # comparable and a silent degradation to a standard report is visible
+        # in the dashboard without a separate baseline run.
+        turns=[
+            Turn(
+                "The history and impact of the transistor",
+                {"search_mode": "RESEARCH", "reportType": "detailed_report"},
+            )
+        ],
+        kind="research",
+        research_type=RESEARCH_TYPE_DETAILED,
+        hard=[
+            A.research_succeeded(),
+            # The client string must survive the server-side mapping to
+            # research_report + total_words 4500.
+            A.research_report_type(RESEARCH_TYPE_DETAILED, deep=False),
+            A.research_word_count_min(DETAILED_REPORT_HARD_FLOOR_WORDS),
+            A.research_within_budget(RESEARCH_SOFT_BUDGET_S),
+        ],
+        soft=[
+            A.research_word_count_min(STANDARD_REPORT_TARGET_WORDS),
+            A.research_sources_min(5),
+        ],
+        judge=JudgeSpec(min_score=6),
+        timeout_s=900,
+    ),
+    EvalCase(
+        id="research_deep",
+        name="Research report (deep — multi-level pipeline)",
+        category="research",
+        # Deliberately multi-faceted: deep research plans sub-queries per
+        # level, so a prompt with several angles exercises the planner that
+        # silently returned zero queries when gpt-5.6-sol was missing from
+        # NO_SUPPORT_TEMPERATURE_MODELS.
+        turns=[
+            Turn(
+                "How have solid-state battery breakthroughs changed the EV "
+                "supply chain, and who is positioned to benefit?",
+                {"search_mode": "RESEARCH", "reportType": "deep"},
+            )
+        ],
+        kind="research",
+        research_type=RESEARCH_TYPE_DEEP,
+        hard=[
+            A.research_succeeded(),
+            A.research_report_type(RESEARCH_TYPE_DEEP, deep=True),
+            A.research_report_min_length(3000),
+            # A deep run visits far more pages than a standard one (106 on the
+            # 2026-08-10 production run); a single-digit count means the tree
+            # collapsed to one level.
+            A.research_sources_min(8),
+            A.research_within_budget(RESEARCH_SOFT_BUDGET_S),
+        ],
+        soft=[
+            A.research_within_budget(RESEARCH_WARN_BUDGET_S),
+            A.research_sources_min(25),
+            A.research_word_count_min(STANDARD_REPORT_TARGET_WORDS),
+        ],
+        judge=JudgeSpec(min_score=6),
+        # Poll past the 1050s hard limit so a killed task is observed as a
+        # FAILURE body rather than the runner's own TIMEOUT.
+        timeout_s=1200,
     ),
     EvalCase(
         id="notion_connector",
