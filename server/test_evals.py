@@ -376,8 +376,26 @@ class TestCases(unittest.TestCase):
         self.assertEqual(len(ids), len(set(ids)))
 
     def test_expected_case_count(self):
-        # 21 executed cases + 2 virtual (computed by the runner) = 23 total
-        self.assertEqual(len(ALL_CASES), 21)
+        # 22 executed cases + 2 virtual (computed by the runner) = 24 total
+        self.assertEqual(len(ALL_CASES), 22)
+
+    def test_a_retired_model_id_stays_covered(self):
+        """Legacy-id translation must keep its own case.
+
+        Shipped App Store builds send retired model ids forever, so
+        translate_legacy_gpt is the only thing keeping them working. If the
+        last case sending a retired id is ever "modernized" to a current id,
+        a translation regression passes the whole suite.
+        """
+        retired = {"gpt-5.4-mini", "gpt-5.4-nano", "gpt-5-mini", "gpt-5-nano"}
+        sent = {
+            turn.overrides.get("model_name")
+            for case in ALL_CASES
+            for turn in case.turns
+        }
+        self.assertTrue(
+            sent & retired, "no eval case exercises a retired model id"
+        )
 
     def test_every_case_has_turns_and_hard_assertions(self):
         for case in ALL_CASES:

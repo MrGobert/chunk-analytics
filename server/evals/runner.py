@@ -13,6 +13,7 @@ CLI (for debugging without Celery):
 import argparse
 import json
 import logging
+import os
 import secrets
 import sys
 import time
@@ -31,6 +32,14 @@ from evals.judge import judge_answer
 
 ANSWER_SNIPPET_CHARS = 1500
 LATENCY_TTFB_BUDGET_MS = 15_000
+
+# Mirrors cerebral ModelConfig.FREE_TIER_CHAT_MODEL, which is itself
+# os.getenv("FREE_TIER_CHAT_MODEL", ...) — the no-deploy rollback lever for the
+# Aug 10 2026 mini/nano retirement. Track it through the env here too, or a
+# rollback leaves the "free tier" case testing a model no free user is served
+# while the run still reports green. The legacy ids the guest case used to send
+# stay covered by the dedicated `retired_model_id` case.
+FREE_TIER_MODEL = os.environ.get("EVAL_FREE_TIER_MODEL", "gpt-5.6-luna")
 
 
 def _db():
@@ -105,7 +114,10 @@ def _build_body(
     body = default_chat_body(uid, run_id, case.id)
     if case.kind == "guest":
         body["isSubscribed"] = False
-        body["model_name"] = "gpt-5.4-mini"
+        # The free-tier model (cerebral FREE_TIER_CHAT_MODEL). Guests are
+        # downgraded to it server-side regardless, so sending it keeps the
+        # case honest about what a real guest turn runs on.
+        body["model_name"] = FREE_TIER_MODEL
     body.update(turn.overrides)
     body["user_input"] = user_input_override or turn.user_input
     body["previous_messages"] = history
@@ -567,7 +579,7 @@ def run_suite(
                 "search_mode": last_turn.overrides.get("search_mode", "ASSISTANT"),
                 "model_name": last_turn.overrides.get(
                     "model_name",
-                    "gpt-5.4-mini" if case.kind == "guest" else "gpt-5.6-sol",
+                    FREE_TIER_MODEL if case.kind == "guest" else "gpt-5.6-sol",
                 ),
                 "user_input": last_turn.user_input[:300],
                 "conversation_id": f"eval-{run_id}-{case.id}",

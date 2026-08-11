@@ -318,6 +318,26 @@ ALL_CASES: list = [
         soft=[A.not_rate_limited()],
     ),
     EvalCase(
+        id="retired_model_id",
+        name="Retired model id (legacy client translation)",
+        category="chat",
+        turns=[
+            Turn(
+                "What is the capital of Australia?",
+                # A model id the backend retired on Aug 10 2026. App Store
+                # builds cannot be edited, so shipped natives send ids like
+                # this forever and the ONLY thing keeping them working is
+                # ModelConfig.translate_legacy_gpt → FREE_TIER_CHAT_MODEL.
+                # Without a case on a retired id, a regression in that
+                # translation (or in the OpenAIService resolver behind it)
+                # passes the whole suite while every legacy client breaks or
+                # gets silently upgraded to a paid model.
+                {"model_name": "gpt-5.4-mini"},
+            )
+        ],
+        hard=[A.stream_ok(), A.answer_min_length(1)],
+    ),
+    EvalCase(
         id="research_quick",
         name="Research report (quick outline, end-to-end)",
         category="research",
