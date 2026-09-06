@@ -2,6 +2,7 @@ import { MixpanelEvent } from '@/types/mixpanel';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { deduplicateMixpanelEvents } from '@/lib/mixpanel-events';
 
 const TTL = 5 * 60 * 1000; // 5 minutes (default — fresh windows)
 const LOCK_MAX_AGE = 5 * 60 * 1000; // 5 minutes — stale locks are auto-cleaned
@@ -90,7 +91,8 @@ export async function getCachedEventsAsync(
         const parsed = JSON.parse(data) as MixpanelEvent[];
         // Preserve the disk snapshot's real age. Resetting this to Date.now()
         // made an almost-expired file fresh for another full TTL in memory.
-        const entry = { events: parsed, timestamp: stat.mtimeMs };
+        // Repair pre-fix exports too, preserving the snapshot's original age.
+        const entry = { events: deduplicateMixpanelEvents(parsed), timestamp: stat.mtimeMs };
         eventCache.set(key, entry);
         return entry;
       }
@@ -116,7 +118,7 @@ export async function getStaleCachedEvents(
       const data = fs.readFileSync(diskFile, 'utf8');
       const parsed = JSON.parse(data) as MixpanelEvent[];
       const stat = fs.statSync(diskFile);
-      return { events: parsed, timestamp: stat.mtimeMs };
+      return { events: deduplicateMixpanelEvents(parsed), timestamp: stat.mtimeMs };
     } catch (e) {
       console.error('Error reading STALE disk cache', e);
     }
@@ -175,11 +177,12 @@ export async function setCachedEventsAsync(fromDate: string, toDate: string, eve
   const diskFile = getCacheFilePath(key);
 
   // Set memory
-  eventCache.set(key, { events, timestamp: Date.now() });
+  const uniqueEvents = deduplicateMixpanelEvents(events);
+  eventCache.set(key, { events: uniqueEvents, timestamp: Date.now() });
 
   // Set disk
   try {
-    fs.writeFileSync(diskFile, JSON.stringify(events), 'utf8');
+    fs.writeFileSync(diskFile, JSON.stringify(uniqueEvents), 'utf8');
   } catch (e) {
     console.error('Failed to write disk cache', e);
   }

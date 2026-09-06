@@ -1,6 +1,7 @@
 import { MixpanelEvent, FunnelStep } from '@/types/mixpanel';
 import { getCachedEventsAsync, setCachedEventsAsync, acquireLock, releaseLock, getStaleCachedEvents } from '@/lib/event-cache';
 import { formatDate } from '@/lib/utils';
+import { deduplicateMixpanelEvents } from '@/lib/mixpanel-events';
 
 // ============================================
 // Event Name Normalization
@@ -293,7 +294,7 @@ async function fetchMixpanelEventsFromAPI(
   // Filter out the test account UID to prevent skewing analytics data
   const filteredEvents = events.filter((e) => e.properties.distinct_id !== TEST_ACCOUNT_UID);
 
-  return filteredEvents;
+  return deduplicateMixpanelEvents(filteredEvents);
 }
 
 /**

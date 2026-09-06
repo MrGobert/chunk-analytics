@@ -35,7 +35,8 @@ export interface UseAnalyticsResult<T> {
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 const STALE_TIME = 5 * 60 * 1000; // 5 minutes
-const SESSION_STORAGE_KEY = 'chunk-analytics-cache';
+// Cached aggregates from before export deduplication contain inflated counts.
+const SESSION_STORAGE_KEY = 'chunk-analytics-cache-v2';
 const MAX_CACHE_AGE = 30 * 60 * 1000; // 30 minutes max — discard anything older
 const FETCH_TIMEOUT = 45_000; // 45s client-side fetch timeout
 
@@ -49,6 +50,7 @@ function buildCacheKey(endpoint: string, params: Record<string, string>): string
 
 function buildUrl(endpoint: string, params: Record<string, string>): string {
   const searchParams = new URLSearchParams(params);
+  searchParams.set('_analytics_version', '2');
   return `${endpoint}?${searchParams.toString()}`;
 }
 
