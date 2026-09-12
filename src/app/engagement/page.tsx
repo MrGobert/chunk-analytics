@@ -11,9 +11,10 @@ import LineChart from '@/components/charts/LineChart';
 import BarChart from '@/components/charts/BarChart';
 import PieChart from '@/components/charts/PieChart';
 import DataTable from '@/components/charts/DataTable';
+import FunnelChart from '@/components/charts/FunnelChart';
 import { SkeletonPage, SkeletonChartCard } from '@/components/ui/Skeleton';
 import { useAnalytics } from '@/hooks/useAnalytics';
-import { EngagementMetrics, HelpCenterMetrics } from '@/types/mixpanel';
+import { EngagementMetrics, HelpCenterMetrics, ProjectsMetrics } from '@/types/mixpanel';
 import { chart } from '@/lib/chartTheme';
 import { customerDetailHref } from '@/lib/customer-links';
 
@@ -56,6 +57,8 @@ export default function EngagementPage() {
   });
   const { data: helpMetrics, isLoading: isHelpLoading, error: helpError } =
     useAnalytics<HelpCenterMetrics>('/api/metrics/help-center', { range: dateRange, platform, userType });
+  const { data: projectMetrics, isLoading: isProjectsLoading, error: projectsError } =
+    useAnalytics<ProjectsMetrics>('/api/metrics/projects', { range: dateRange, platform, userType });
 
   const userMetrics = engagement?.users;
   const advancedMetrics = engagement?.advanced;
@@ -278,6 +281,59 @@ export default function EngagementPage() {
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 <div className="card-animate"><ChartCard title="Top FAQ Questions" subtitle="Most opened FAQ entries">{helpMetrics.topFaqQuestions.length > 0 ? <DataTable data={helpMetrics.topFaqQuestions} columns={[{ key: 'question', header: 'Question' }, { key: 'category', header: 'Category' }, { key: 'count', header: 'Opens', numeric: true }]} /> : <div className="empty-state h-full">No FAQ question data yet</div>}</ChartCard></div>
                 <div className="card-animate"><ChartCard title="Daily Help Center Activity" subtitle="Views, FAQ opens, and CTA clicks per day">{helpMetrics.dailyData.length > 0 ? <LineChart data={helpMetrics.dailyData} xKey="date" lines={[{ key: 'views', color: chart.series[0], name: 'Page Views' }, { key: 'faqOpens', color: chart.series[3], name: 'FAQ Opens' }, { key: 'ctaClicks', color: chart.primary, name: 'CTA Clicks' }]} showLegend /> : <div className="empty-state h-full">No daily data available</div>}</ChartCard></div>
+              </div>
+            </>
+          ) : (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <SkeletonChartCard />
+              <SkeletonChartCard />
+            </div>
+          )}
+        </>
+      )}
+
+      {/* ── Projects ────────────────────────────────────────────────────────── */}
+      {(projectMetrics || isProjectsLoading || projectsError) && (
+        <>
+          <div className="mt-12 mb-8 border-t border-line pt-8">
+            <h2 className="font-display text-2xl text-ink">Projects</h2>
+            <p className="text-sm text-ink-soft mt-1">Beta · who opens Projects, who starts an idea, and how many projects get made (web only)</p>
+          </div>
+
+          {projectsError ? (
+            <DataStatusBanner message={`Projects analytics could not be loaded: ${projectsError}`} />
+          ) : projectMetrics ? (
+            <>
+              {projectMetrics.dataUnavailable && (
+                <DataStatusBanner message="Mixpanel Projects activity is temporarily unavailable. The numbers below are not real zeroes—please refresh shortly." />
+              )}
+              {!projectMetrics.dataUnavailable && projectMetrics.servedStale && (
+                <DataStatusBanner
+                  message={`Showing cached Projects activity${
+                    projectMetrics.dataAsOf ? ` from ${new Date(projectMetrics.dataAsOf).toLocaleString()}` : ''
+                  }.`}
+                />
+              )}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+                <div className="card-animate"><StatCard title="Projects Opened" value={projectMetrics.projectsOpened} trend={projectMetrics.projectsOpenedTrend} format="number" subtitle={`${projectMetrics.uniqueOpeners} unique user${projectMetrics.uniqueOpeners === 1 ? '' : 's'}`} /></div>
+                <div className="card-animate"><StatCard title="Tile Opens" value={projectMetrics.tileOpens} trend={projectMetrics.tileOpensTrend} format="number" subtitle="Projects tile in the Workstation dock" /></div>
+                <div className="card-animate"><StatCard title="Start Clicks" value={projectMetrics.startClicks} trend={projectMetrics.startClicksTrend} format="number" subtitle={`${projectMetrics.paywallHits} hit the paywall`} /></div>
+                <div className="card-animate"><StatCard title="Projects Created" value={projectMetrics.projectsCreated} trend={projectMetrics.projectsCreatedTrend} format="number" subtitle={`${projectMetrics.uniqueCreators} creator${projectMetrics.uniqueCreators === 1 ? '' : 's'}`} /></div>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                <div className="card-animate"><StatCard title="Unique Creators" value={projectMetrics.uniqueCreators} trend={projectMetrics.uniqueCreatorsTrend} format="number" subtitle="Users who created at least one project" /></div>
+                <div className="card-animate"><StatCard title="Project Opens" value={projectMetrics.projectOpens} trend={projectMetrics.projectOpensTrend} format="number" subtitle={`Return visits · ${projectMetrics.uniqueProjectOpeners} unique`} /></div>
+                <div className="card-animate"><StatCard title="Converted from Collections" value={projectMetrics.convertedToProject} format="number" subtitle="Turned into a project (not counted as created)" /></div>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+                <div className="card-animate"><ChartCard title="Projects Funnel" subtitle="Unique users: opened Projects → started an idea → created a project">{(projectMetrics.funnel[0]?.count ?? 0) > 0 ? <FunnelChart data={projectMetrics.funnel} unitLabel="users" /> : <div className="empty-state h-full">No Projects activity yet</div>}</ChartCard></div>
+                <div className="card-animate"><ChartCard title="Daily Projects Activity" subtitle="Opens, start clicks, and projects created per day">{projectMetrics.dailyData.length > 0 ? <LineChart data={projectMetrics.dailyData} xKey="date" lines={[{ key: 'opened', color: chart.series[0], name: 'Opened' }, { key: 'startClicks', color: chart.series[3], name: 'Start Clicks' }, { key: 'created', color: chart.series[1], name: 'Created' }]} showLegend /> : <div className="empty-state h-full">No daily data available</div>}</ChartCard></div>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div className="card-animate"><ChartCard title="How People Reach Projects" subtitle="Entry path of each Projects view">{projectMetrics.entryPaths.length > 0 ? <BarChart data={projectMetrics.entryPaths} xKey="via" yKey="count" color={chart.series[4]} horizontal /> : <div className="empty-state h-full">No entry data yet</div>}</ChartCard></div>
+                <div className="card-animate"><ChartCard title="Projects Created by Entry Point" subtitle="Where new projects were started from">{projectMetrics.createdByVia.length > 0 ? <BarChart data={projectMetrics.createdByVia} xKey="via" yKey="count" color={chart.series[1]} horizontal /> : <div className="empty-state h-full">No projects created yet</div>}</ChartCard></div>
               </div>
             </>
           ) : (

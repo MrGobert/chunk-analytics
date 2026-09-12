@@ -898,6 +898,49 @@ export interface HelpCenterMetrics {
   lastUpdated: string;
 }
 
+/** Product → Engagement → Projects (web only, Pro to create; beta since Sep 2026). */
+export interface ProjectsMetrics {
+  /** Workstation_View_Changed{view:'projects'} — every path into the Projects view. */
+  projectsOpened: number;
+  uniqueOpeners: number;
+  /** Workstation_Tool_Opened{tool:'projects'} — the dock tile itself. */
+  tileOpens: number;
+  /** Project_Start_Clicked — "Start with an idea" pressed (before the Pro gate). */
+  startClicks: number;
+  /** Project_Start_Clicked{gated:true} — the click opened the paywall. */
+  paywallHits: number;
+  /** Project_Created. */
+  projectsCreated: number;
+  uniqueCreators: number;
+  /** Project_Converted{direction:'to_project'} — never summed into projectsCreated. */
+  convertedToProject: number;
+  /** Project_Opened — return visits to an existing project. */
+  projectOpens: number;
+  uniqueProjectOpeners: number;
+  projectsOpenedTrend: number | null;
+  tileOpensTrend: number | null;
+  startClicksTrend: number | null;
+  projectsCreatedTrend: number | null;
+  uniqueCreatorsTrend: number | null;
+  projectOpensTrend: number | null;
+  /** Unique users: opened Projects → start clicked → project created. */
+  funnel: FunnelStep[];
+  /** Workstation_View_Changed.via for the Projects view (tile / row / palette / deeplink / card / back…). */
+  entryPaths: { via: string; count: number }[];
+  /** Project_Created.via (projects_tab / empty_state / collection_menu / try_import). */
+  createdByVia: { via: string; count: number }[];
+  startClicksByGate: { gate: 'Pro' | 'Paywalled'; count: number }[];
+  dailyData: { date: string; opened: number; tileOpens: number; startClicks: number; created: number }[];
+  dateRange: DateRange;
+  priorRange: DateRange;
+  platform: string;
+  userType: string;
+  dataUnavailable?: boolean;
+  servedStale?: boolean;
+  dataAsOf?: string | null;
+  lastUpdated: string;
+}
+
 export interface MarketingMetrics {
   totalCTAClicks: number;
   tryForFreeClicks: number;

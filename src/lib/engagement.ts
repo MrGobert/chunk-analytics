@@ -287,6 +287,7 @@ export function aggregateAdvancedEngagement(
     { events: ['Document_Uploaded'], name: 'Documents' },
     { events: ['Image_Generation_Completed'], name: 'Image Generation' },
     { events: ['Collection_Created'], name: 'Collections' },
+    { events: ['Project_Created'], name: 'Projects' },
     { events: ['Memory_Added'], name: 'Memory' },
     { events: ['Research_Report_Completed'], name: 'Research Reports' },
     { events: ['Note_Writing_Tool_Used'], name: 'Writing Tools' },

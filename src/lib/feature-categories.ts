@@ -82,6 +82,16 @@ export const FEATURE_DEFINITIONS = {
     },
     unit: 'core actions',
   },
+  // Projects (web only, Pro to create, beta since Sep 2026) share the
+  // collection substrate but are their own feature. Project_Start_Clicked is
+  // intent and Project_Suggestions_Seen is passive exposure — both stay on the
+  // Projects detail route, never here.
+  Projects: {
+    activityEvents: ['Project_Created', 'Project_Opened', 'Project_Plan_Created', 'Project_Plan_Appended', 'Project_Momentum_Opened', 'Project_Suggestions_Refreshed', 'Project_Suggestion_Acted', 'Project_Converted'],
+    primaryActionEvents: ['Project_Created'],
+    eventLabels: { Project_Created: 'projects created' },
+    unit: 'projects created',
+  },
   Artifacts: {
     activityEvents: ['Artifact_Created', 'Artifact_Completed', 'Artifact_Viewed', 'Artifact_Saved_To_Notes', 'Artifact_File_Uploaded', 'Artifact_Deleted', 'Artifact_Visual_Generated', 'Artifact_Batch_Started', 'Artifact_Batch_Completed'],
     primaryActionEvents: ['Artifact_Completed'],

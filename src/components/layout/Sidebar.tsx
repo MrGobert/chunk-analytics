@@ -39,7 +39,7 @@ const ROUTE_TO_ENDPOINTS: Record<string, string[]> = {
   '/acquisition': ['/api/metrics/acquisition'],
   '/activation': ['/api/metrics/activation'],
   '/retention': ['/api/metrics/retention-cohorts'],
-  '/engagement': ['/api/metrics/users', '/api/metrics/advanced'],
+  '/engagement': ['/api/metrics/engagement'],
   '/features': ['/api/metrics/feature-overview', '/api/metrics/searches'],
   '/capture-monitors': ['/api/metrics/capture-monitors'],
   '/outreach': ['/api/metrics/emails'],

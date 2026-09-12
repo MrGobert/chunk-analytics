@@ -49,6 +49,7 @@ describe('canonical feature activity registry', () => {
       'Image_Generation_Completed',
       'inbox_capture_created',
       'Onboarding_Completed',
+      'Project_Created',
     ]));
   });
 
@@ -81,6 +82,10 @@ describe('canonical feature activity registry', () => {
       event('inbox_capture_created', 'capture'),
       event('inbox_item_accepted', 'capture'),
       event('inbox_item_discarded', 'capture'),
+      event('Project_Created', 'projects'),
+      event('Project_Opened', 'projects'),
+      // Intent, not usage: pressing "Start with an idea" never counts as feature activity.
+      event('Project_Start_Clicked', 'projects-intent'),
     ], { currentDays: [currentDay], priorDays: [priorDay] });
 
     expect(byName(activity, 'Search')).toMatchObject({ totalEvents: 1, primaryActions: 1 });
@@ -95,6 +100,7 @@ describe('canonical feature activity registry', () => {
     expect(byName(activity, 'Connections')).toMatchObject({ totalEvents: 1, primaryActions: 1 });
     expect(byName(activity, 'Automations')).toMatchObject({ totalEvents: 3, primaryActions: 2 });
     expect(byName(activity, 'Capture')).toMatchObject({ totalEvents: 3, primaryActions: 1 });
+    expect(byName(activity, 'Projects')).toMatchObject({ totalEvents: 2, primaryActions: 1, uniqueUsers: 1 });
   });
 
   it('deduplicates insert ids without collapsing legitimate repeated events', () => {

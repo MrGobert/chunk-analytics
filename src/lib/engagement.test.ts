@@ -35,6 +35,7 @@ describe('engagement analytics', () => {
         'Session_Started',
         'Search_Performed',
         'Search Performed',
+        'Project_Created',
         'Purchase_Completed',
         'Purchase Completed',
         'Subscription_Started',
@@ -46,6 +47,8 @@ describe('engagement analytics', () => {
   it('defines activity as app sessions or genuine product feature use', () => {
     expect(isEngagementActivityEvent(event('$ae_session', 'session', '2026-07-05'))).toBe(true);
     expect(isEngagementActivityEvent(event('Search_Performed', 'search', '2026-07-05'))).toBe(true);
+    expect(isEngagementActivityEvent(event('Project_Opened', 'projects', '2026-07-05'))).toBe(true);
+    expect(isEngagementActivityEvent(event('Project_Start_Clicked', 'projects-intent', '2026-07-05'))).toBe(false);
     expect(
       isEngagementActivityEvent(
         event('Connector_Operation_Used', 'failed', '2026-07-05', {
