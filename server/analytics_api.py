@@ -19,8 +19,28 @@ from flask import Blueprint, jsonify, request
 
 analytics_api_bp = Blueprint("analytics_api", __name__)
 
-# Default monthly price assumption when subscriptionPrice is absent
-DEFAULT_MONTHLY_PRICE = 9.99
+# A subscription whose monthly USD price exceeds this is not a real plan; it is
+# a foreign-currency amount that reached Firestore without conversion. Summing
+# those as dollars is what once reported $250k of MRR off a single ~249,000-unit
+# local price, so they are excluded and reported rather than trusted.
+MAX_PLAUSIBLE_MONTHLY_USD = 200.0
+
+# users/{uid}.subscriptionStatus is NOT trustworthy on its own: the native app
+# writes "active" to it directly (Chunk ChatView.swift) whenever a RevenueCat
+# entitlement is merely active — which is also true for free trials, sandbox and
+# TestFlight builds, promotional grants and family sharing — and it only ever
+# writes that one value, never trial/expired/cancelled. Every OTHER subscription
+# field on the document is written exclusively by cerebral's RevenueCat webhook
+# (_subscription_metadata / handle_initial_purchase / handle_trial_*), so their
+# presence is what separates a real paid subscription from a client-set flag.
+WEBHOOK_PROVENANCE_FIELDS = (
+    "latestTransactionId",
+    "subscriptionStore",
+    "productId",
+    "subscriptionPrice",
+    "initialPurchaseAt",
+    "renewalDate",
+)
 
 
 # ---- Helpers ----
@@ -405,6 +425,132 @@ def _is_annual_plan(user_data: dict, price: float) -> bool:
     return False
 
 
+def _has_webhook_provenance(user_data: dict) -> bool:
+    """True when RevenueCat's webhook — not the app itself — wrote this subscription."""
+    return any(user_data.get(field) for field in WEBHOOK_PROVENANCE_FIELDS)
+
+
+def _is_promotional(user_data: dict) -> bool:
+    """Complimentary grants carry a live entitlement but produce no revenue."""
+    return str(user_data.get("subscriptionStore") or "").strip().upper() == "PROMOTIONAL"
+
+
+def _has_lapsed_renewal(user_data: dict, now: datetime) -> bool:
+    """True when the webhook's own dates say this subscription already ended.
+
+    renewalDate is stamped by every paid webhook handler and written by no
+    client, so a past one with nothing later means the period closed and the
+    expiry event was missed — or arrived and was overwritten by the app's
+    "active" write. Documents with no renewalDate at all are left alone: the
+    field only became reliable in cerebral b7c6bca (2026-03), and dropping them
+    would discard genuine long-cycle annual subscribers.
+    """
+    dates = [
+        d for d in (
+            _to_datetime(user_data.get("renewalDate")),
+            _to_datetime(user_data.get("expirationDate")),
+        ) if d
+    ]
+    return bool(dates and max(dates) < now)
+
+
+def _is_unconverted_trial(user_data: dict, now: datetime) -> bool:
+    """A live trial that something flipped to "active" without a purchase.
+
+    handle_trial_started stamps trialEndDate and handle_trial_converted DELETES
+    it while setting hasConvertedTrial, so a trialEndDate still in the future on
+    an "active" document means the trial never converted — the native client
+    overwrote the status on its own.
+    """
+    if user_data.get("hasConvertedTrial"):
+        return False
+    trial_end = _to_datetime(user_data.get("trialEndDate"))
+    return bool(trial_end and trial_end > now)
+
+
+def _monthly_usd(user_data: dict, doc_id: str = "") -> float:
+    """Monthly USD price for MRR, or None when it cannot be established.
+
+    cerebral's webhook stores RevenueCat's price_in_purchased_currency — the
+    buyer's LOCAL amount — in subscriptionPrice, with the ISO code alongside it
+    in subscriptionCurrency. Anything we cannot state in USD is left out of MRR
+    and reported as unpriced; guessing a price is how a flat default silently
+    manufactured revenue for users who had never paid anything.
+    """
+    try:
+        price = float(user_data.get("subscriptionPrice"))
+    except (TypeError, ValueError):
+        return None
+    if price <= 0:
+        return None
+
+    currency = str(user_data.get("subscriptionCurrency") or "USD").strip().upper()
+    if currency != "USD":
+        return None
+
+    monthly = round(price / 12, 2) if _is_annual_plan(user_data, price) else price
+    if monthly > MAX_PLAUSIBLE_MONTHLY_USD:
+        logging.warning(
+            f"[ANALYTICS_API] Ignoring implausible price {price} {currency} "
+            f"(${monthly}/mo) on user {doc_id or '?'} — likely an unconverted currency"
+        )
+        return None
+    return monthly
+
+
+# RevenueCat store values, as cerebral's _STORE_TO_PLATFORM receives them.
+_STORE_LABELS = {
+    "APP_STORE": "App Store",
+    "MAC_APP_STORE": "Mac App Store",
+    "PLAY_STORE": "Play Store",
+    "AMAZON": "Amazon",
+    "STRIPE": "Stripe",
+    "RC_BILLING": "Web",
+    "PROMOTIONAL": "Promotional",
+}
+
+
+def _store_label(user_data: dict) -> str:
+    """Billing store for revenue attribution, not the user's last-seen device."""
+    store = str(user_data.get("subscriptionStore") or "").strip().upper()
+    return _STORE_LABELS.get(store, store.replace("_", " ").title() or "Unknown")
+
+
+def _sandbox_only_app_user_ids(db, since: datetime) -> set:
+    """UIDs whose entire RevenueCat history is sandbox (TestFlight/simulator).
+
+    The sandbox flag never reaches the user document — cerebral records
+    `environment` only on the subscription_events mirror — so the screen has to
+    be a join. A user with any production event is treated as real.
+
+    Bounded by `since` for the same reason as _subscription_events_since: an
+    unfiltered read would silently truncate at the document cap and return an
+    arbitrary subset, which here would mean dropping real subscribers.
+    """
+    try:
+        docs = list(
+            db.collection("subscription_events")
+            .where("occurredAt", ">=", since)
+            .limit(5000)
+            .stream()
+        )
+        if len(docs) == 5000:
+            logging.warning("[ANALYTICS_API] sandbox screen hit the 5000-doc limit")
+    except Exception as exc:
+        logging.warning(f"[ANALYTICS_API] sandbox screen unavailable: {exc}")
+        return set()
+
+    sandbox_only = {}
+    for doc in docs:
+        data = doc.to_dict() or {}
+        app_user_id = data.get("appUserId")
+        if not app_user_id:
+            continue
+        is_sandbox = str(data.get("environment") or "PRODUCTION").upper() == "SANDBOX"
+        sandbox_only[app_user_id] = sandbox_only.get(app_user_id, True) and is_sandbox
+    return {uid for uid, only in sandbox_only.items() if only}
+
+
 # Per-user usage counters live in users/{uid}/usage_monthly/{YYYY-MM} docs,
 # written by cerebral's request paths (usage_tracking.track_*_monthly). The
 # legacy users/{uid}.usageStats.monthly* fields lost all writers in cerebral
@@ -567,6 +713,9 @@ def _health_with_email_history(health: dict, email_history: list[dict]) -> dict:
     "totalSubscribers": 0, "trialUsers": 0, "churnRate": 0,
     "byPlatform": {}, "byProduct": {}, "subscribersByProduct": {}, "mrrTrend": [],
     "newSubscribers": 0, "churned": 0, "netNew": 0,
+    "pricedSubscribers": 0, "unpricedSubscribers": 0,
+    "excludedNoProvenance": 0, "excludedNonPaying": 0, "excludedLapsed": 0,
+    "excludedNonUsd": 0,
 })
 def revenue_summary():
     days = request.args.get("days", 30, type=int)
@@ -610,33 +759,76 @@ def _compute_revenue_summary(days: int) -> dict:
         doc for doc in unexpired_cancelled_docs
         if not _is_trial_subscription(doc.to_dict())
     ]
-    current_subscriber_docs = active_docs + unexpired_cancelled_paid_docs
-    total_subscribers = len(current_subscriber_docs)
-    trial_users = len(trial_docs) + len(unexpired_cancelled_trial_docs)
+    # Screen the candidates: an "active" status alone proves nothing, because
+    # the native app writes it for trials, sandbox builds and promo grants.
+    sandbox_only_uids = _sandbox_only_app_user_ids(db, now - timedelta(days=400))
+    candidate_docs = active_docs + unexpired_cancelled_paid_docs
 
-    # MRR calculation from active subscribers
+    current_subscriber_docs = []
+    ratcheted_trial_docs = []
+    excluded_no_provenance = 0
+    excluded_non_paying = 0
+    excluded_lapsed = 0
+
+    for doc in candidate_docs:
+        data = doc.to_dict()
+        if doc.id in sandbox_only_uids or _is_promotional(data):
+            excluded_non_paying += 1
+            continue
+        if not _has_webhook_provenance(data):
+            excluded_no_provenance += 1
+            continue
+        if _has_lapsed_renewal(data, now):
+            excluded_lapsed += 1
+            continue
+        if _is_unconverted_trial(data, now):
+            ratcheted_trial_docs.append(doc)
+            continue
+        current_subscriber_docs.append(doc)
+
+    total_subscribers = len(current_subscriber_docs)
+    trial_users = (
+        len(trial_docs)
+        + len(unexpired_cancelled_trial_docs)
+        + len(ratcheted_trial_docs)
+    )
+
+    # MRR calculation from confirmed paid subscribers
     by_platform = {}
     by_product = {}
     subs_by_product = {}
     mrr = 0.0
+    priced_subscribers = 0
+    unpriced_subscribers = 0
+    excluded_non_usd = 0
 
     for doc in current_subscriber_docs:
         data = doc.to_dict()
-        price = float(data.get("subscriptionPrice", DEFAULT_MONTHLY_PRICE) or DEFAULT_MONTHLY_PRICE)
+        monthly_price = _monthly_usd(data, doc.id)
+        if monthly_price is None:
+            # A confirmed subscriber we cannot price in USD contributes nothing
+            # to MRR and is reported instead, so the figure never includes a
+            # guess. pricedSubscribers is the honest ARPU denominator.
+            unpriced_subscribers += 1
+            currency = str(data.get("subscriptionCurrency") or "").strip().upper()
+            if currency and currency != "USD":
+                excluded_non_usd += 1
+            continue
 
-        # Normalize annual prices to monthly equivalent for MRR
-        is_annual = _is_annual_plan(data, price)
-        monthly_price = round(price / 12, 2) if is_annual else price
+        priced_subscribers += 1
         mrr += monthly_price
 
-        platform = data.get("platform", "unknown") or "unknown"
-        # byPlatform contains MRR per platform (dollar amounts, not counts)
-        by_platform[platform] = round(by_platform.get(platform, 0) + monthly_price, 2)
+        # byPlatform is MRR per BILLING STORE (dollar amounts, not counts).
+        # users/{uid}.platform is the last-seen device, which is a different
+        # question and produced an "unknown" slice on the revenue chart.
+        store = _store_label(data)
+        by_platform[store] = round(by_platform.get(store, 0) + monthly_price, 2)
 
         # byProduct holds MRR per product type (dollar amounts); subscribersByProduct
-        # holds the matching head-count so the dashboard shows real per-plan subs/ARPU
-        # rather than estimating from MRR share.
-        product = "annual" if is_annual else "monthly"
+        # holds the matching head-count of PRICED subscribers so the breakdown
+        # table's MRR / subs / ARPU columns stay internally consistent.
+        raw_price = float(data.get("subscriptionPrice") or 0)
+        product = "annual" if _is_annual_plan(data, raw_price) else "monthly"
         by_product[product] = round(by_product.get(product, 0) + monthly_price, 2)
         subs_by_product[product] = subs_by_product.get(product, 0) + 1
 
@@ -652,12 +844,18 @@ def _compute_revenue_summary(days: int) -> dict:
 
     # Churned paid subscribers in period. Trial expirations are conversion
     # fallout, not subscriber churn.
+    # The provenance screen has to apply to the numerator too: counting
+    # unscreened churn against a screened active base would divide real
+    # cancellations by a much smaller population and overstate the rate.
     churned = 0
     for doc in expired_docs + cancelled_docs:
         data = doc.to_dict()
         exp_date = _to_datetime(data.get("expirationDate"))
         if (
             not _is_trial_subscription(data)
+            and _has_webhook_provenance(data)
+            and not _is_promotional(data)
+            and doc.id not in sandbox_only_uids
             and exp_date
             and cutoff <= exp_date <= now
         ):
@@ -740,6 +938,11 @@ def _compute_revenue_summary(days: int) -> dict:
         if _is_paid_event(event)
     ]
     for event in today_transactions:
+        # The mirror stores price_in_purchased_currency too, so a non-USD
+        # transaction would land here at its local face value.
+        currency = str(event.get("currency") or "USD").strip().upper()
+        if currency != "USD":
+            continue
         try:
             today_revenue += float(event.get("price") or 0)
         except (TypeError, ValueError):
@@ -752,8 +955,11 @@ def _compute_revenue_summary(days: int) -> dict:
         for doc in current_subscriber_docs:
             data = doc.to_dict()
             purchased = _to_datetime(data.get("initialPurchaseAt"))
-            if purchased and purchased >= today_start:
-                today_revenue += float(data.get("subscriptionPrice", DEFAULT_MONTHLY_PRICE) or DEFAULT_MONTHLY_PRICE)
+            if not purchased or purchased < today_start:
+                continue
+            monthly_price = _monthly_usd(data, doc.id)
+            if monthly_price is not None:
+                today_revenue += monthly_price
 
     return {
         "mrr": round(mrr, 2),
@@ -766,6 +972,12 @@ def _compute_revenue_summary(days: int) -> dict:
         "byPlatform": by_platform,
         "byProduct": by_product,
         "subscribersByProduct": subs_by_product,
+        "pricedSubscribers": priced_subscribers,
+        "unpricedSubscribers": unpriced_subscribers,
+        "excludedNoProvenance": excluded_no_provenance,
+        "excludedNonPaying": excluded_non_paying,
+        "excludedLapsed": excluded_lapsed,
+        "excludedNonUsd": excluded_non_usd,
         "mrrTrend": mrr_trend,
         "newSubscribers": new_subscribers,
         "churned": churned,

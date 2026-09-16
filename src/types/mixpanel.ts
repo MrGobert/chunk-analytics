@@ -431,6 +431,18 @@ export interface RevenueSummary {
   byProduct: Record<string, number>;
   /** Real active-subscriber head-count per plan type (monthly/annual). */
   subscribersByProduct?: Record<string, number>;
+  /** Subscribers whose USD price is known; the honest ARPU denominator. */
+  pricedSubscribers?: number;
+  /** Confirmed subscribers we could not price in USD — excluded from MRR. */
+  unpricedSubscribers?: number;
+  /** "active" documents with no RevenueCat webhook behind them. */
+  excludedNoProvenance?: number;
+  /** Promotional grants and sandbox-only accounts. */
+  excludedNonPaying?: number;
+  /** Subscriptions whose renewal date has already passed. */
+  excludedLapsed?: number;
+  /** Dropped because the stored price was in a non-USD currency. */
+  excludedNonUsd?: number;
   mrrTrend: { date: string; mrr: number }[];
   newSubscribers: number;
   churned: number;

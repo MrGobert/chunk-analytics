@@ -59,6 +59,12 @@ export default function PulsePage() {
     return () => ctx.revert();
   }, [revenueLoading, revenue]);
 
+  // Subscribers the backend could not price in USD are excluded from MRR; say so
+  // rather than letting the tile read as a complete figure.
+  const revenueCoverageNote = (revenue?.unpricedSubscribers ?? 0) > 0
+    ? `${revenue?.pricedSubscribers ?? 0} of ${(revenue?.pricedSubscribers ?? 0) + (revenue?.unpricedSubscribers ?? 0)} subscribers priced`
+    : undefined;
+
   const mrrChartData = useMemo(() => (revenue?.mrrTrend || []).map((d) => ({ date: d.date, mrr: d.mrr })), [revenue?.mrrTrend]);
   const dauChartData = useMemo(
     () => (pulse?.dauTrend || pulse?.dauTrend14d || pulse?.dauTrend7d || []).map((d) => ({ date: d.date, users: d.users })),
@@ -214,7 +220,7 @@ export default function PulsePage() {
         </div>
       ) : revenue ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-6 mb-8">
-          <StatCard title="MRR" value={revenue.mrr} format="currency" trend={revenue.mrrChange} icon={<DollarSign className="w-5 h-5" />} />
+          <StatCard title="MRR" value={revenue.mrr} format="currency" trend={revenue.mrrChange} subtitle={revenueCoverageNote} icon={<DollarSign className="w-5 h-5" />} />
           <StatCard title="Today's Revenue" value={revenue.todayRevenue} format="currency" icon={<Wallet className="w-5 h-5" />} />
           <StatCard title="Active Subscribers" value={revenue.totalSubscribers} icon={<Users2 className="w-5 h-5" />} />
           <StatCard title="DAU" value={pulse?.todayDAU ?? 0} trend={dauTrend} subtitle="vs same weekday last week" icon={<UserPlus className="w-5 h-5" />} />

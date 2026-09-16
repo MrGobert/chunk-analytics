@@ -197,6 +197,8 @@ class RevenueSummaryTests(unittest.TestCase):
             }),
             FakeDoc("expired-paid", {
                 "subscriptionStatus": "expired",
+                "subscriptionPrice": 10,
+                "subscriptionStore": "APP_STORE",
                 "expirationDate": now - timedelta(days=2),
                 "createdAt": now - timedelta(days=100),
             }),
@@ -221,6 +223,225 @@ class RevenueSummaryTests(unittest.TestCase):
         self.assertEqual(result["trialUsers"], 2)
         self.assertEqual(result["mrr"], 20)
         self.assertEqual(result["churned"], 1)
+
+
+class RevenueGuardTests(unittest.TestCase):
+    """Regressions for the September 2026 $250k MRR incident.
+
+    Two defects stacked: cerebral stored RevenueCat's local-currency price in
+    subscriptionPrice, and the native app wrote subscriptionStatus "active" for
+    anyone holding an entitlement — trials, sandbox builds and promo grants
+    included. MRR summed the first over the second.
+    """
+
+    NOW = datetime.now(timezone.utc)
+
+    def _paid(self, **overrides):
+        """A subscriber the RevenueCat webhook confirmed and priced in USD."""
+        data = {
+            "subscriptionStatus": "active",
+            "subscriptionPrice": 9.99,
+            "subscriptionCurrency": "USD",
+            "subscriptionPeriod": "monthly",
+            "subscriptionStore": "APP_STORE",
+            "latestTransactionId": "txn-1",
+            "renewalDate": self.NOW + timedelta(days=20),
+            "createdAt": self.NOW - timedelta(days=100),
+        }
+        data.update(overrides)
+        return data
+
+    def _summarize(self, users, events=()):
+        fake_db = FakeDB({
+            "users": users,
+            "subscription_events": list(events),
+            "analytics_cache": [],
+        })
+        with patch.dict(sys.modules, {"firebase_setup": SimpleNamespace(db=fake_db)}), \
+             patch.object(analytics_api, "_get_redis", return_value=None):
+            return analytics_api._compute_revenue_summary(30)
+
+    def test_foreign_currency_price_is_not_summed_as_dollars(self):
+        """249,000 VND is Apple's $9.99 tier in Vietnam, not $249,000 of MRR."""
+        result = self._summarize([
+            FakeDoc("vnd-monthly", self._paid(
+                subscriptionPrice=249000.0, subscriptionCurrency="VND",
+            )),
+            FakeDoc("usd-monthly", self._paid()),
+        ])
+
+        self.assertEqual(result["mrr"], 9.99)
+        self.assertEqual(result["excludedNonUsd"], 1)
+        self.assertEqual(result["unpricedSubscribers"], 1)
+        self.assertEqual(result["pricedSubscribers"], 1)
+        # Still a real subscriber — only their price is unusable.
+        self.assertEqual(result["totalSubscribers"], 2)
+
+    def test_implausible_price_is_rejected_even_without_a_currency_field(self):
+        """The backstop for currency metadata that never arrived."""
+        result = self._summarize([
+            FakeDoc("no-currency", self._paid(
+                subscriptionPrice=249000.0, subscriptionCurrency=None,
+            )),
+        ])
+
+        self.assertEqual(result["mrr"], 0)
+        self.assertEqual(result["unpricedSubscribers"], 1)
+
+    def test_client_written_active_status_is_not_a_subscriber(self):
+        """The native app writes subscriptionStatus and nothing else."""
+        result = self._summarize([
+            FakeDoc("ghost", {
+                "subscriptionStatus": "active",
+                "createdAt": self.NOW - timedelta(days=10),
+            }),
+            FakeDoc("real", self._paid()),
+        ])
+
+        self.assertEqual(result["totalSubscribers"], 1)
+        self.assertEqual(result["excludedNoProvenance"], 1)
+        # The old DEFAULT_MONTHLY_PRICE booked the ghost at $9.99.
+        self.assertEqual(result["mrr"], 9.99)
+
+    def test_unpriced_subscriber_contributes_nothing(self):
+        """No price must mean no revenue, never an assumed one."""
+        result = self._summarize([
+            FakeDoc("priceless", self._paid(subscriptionPrice=None)),
+        ])
+
+        self.assertEqual(result["mrr"], 0)
+        self.assertEqual(result["totalSubscribers"], 1)
+        self.assertEqual(result["pricedSubscribers"], 0)
+        self.assertEqual(result["unpricedSubscribers"], 1)
+
+    def test_promotional_and_sandbox_entitlements_are_excluded(self):
+        users = [
+            FakeDoc("comped", self._paid(subscriptionStore="PROMOTIONAL")),
+            FakeDoc("tester", self._paid()),
+            FakeDoc("real", self._paid()),
+        ]
+        events = [
+            FakeDoc("e1", {"appUserId": "tester", "environment": "SANDBOX", "occurredAt": self.NOW - timedelta(days=3)}),
+            FakeDoc("e2", {"appUserId": "real", "environment": "PRODUCTION", "occurredAt": self.NOW - timedelta(days=3)}),
+        ]
+        result = self._summarize(users, events)
+
+        self.assertEqual(result["totalSubscribers"], 1)
+        self.assertEqual(result["excludedNonPaying"], 2)
+        self.assertEqual(result["mrr"], 9.99)
+
+    def test_a_production_event_keeps_a_user_who_also_tested_in_sandbox(self):
+        events = [
+            FakeDoc("e1", {"appUserId": "dev", "environment": "SANDBOX", "occurredAt": self.NOW - timedelta(days=9)}),
+            FakeDoc("e2", {"appUserId": "dev", "environment": "PRODUCTION", "occurredAt": self.NOW - timedelta(days=3)}),
+        ]
+        result = self._summarize([FakeDoc("dev", self._paid())], events)
+
+        self.assertEqual(result["totalSubscribers"], 1)
+        self.assertEqual(result["mrr"], 9.99)
+
+    def test_live_trial_flipped_to_active_counts_as_a_trial(self):
+        """Why the dashboard reported trialUsers: 0 against 6 trial starts."""
+        result = self._summarize([
+            FakeDoc("ratcheted", self._paid(
+                subscriptionPrice=None,
+                trialEndDate=self.NOW + timedelta(days=2),
+                hasStartedTrial=True,
+            )),
+        ])
+
+        self.assertEqual(result["totalSubscribers"], 0)
+        self.assertEqual(result["trialUsers"], 1)
+        self.assertEqual(result["mrr"], 0)
+
+    def test_converted_trial_is_a_paying_subscriber(self):
+        """handle_trial_converted deletes trialEndDate and sets the flag."""
+        result = self._summarize([
+            FakeDoc("converted", self._paid(
+                hasConvertedTrial=True,
+                trialConvertedAt=self.NOW - timedelta(days=5),
+            )),
+        ])
+
+        self.assertEqual(result["totalSubscribers"], 1)
+        self.assertEqual(result["trialUsers"], 0)
+        self.assertEqual(result["mrr"], 9.99)
+
+    def test_subscription_whose_renewal_date_has_passed_is_excluded(self):
+        result = self._summarize([
+            FakeDoc("lapsed", self._paid(
+                renewalDate=self.NOW - timedelta(days=5),
+            )),
+        ])
+
+        self.assertEqual(result["totalSubscribers"], 0)
+        self.assertEqual(result["excludedLapsed"], 1)
+
+    def test_missing_renewal_date_does_not_drop_a_long_cycle_subscriber(self):
+        """renewalDate only became reliable in 2026-03; absence is not evidence."""
+        result = self._summarize([
+            FakeDoc("old-annual", self._paid(
+                renewalDate=None,
+                subscriptionPeriod="annual",
+                subscriptionPrice=99.99,
+            )),
+        ])
+
+        self.assertEqual(result["totalSubscribers"], 1)
+        self.assertEqual(result["mrr"], 8.33)
+
+    def test_annual_is_normalized_and_bucketed_separately_from_monthly(self):
+        result = self._summarize([
+            FakeDoc("yearly", self._paid(
+                subscriptionPeriod="annual", subscriptionPrice=99.99,
+            )),
+            FakeDoc("monthly", self._paid()),
+        ])
+
+        self.assertEqual(result["byProduct"], {"annual": 8.33, "monthly": 9.99})
+        self.assertEqual(result["subscribersByProduct"], {"annual": 1, "monthly": 1})
+        self.assertEqual(result["mrr"], 18.32)
+        self.assertEqual(result["arr"], round(18.32 * 12, 2))
+
+    def test_revenue_is_attributed_to_the_billing_store_not_the_device(self):
+        result = self._summarize([
+            FakeDoc("ios", self._paid(subscriptionStore="APP_STORE", platform="macos")),
+            FakeDoc("web", self._paid(subscriptionStore="STRIPE", platform="ios")),
+        ])
+
+        self.assertEqual(result["byPlatform"], {"App Store": 9.99, "Stripe": 9.99})
+
+    def test_churn_counts_only_subscriptions_the_webhook_confirmed(self):
+        """Numerator and denominator must be screened the same way."""
+        result = self._summarize([
+            FakeDoc("real", self._paid()),
+            FakeDoc("real-churned", self._paid(
+                subscriptionStatus="expired",
+                expirationDate=self.NOW - timedelta(days=3),
+                renewalDate=None,
+            )),
+            FakeDoc("ghost-churned", {
+                "subscriptionStatus": "expired",
+                "expirationDate": self.NOW - timedelta(days=3),
+                "createdAt": self.NOW - timedelta(days=90),
+            }),
+        ])
+
+        self.assertEqual(result["churned"], 1)
+
+    def test_coverage_counts_account_for_every_confirmed_subscriber(self):
+        result = self._summarize([
+            FakeDoc("a", self._paid()),
+            FakeDoc("b", self._paid(subscriptionPrice=None)),
+            FakeDoc("c", self._paid(subscriptionCurrency="JPY", subscriptionPrice=1500)),
+        ])
+
+        self.assertEqual(
+            result["pricedSubscribers"] + result["unpricedSubscribers"],
+            result["totalSubscribers"],
+        )
+        self.assertEqual(result["totalSubscribers"], 3)
+        self.assertEqual(result["mrr"], 9.99)
 
 
 class HealthScoreTests(unittest.TestCase):

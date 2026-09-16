@@ -1594,6 +1594,24 @@ def check_monthly_recap_task(self, dry_run: bool = False):
 # ============================================================
 
 
+def _format_renewal_amount(user_data: dict, fallback: str = "$9.99") -> str:
+    """Render the stored subscription price in its own currency.
+
+    Zero-decimal currencies (VND, JPY, KRW) are common on the App Store, so the
+    decimals follow the value rather than being assumed.
+    """
+    try:
+        price = float(user_data.get("subscriptionPrice"))
+    except (TypeError, ValueError):
+        return fallback
+    if price <= 0:
+        return fallback
+
+    currency = str(user_data.get("subscriptionCurrency") or "USD").strip().upper()
+    formatted = f"{price:,.0f}" if float(price).is_integer() else f"{price:,.2f}"
+    return f"${formatted}" if currency == "USD" else f"{formatted} {currency}"
+
+
 @shared_task(
     bind=True,
     name="send_renewal_reminder_email",
@@ -1706,8 +1724,11 @@ def check_renewal_reminders_task(self):
             if not email:
                 continue
 
-            # Get subscription amount if available
-            amount = user_data.get("subscriptionPrice", "$9.99")
+            # subscriptionPrice holds RevenueCat's price in the BUYER'S
+            # currency (cerebral _subscription_metadata), so it cannot be
+            # rendered as dollars unqualified — a Vietnamese subscriber was
+            # being emailed "249000.0" as their renewal amount.
+            amount = _format_renewal_amount(user_data)
 
             # Send renewal reminder
             send_renewal_reminder_task.delay(email, name, 7, amount, doc.id)

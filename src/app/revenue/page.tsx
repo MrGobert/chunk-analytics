@@ -35,7 +35,7 @@ export default function RevenuePage() {
   const mrrChartData = useMemo(() => (revenue?.mrrTrend || []).map((d) => ({ date: d.date, mrr: d.mrr })), [revenue?.mrrTrend]);
 
   const platformData = useMemo(() =>
-    Object.entries(revenue?.byPlatform || {}).map(([name, value]) => ({ name: name.charAt(0).toUpperCase() + name.slice(1), value })),
+    Object.entries(revenue?.byPlatform || {}).map(([name, value]) => ({ name, value })),
     [revenue?.byPlatform]
   );
 
@@ -44,8 +44,17 @@ export default function RevenuePage() {
     [revenue?.byProduct]
   );
 
+  // ARPU over the subscribers that actually contributed to MRR. Subscribers the
+  // backend could not price in USD are excluded from both sides of the ratio;
+  // dividing by totalSubscribers would silently understate it.
+  const pricedSubs = revenue?.pricedSubscribers ?? revenue?.totalSubscribers ?? 0;
+  const unpricedSubs = revenue?.unpricedSubscribers ?? 0;
+  const coverageNote = unpricedSubs > 0
+    ? `${pricedSubs} of ${pricedSubs + unpricedSubs} subscribers priced`
+    : undefined;
+
   // MRR movements: new vs churned vs net (estimated $ from counts × ARPU)
-  const arpu = revenue && revenue.totalSubscribers > 0 ? revenue.mrr / revenue.totalSubscribers : 0;
+  const arpu = revenue && pricedSubs > 0 ? revenue.mrr / pricedSubs : 0;
   const movementsData = useMemo(() => {
     if (!revenue) return [];
     return [
@@ -56,7 +65,7 @@ export default function RevenuePage() {
   }, [revenue, arpu]);
 
   const breakdownTableData = useMemo(() => {
-    const totalSubs = revenue?.totalSubscribers || 0;
+    const totalSubs = revenue?.pricedSubscribers ?? revenue?.totalSubscribers ?? 0;
     const subsByProduct = revenue?.subscribersByProduct;
     return Object.entries(revenue?.byProduct || {}).map(([product, amount]) => {
       // Prefer real per-plan counts from the backend; only fall back to apportioning
@@ -73,7 +82,7 @@ export default function RevenuePage() {
         arpu: `$${productArpu.toFixed(2)}`,
       };
     });
-  }, [revenue?.byProduct, revenue?.totalSubscribers, revenue?.mrr, revenue?.subscribersByProduct]);
+  }, [revenue?.byProduct, revenue?.pricedSubscribers, revenue?.totalSubscribers, revenue?.mrr, revenue?.subscribersByProduct]);
 
   // The backend funnel ends with a "Churned" stage, which isn't a continuation of
   // the signup → active flow. Keep it out of the funnel chart (whose dropoff math
@@ -159,11 +168,11 @@ export default function RevenuePage() {
       {/* KPI row (6-up) */}
       {revenue && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-6 mb-8">
-          <div className="card-animate"><StatCard title="MRR" value={revenue.mrr} trend={mrrGrowth} format="currency" icon={<DollarSign className="w-5 h-5" />} /></div>
+          <div className="card-animate"><StatCard title="MRR" value={revenue.mrr} trend={mrrGrowth} format="currency" subtitle={coverageNote} icon={<DollarSign className="w-5 h-5" />} /></div>
           <div className="card-animate"><StatCard title="ARR" value={revenue.arr} format="currency" icon={<TrendingUp className="w-5 h-5" />} /></div>
           <div className="card-animate"><StatCard title="ARPU" value={arpu} format="currency" icon={<Users2 className="w-5 h-5" />} /></div>
           <div className="card-animate"><StatCard title="Est. LTV" value={ltv ?? '—'} format={ltv != null ? 'currency' : 'text'} subtitle="ARPU ÷ monthly churn" icon={<Repeat className="w-5 h-5" />} /></div>
-          <div className="card-animate"><StatCard title="Active Subscribers" value={revenue.totalSubscribers} icon={<Users2 className="w-5 h-5" />} /></div>
+          <div className="card-animate"><StatCard title="Active Subscribers" value={revenue.totalSubscribers} subtitle="RevenueCat-confirmed" icon={<Users2 className="w-5 h-5" />} /></div>
           <div className="card-animate"><StatCard title="Today's Revenue" value={revenue.todayRevenue} format="currency" subtitle="Est. from tracked conversions" icon={<Wallet className="w-5 h-5" />} /></div>
         </div>
       )}
@@ -198,11 +207,11 @@ export default function RevenuePage() {
           </ChartCard>
         </div>
         <div className="card-animate">
-          <ChartCard title="Revenue by Platform" subtitle="MRR distribution across platforms">
+          <ChartCard title="Revenue by Store" subtitle="MRR distribution across billing stores">
             {platformData.length > 0 ? (
               <PieChart data={platformData} />
             ) : (
-              <div className="empty-state h-full">No platform data available yet</div>
+              <div className="empty-state h-full">No store data available yet</div>
             )}
           </ChartCard>
         </div>
