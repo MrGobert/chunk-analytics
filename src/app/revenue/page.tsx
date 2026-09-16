@@ -49,8 +49,18 @@ export default function RevenuePage() {
   // dividing by totalSubscribers would silently understate it.
   const pricedSubs = revenue?.pricedSubscribers ?? revenue?.totalSubscribers ?? 0;
   const unpricedSubs = revenue?.unpricedSubscribers ?? 0;
-  const coverageNote = unpricedSubs > 0
-    ? `${pricedSubs} of ${pricedSubs + unpricedSubs} subscribers priced`
+  const fromRevenueCat = revenue?.mrrSource === 'revenuecat';
+  const attributedMrr = revenue?.attributedMrr ?? 0;
+  const coverageNote = fromRevenueCat
+    ? 'From RevenueCat'
+    : unpricedSubs > 0
+      ? `${pricedSubs} of ${pricedSubs + unpricedSubs} subscribers priced`
+      : undefined;
+  // Everything below the KPI row is built from subscriptions we can tie to a
+  // store and a plan, which is a subset of RevenueCat's total whenever a
+  // webhook never landed.
+  const attributionNote = fromRevenueCat && revenue
+    ? `Covers $${attributedMrr.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} of $${revenue.mrr.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} attributed`
     : undefined;
 
   // MRR movements: new vs churned vs net (estimated $ from counts × ARPU)
@@ -172,7 +182,7 @@ export default function RevenuePage() {
           <div className="card-animate"><StatCard title="ARR" value={revenue.arr} format="currency" icon={<TrendingUp className="w-5 h-5" />} /></div>
           <div className="card-animate"><StatCard title="ARPU" value={arpu} format="currency" icon={<Users2 className="w-5 h-5" />} /></div>
           <div className="card-animate"><StatCard title="Est. LTV" value={ltv ?? '—'} format={ltv != null ? 'currency' : 'text'} subtitle="ARPU ÷ monthly churn" icon={<Repeat className="w-5 h-5" />} /></div>
-          <div className="card-animate"><StatCard title="Active Subscribers" value={revenue.totalSubscribers} subtitle="RevenueCat-confirmed" icon={<Users2 className="w-5 h-5" />} /></div>
+          <div className="card-animate"><StatCard title="Active Subscribers" value={revenue.totalSubscribers} subtitle={fromRevenueCat ? 'From RevenueCat' : 'Webhook-confirmed'} icon={<Users2 className="w-5 h-5" />} /></div>
           <div className="card-animate"><StatCard title="Today's Revenue" value={revenue.todayRevenue} format="currency" subtitle="Est. from tracked conversions" icon={<Wallet className="w-5 h-5" />} /></div>
         </div>
       )}
@@ -207,7 +217,7 @@ export default function RevenuePage() {
           </ChartCard>
         </div>
         <div className="card-animate">
-          <ChartCard title="Revenue by Store" subtitle="MRR distribution across billing stores">
+          <ChartCard title="Revenue by Store" subtitle={attributionNote ?? "MRR distribution across billing stores"}>
             {platformData.length > 0 ? (
               <PieChart data={platformData} />
             ) : (
@@ -220,7 +230,7 @@ export default function RevenuePage() {
       {/* Product mix + breakdown table */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
         <div className="card-animate">
-          <ChartCard title="Revenue by Product" subtitle="MRR by subscription tier (Monthly vs Yearly)">
+          <ChartCard title="Revenue by Product" subtitle={attributionNote ?? "MRR by subscription tier (Monthly vs Yearly)"}>
             {productData.length > 0 ? (
               <BarChart data={productData} xKey="product" yKey="revenue" color={chart.series[0]} />
             ) : (

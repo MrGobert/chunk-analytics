@@ -317,6 +317,58 @@ class RevenueGuardTests(unittest.TestCase):
         self.assertEqual(result["pricedSubscribers"], 0)
         self.assertEqual(result["unpricedSubscribers"], 1)
 
+    def test_revenuecat_metrics_win_over_the_firestore_derivation(self):
+        """A webhook that never landed leaves a payer invisible to us but not to RevenueCat."""
+        with patch.object(analytics_api.revenuecat_client, "get_overview_metrics",
+                          return_value={"mrr": 337.0, "active_subscriptions": 44.0}):
+            result = self._summarize([FakeDoc("one", self._paid())])
+
+        self.assertEqual(result["mrr"], 337.0)
+        self.assertEqual(result["arr"], 4044.0)
+        self.assertEqual(result["totalSubscribers"], 44)
+        self.assertEqual(result["mrrSource"], "revenuecat")
+        # What we can actually attribute to a store and a plan is kept beside it.
+        self.assertEqual(result["attributedMrr"], 9.99)
+        self.assertEqual(result["attributedSubscribers"], 1)
+
+    def test_todays_trend_point_matches_the_headline_figure(self):
+        with patch.object(analytics_api.revenuecat_client, "get_overview_metrics",
+                          return_value={"mrr": 337.0}):
+            result = self._summarize([FakeDoc("one", self._paid())])
+
+        self.assertEqual(result["mrrTrend"][-1]["mrr"], 337.0)
+
+    def test_falls_back_to_the_derived_figure_when_revenuecat_is_unavailable(self):
+        with patch.object(analytics_api.revenuecat_client, "get_overview_metrics",
+                          return_value=None):
+            result = self._summarize([FakeDoc("one", self._paid())])
+
+        self.assertEqual(result["mrr"], 9.99)
+        self.assertEqual(result["mrrSource"], "firestore")
+
+    def test_usd_price_field_is_trusted_whatever_the_buyer_was_charged_in(self):
+        """After the webhook fix a VND subscriber carries a USD price too."""
+        result = self._summarize([
+            FakeDoc("vnd", self._paid(
+                subscriptionPrice=9.99, subscriptionPriceUsd=9.99,
+                subscriptionCurrency="VND",
+            )),
+        ])
+
+        self.assertEqual(result["mrr"], 9.99)
+        self.assertEqual(result["excludedNonUsd"], 0)
+        self.assertEqual(result["pricedSubscribers"], 1)
+
+    def test_offer_code_and_family_share_mark_free_access_on_the_user_doc(self):
+        result = self._summarize([
+            FakeDoc("offer", self._paid(subscriptionOfferCode="free_month")),
+            FakeDoc("family", self._paid(subscriptionIsFamilyShare=True)),
+            FakeDoc("paying", self._paid()),
+        ])
+
+        self.assertEqual(result["totalSubscribers"], 1)
+        self.assertEqual(result["excludedFreeAccess"], 2)
+
     def test_comped_access_is_excluded_from_the_subscriber_count(self):
         """A currency with no price means the webhook saw a zero-price charge.
 

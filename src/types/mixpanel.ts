@@ -431,6 +431,12 @@ export interface RevenueSummary {
   byProduct: Record<string, number>;
   /** Real active-subscriber head-count per plan type (monthly/annual). */
   subscribersByProduct?: Record<string, number>;
+  /** Where mrr/totalSubscribers came from: RevenueCat, or our own derivation. */
+  mrrSource?: 'revenuecat' | 'firestore' | 'unavailable';
+  /** MRR we can attribute to a specific store and plan (drives the breakdowns). */
+  attributedMrr?: number;
+  /** Subscribers behind attributedMrr. */
+  attributedSubscribers?: number;
   /** Subscribers whose USD price is known; the honest ARPU denominator. */
   pricedSubscribers?: number;
   /** Confirmed subscribers we could not price in USD — excluded from MRR. */

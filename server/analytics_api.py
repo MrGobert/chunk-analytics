@@ -17,6 +17,8 @@ from statistics import median
 
 from flask import Blueprint, jsonify, request
 
+import revenuecat_client
+
 analytics_api_bp = Blueprint("analytics_api", __name__)
 
 # A subscription whose monthly USD price exceeds this is not a real plan; it is
@@ -482,6 +484,32 @@ def _is_unconverted_trial(user_data: dict, now: datetime) -> bool:
     return bool(trial_end and trial_end > now)
 
 
+def _stored_usd_price(user_data: dict):
+    """The subscription price in USD, or None when it is not stated in USD.
+
+    subscriptionPriceUsd is written from RevenueCat's own USD figure and is
+    authoritative whatever currency the buyer was charged in. The older
+    subscriptionPrice field held the LOCAL amount, so it can only be trusted
+    when the recorded currency is USD (or none was recorded at all).
+    """
+    explicit = user_data.get("subscriptionPriceUsd")
+    try:
+        value = float(explicit)
+        if value > 0:
+            return value
+    except (TypeError, ValueError):
+        pass
+
+    currency = str(user_data.get("subscriptionCurrency") or "USD").strip().upper()
+    if currency != "USD":
+        return None
+    try:
+        value = float(user_data.get("subscriptionPrice"))
+    except (TypeError, ValueError):
+        return None
+    return value if value > 0 else None
+
+
 def _unpriced_reason(user_data: dict) -> str:
     """Why a confirmed subscriber has no usable USD price.
 
@@ -491,6 +519,9 @@ def _unpriced_reason(user_data: dict) -> str:
     access, an offer-code redemption or a comped account — not a purchase we
     failed to convert.
     """
+    if _stored_usd_price(user_data) is not None:
+        return "priced"
+
     currency = str(user_data.get("subscriptionCurrency") or "").strip().upper()
     try:
         price = float(user_data.get("subscriptionPrice"))
@@ -499,13 +530,17 @@ def _unpriced_reason(user_data: dict) -> str:
 
     if price <= 0:
         return "free_access" if currency else "no_price_recorded"
-    if currency and currency != "USD":
-        return "non_usd"
-    return "implausible"
+    return "non_usd"
 
 
 def _is_free_access(user_data: dict) -> bool:
     """Access granted without a charge — comped, offer code, or test account."""
+    if user_data.get("subscriptionOfferCode"):
+        return True
+    if user_data.get("subscriptionIsFamilyShare") is True:
+        return True
+    if str(user_data.get("subscriptionPeriodType") or "").upper() == "PROMOTIONAL":
+        return True
     return _unpriced_reason(user_data) == "free_access"
 
 
@@ -518,16 +553,10 @@ def _monthly_usd(user_data: dict, doc_id: str = "") -> float:
     and reported as unpriced; guessing a price is how a flat default silently
     manufactured revenue for users who had never paid anything.
     """
-    try:
-        price = float(user_data.get("subscriptionPrice"))
-    except (TypeError, ValueError):
+    price = _stored_usd_price(user_data)
+    if price is None:
         return None
-    if price <= 0:
-        return None
-
     currency = str(user_data.get("subscriptionCurrency") or "USD").strip().upper()
-    if currency != "USD":
-        return None
 
     monthly = round(price / 12, 2) if _is_annual_plan(user_data, price) else price
     if monthly > MAX_PLAUSIBLE_MONTHLY_USD:
@@ -549,6 +578,19 @@ _STORE_LABELS = {
     "RC_BILLING": "Web",
     "PROMOTIONAL": "Promotional",
 }
+
+
+RC_MRR_METRIC_IDS = ("mrr",)
+RC_SUBSCRIBER_METRIC_IDS = (
+    "active_subscriptions", "active_subscribers", "subscriptions_active",
+)
+
+
+def _first_metric(metrics: dict, candidate_ids: tuple):
+    for metric_id in candidate_ids:
+        if metric_id in metrics:
+            return metrics[metric_id]
+    return None
 
 
 def _store_label(user_data: dict) -> str:
@@ -774,6 +816,7 @@ def _health_with_email_history(health: dict, email_history: list[dict]) -> dict:
     "byPlatform": {}, "byProduct": {}, "subscribersByProduct": {}, "mrrTrend": [],
     "newSubscribers": 0, "churned": 0, "netNew": 0,
     "pricedSubscribers": 0, "unpricedSubscribers": 0,
+    "mrrSource": "unavailable", "attributedMrr": 0, "attributedSubscribers": 0,
     "excludedNoProvenance": 0, "excludedNonPaying": 0,
     "excludedFreeAccess": 0, "excludedLapsed": 0,
     "excludedNonUsd": 0,
@@ -906,6 +949,27 @@ def _compute_revenue_summary(days: int) -> dict:
         subs_by_product[product] = subs_by_product.get(product, 0) + 1
 
     arr = mrr * 12
+
+    # RevenueCat is the billing system of record. Our Firestore-derived figure
+    # can only ever see subscribers whose webhook landed and whose document
+    # carries the metadata we screen on, so it under-reports whenever delivery
+    # failed or the purchase predates those fields. Prefer RevenueCat's own
+    # numbers for the headline and keep the derived sum beside them as the
+    # amount we can actually attribute to a store and a plan.
+    attributed_mrr = round(mrr, 2)
+    attributed_subscribers = total_subscribers
+    mrr_source = "firestore"
+
+    rc_metrics = revenuecat_client.get_overview_metrics() or {}
+    rc_mrr = _first_metric(rc_metrics, RC_MRR_METRIC_IDS)
+    rc_subscribers = _first_metric(rc_metrics, RC_SUBSCRIBER_METRIC_IDS)
+    if rc_mrr is not None and rc_mrr >= 0:
+        mrr = float(rc_mrr)
+        arr = mrr * 12
+        mrr_source = "revenuecat"
+        if rc_subscribers is not None and rc_subscribers >= 0:
+            total_subscribers = int(rc_subscribers)
+
 
     # New subscribers in period
     new_subscribers = 0
@@ -1041,6 +1105,9 @@ def _compute_revenue_summary(days: int) -> dict:
         "mrr": round(mrr, 2),
         "mrrChange": mrr_change,
         "arr": round(arr, 2),
+        "mrrSource": mrr_source,
+        "attributedMrr": attributed_mrr,
+        "attributedSubscribers": attributed_subscribers,
         "todayRevenue": round(today_revenue, 2),
         "totalSubscribers": total_subscribers,
         "trialUsers": trial_users,

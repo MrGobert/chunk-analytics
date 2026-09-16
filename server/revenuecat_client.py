@@ -54,6 +54,61 @@ def _customer_profile(customer: dict, app_user_id: str = "") -> dict | None:
     }
 
 
+def get_overview_metrics() -> dict | None:
+    """RevenueCat's own project overview metrics — MRR, active subscriptions.
+
+    These are the figures the RevenueCat dashboard shows, computed from the
+    billing data itself. They are authoritative in a way a Firestore mirror can
+    never be: a webhook that was never delivered, or that predates the fields
+    we now store, leaves a paying subscriber invisible to us but perfectly
+    visible here.
+
+    One request, no per-customer fan-out. Returns {metric_id: value} or None
+    on any failure, so callers fall back to the derived figures.
+
+    Needs the `charts_metrics:overview:read` scope on REVENUECAT_SECRET_API_KEY;
+    a 403 means the key was issued without it.
+    """
+    api_key, project_id = _config()
+    if not api_key or not project_id:
+        return None
+
+    url = (
+        f"{REVENUECAT_API_BASE}/projects/{quote(project_id, safe='')}"
+        "/metrics/overview?currency=USD"
+    )
+    try:
+        with httpx.Client(timeout=REQUEST_TIMEOUT_SECONDS) as client:
+            response = client.get(url, headers={"Authorization": f"Bearer {api_key}"})
+        if response.status_code == 403:
+            logging.warning(
+                "[REVENUECAT] overview metrics denied — the API key is missing "
+                "the charts_metrics:overview:read scope"
+            )
+            return None
+        if response.status_code != 200:
+            logging.warning(f"[REVENUECAT] overview metrics returned {response.status_code}")
+            return None
+        payload = response.json() or {}
+    except Exception as exc:
+        logging.warning(f"[REVENUECAT] overview metrics unavailable: {exc}")
+        return None
+
+    metrics = {}
+    for entry in payload.get("metrics") or []:
+        metric_id = str(entry.get("id") or "").strip().lower()
+        if not metric_id:
+            continue
+        try:
+            metrics[metric_id] = float(entry.get("value"))
+        except (TypeError, ValueError):
+            continue
+
+    if metrics:
+        logging.info(f"[REVENUECAT] overview metrics: {sorted(metrics)}")
+    return metrics or None
+
+
 def get_customer_profile(app_user_id: str) -> dict | None:
     """Fetch one RevenueCat customer by exact App User ID/customer alias."""
     api_key, project_id = _config()
