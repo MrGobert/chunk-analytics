@@ -439,6 +439,8 @@ export interface RevenueSummary {
   excludedNoProvenance?: number;
   /** Promotional grants and sandbox-only accounts. */
   excludedNonPaying?: number;
+  /** Comped / offer-code / internal accounts: entitled but never charged. */
+  excludedFreeAccess?: number;
   /** Subscriptions whose renewal date has already passed. */
   excludedLapsed?: number;
   /** Dropped because the stored price was in a non-USD currency. */

@@ -430,9 +430,23 @@ def _has_webhook_provenance(user_data: dict) -> bool:
     return any(user_data.get(field) for field in WEBHOOK_PROVENANCE_FIELDS)
 
 
+# Stores that never represent a paid transaction.
+NON_PAYING_STORES = ("PROMOTIONAL", "TEST_STORE")
+
+
 def _is_promotional(user_data: dict) -> bool:
     """Complimentary grants carry a live entitlement but produce no revenue."""
-    return str(user_data.get("subscriptionStore") or "").strip().upper() == "PROMOTIONAL"
+    return str(user_data.get("subscriptionStore") or "").strip().upper() in NON_PAYING_STORES
+
+
+def _excluded_uids() -> set:
+    """Accounts held out of every revenue figure, from ANALYTICS_EXCLUDED_UIDS.
+
+    For access granted outside RevenueCat's own signals — a hand-edited
+    document, or an internal account that should never reach the dashboard.
+    """
+    raw = os.environ.get("ANALYTICS_EXCLUDED_UIDS", "")
+    return {uid.strip() for uid in raw.replace("\n", ",").split(",") if uid.strip()}
 
 
 def _has_lapsed_renewal(user_data: dict, now: datetime) -> bool:
@@ -466,6 +480,33 @@ def _is_unconverted_trial(user_data: dict, now: datetime) -> bool:
         return False
     trial_end = _to_datetime(user_data.get("trialEndDate"))
     return bool(trial_end and trial_end > now)
+
+
+def _unpriced_reason(user_data: dict) -> str:
+    """Why a confirmed subscriber has no usable USD price.
+
+    cerebral writes subscriptionCurrency whenever RevenueCat reports one, but
+    subscriptionPrice only when the price is > 0. A currency with no price
+    therefore means the webhook saw a zero-price transaction — complimentary
+    access, an offer-code redemption or a comped account — not a purchase we
+    failed to convert.
+    """
+    currency = str(user_data.get("subscriptionCurrency") or "").strip().upper()
+    try:
+        price = float(user_data.get("subscriptionPrice"))
+    except (TypeError, ValueError):
+        price = 0.0
+
+    if price <= 0:
+        return "free_access" if currency else "no_price_recorded"
+    if currency and currency != "USD":
+        return "non_usd"
+    return "implausible"
+
+
+def _is_free_access(user_data: dict) -> bool:
+    """Access granted without a charge — comped, offer code, or test account."""
+    return _unpriced_reason(user_data) == "free_access"
 
 
 def _monthly_usd(user_data: dict, doc_id: str = "") -> float:
@@ -516,12 +557,16 @@ def _store_label(user_data: dict) -> str:
     return _STORE_LABELS.get(store, store.replace("_", " ").title() or "Unknown")
 
 
-def _sandbox_only_app_user_ids(db, since: datetime) -> set:
-    """UIDs whose entire RevenueCat history is sandbox (TestFlight/simulator).
+def _non_paying_uids_from_events(db, since: datetime) -> tuple:
+    """UIDs the event mirror shows as never having transacted for real.
 
-    The sandbox flag never reaches the user document — cerebral records
-    `environment` only on the subscription_events mirror — so the screen has to
-    be a join. A user with any production event is treated as real.
+    `environment` and `period_type` live only on subscription_events — the user
+    document carries neither — so a sandbox build or an offer-code redemption
+    can only be told from a purchase by joining against the mirror.
+
+    Returns (sandbox_only, promotional_only). Both are "only" sets: any single
+    PRODUCTION or non-promotional event clears the user, because a comped
+    period followed by a real purchase is a paying subscriber.
 
     Bounded by `since` for the same reason as _subscription_events_since: an
     unfiltered read would silently truncate at the document cap and return an
@@ -535,20 +580,35 @@ def _sandbox_only_app_user_ids(db, since: datetime) -> set:
             .stream()
         )
         if len(docs) == 5000:
-            logging.warning("[ANALYTICS_API] sandbox screen hit the 5000-doc limit")
+            logging.warning("[ANALYTICS_API] non-paying screen hit the 5000-doc limit")
     except Exception as exc:
-        logging.warning(f"[ANALYTICS_API] sandbox screen unavailable: {exc}")
-        return set()
+        logging.warning(f"[ANALYTICS_API] non-paying screen unavailable: {exc}")
+        return set(), set()
 
-    sandbox_only = {}
+    sandbox_only, promo_only = {}, {}
     for doc in docs:
         data = doc.to_dict() or {}
         app_user_id = data.get("appUserId")
         if not app_user_id:
             continue
+
         is_sandbox = str(data.get("environment") or "PRODUCTION").upper() == "SANDBOX"
         sandbox_only[app_user_id] = sandbox_only.get(app_user_id, True) and is_sandbox
-    return {uid for uid, only in sandbox_only.items() if only}
+
+        # A promotional PERIOD can arrive on an ordinary store — an App Store
+        # offer code redeemed against APP_STORE — so the store check alone
+        # never sees it. Sandbox events are ignored here so the two screens
+        # stay independent and each reports its own population.
+        if not is_sandbox:
+            period = str(data.get("periodType") or "").upper()
+            store = str(data.get("store") or "").upper()
+            is_promo = period == "PROMOTIONAL" or store in NON_PAYING_STORES
+            promo_only[app_user_id] = promo_only.get(app_user_id, True) and is_promo
+
+    return (
+        {uid for uid, only in sandbox_only.items() if only},
+        {uid for uid, only in promo_only.items() if only},
+    )
 
 
 # Per-user usage counters live in users/{uid}/usage_monthly/{YYYY-MM} docs,
@@ -714,7 +774,8 @@ def _health_with_email_history(health: dict, email_history: list[dict]) -> dict:
     "byPlatform": {}, "byProduct": {}, "subscribersByProduct": {}, "mrrTrend": [],
     "newSubscribers": 0, "churned": 0, "netNew": 0,
     "pricedSubscribers": 0, "unpricedSubscribers": 0,
-    "excludedNoProvenance": 0, "excludedNonPaying": 0, "excludedLapsed": 0,
+    "excludedNoProvenance": 0, "excludedNonPaying": 0,
+    "excludedFreeAccess": 0, "excludedLapsed": 0,
     "excludedNonUsd": 0,
 })
 def revenue_summary():
@@ -761,28 +822,41 @@ def _compute_revenue_summary(days: int) -> dict:
     ]
     # Screen the candidates: an "active" status alone proves nothing, because
     # the native app writes it for trials, sandbox builds and promo grants.
-    sandbox_only_uids = _sandbox_only_app_user_ids(db, now - timedelta(days=400))
+    sandbox_only_uids, promotional_uids = _non_paying_uids_from_events(
+        db, now - timedelta(days=400)
+    )
+    held_out_uids = _excluded_uids()
     candidate_docs = active_docs + unexpired_cancelled_paid_docs
 
     current_subscriber_docs = []
     ratcheted_trial_docs = []
     excluded_no_provenance = 0
     excluded_non_paying = 0
+    excluded_free_access = 0
     excluded_lapsed = 0
 
     for doc in candidate_docs:
         data = doc.to_dict()
-        if doc.id in sandbox_only_uids or _is_promotional(data):
+        if doc.id in held_out_uids:
+            excluded_non_paying += 1
+            continue
+        if doc.id in sandbox_only_uids or doc.id in promotional_uids or _is_promotional(data):
             excluded_non_paying += 1
             continue
         if not _has_webhook_provenance(data):
             excluded_no_provenance += 1
             continue
-        if _has_lapsed_renewal(data, now):
-            excluded_lapsed += 1
-            continue
         if _is_unconverted_trial(data, now):
             ratcheted_trial_docs.append(doc)
+            continue
+        # Comped, offer-code and internal accounts hold a real entitlement and
+        # would otherwise sit in the subscriber count at $0, dragging ARPU and
+        # conversion down with a population that was never going to pay.
+        if _is_free_access(data):
+            excluded_free_access += 1
+            continue
+        if _has_lapsed_renewal(data, now):
+            excluded_lapsed += 1
             continue
         current_subscriber_docs.append(doc)
 
@@ -810,8 +884,7 @@ def _compute_revenue_summary(days: int) -> dict:
             # to MRR and is reported instead, so the figure never includes a
             # guess. pricedSubscribers is the honest ARPU denominator.
             unpriced_subscribers += 1
-            currency = str(data.get("subscriptionCurrency") or "").strip().upper()
-            if currency and currency != "USD":
+            if _unpriced_reason(data) == "non_usd":
                 excluded_non_usd += 1
             continue
 
@@ -855,7 +928,10 @@ def _compute_revenue_summary(days: int) -> dict:
             not _is_trial_subscription(data)
             and _has_webhook_provenance(data)
             and not _is_promotional(data)
+            and not _is_free_access(data)
             and doc.id not in sandbox_only_uids
+            and doc.id not in promotional_uids
+            and doc.id not in held_out_uids
             and exp_date
             and cutoff <= exp_date <= now
         ):
@@ -976,6 +1052,7 @@ def _compute_revenue_summary(days: int) -> dict:
         "unpricedSubscribers": unpriced_subscribers,
         "excludedNoProvenance": excluded_no_provenance,
         "excludedNonPaying": excluded_non_paying,
+        "excludedFreeAccess": excluded_free_access,
         "excludedLapsed": excluded_lapsed,
         "excludedNonUsd": excluded_non_usd,
         "mrrTrend": mrr_trend,

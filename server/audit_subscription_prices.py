@@ -37,23 +37,33 @@ def main():
         print(f"  {status:<10} {len(docs)}{flag}")
 
     active = buckets["active"]
-    sandbox_only = A._sandbox_only_app_user_ids(db, now - timedelta(days=400))
-    print(f"\nsandbox-only app_user_ids in the event mirror: {len(sandbox_only)}")
+    sandbox_only, promotional = A._non_paying_uids_from_events(db, now - timedelta(days=400))
+    held_out = A._excluded_uids()
+    print(f"\nevent-mirror screens: {len(sandbox_only)} sandbox-only, "
+          f"{len(promotional)} promotional-only app_user_id(s)")
+    print(f"ANALYTICS_EXCLUDED_UIDS holds {len(held_out)} uid(s)")
 
     reasons = Counter()
-    confirmed = []
+    confirmed, comped = [], []
     for doc in active:
         data = doc.to_dict() or {}
-        if doc.id in sandbox_only:
+        if doc.id in held_out:
+            reasons["held out by ANALYTICS_EXCLUDED_UIDS"] += 1
+        elif doc.id in sandbox_only:
             reasons["sandbox only"] += 1
+        elif doc.id in promotional:
+            reasons["promotional period / non-paying store (mirror)"] += 1
         elif A._is_promotional(data):
-            reasons["promotional grant"] += 1
+            reasons["promotional or test store (user doc)"] += 1
         elif not A._has_webhook_provenance(data):
             reasons["no webhook provenance (client-written)"] += 1
-        elif A._has_lapsed_renewal(data, now):
-            reasons["renewal date already passed"] += 1
         elif A._is_unconverted_trial(data, now):
             reasons["live trial flipped to active"] += 1
+        elif A._is_free_access(data):
+            reasons["free access (currency recorded, price 0)"] += 1
+            comped.append(doc)
+        elif A._has_lapsed_renewal(data, now):
+            reasons["renewal date already passed"] += 1
         else:
             confirmed.append(doc)
 
@@ -68,6 +78,19 @@ def main():
         coverage["missing" if not renewal else ("future" if renewal > now else "past")] += 1
     for key, count in coverage.most_common():
         print(f"  {key:<8} {count}")
+
+    if comped:
+        print(f"\nfree-access accounts ({len(comped)}) — granted, never charged")
+        for doc in comped:
+            d = doc.to_dict() or {}
+            print(f"  {doc.id[:10]}…  store={d.get('subscriptionStore') or '?':<14} "
+                  f"currency={d.get('subscriptionCurrency') or '?':<5} "
+                  f"product={str(d.get('productId') or '?')[:28]}")
+
+    print("\nunpriced reason across webhook-confirmed subscribers")
+    for reason, count in Counter(A._unpriced_reason(d.to_dict() or {}) for d in confirmed
+                                 if A._monthly_usd(d.to_dict() or {}, d.id) is None).most_common():
+        print(f"  {reason:<20} {count}")
 
     print("\nsubscriptionCurrency across webhook-confirmed subscribers")
     by_currency = defaultdict(list)

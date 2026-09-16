@@ -1,3 +1,4 @@
+import os
 import sys
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -306,13 +307,74 @@ class RevenueGuardTests(unittest.TestCase):
     def test_unpriced_subscriber_contributes_nothing(self):
         """No price must mean no revenue, never an assumed one."""
         result = self._summarize([
-            FakeDoc("priceless", self._paid(subscriptionPrice=None)),
+            FakeDoc("priceless", self._paid(
+                subscriptionPrice=None, subscriptionCurrency=None,
+            )),
         ])
 
         self.assertEqual(result["mrr"], 0)
         self.assertEqual(result["totalSubscribers"], 1)
         self.assertEqual(result["pricedSubscribers"], 0)
         self.assertEqual(result["unpricedSubscribers"], 1)
+
+    def test_comped_access_is_excluded_from_the_subscriber_count(self):
+        """A currency with no price means the webhook saw a zero-price charge.
+
+        cerebral writes subscriptionCurrency whenever RevenueCat reports one but
+        subscriptionPrice only when it is > 0, so this shape is complimentary
+        access — a friends-and-family grant or an offer-code redemption — and
+        counting it would drag ARPU and conversion down with a population that
+        was never going to pay.
+        """
+        result = self._summarize([
+            FakeDoc("comped", self._paid(subscriptionPrice=None, subscriptionCurrency="GBP")),
+            FakeDoc("paying", self._paid()),
+        ])
+
+        self.assertEqual(result["totalSubscribers"], 1)
+        self.assertEqual(result["excludedFreeAccess"], 1)
+        self.assertEqual(result["excludedNonUsd"], 0)
+        self.assertEqual(result["mrr"], 9.99)
+
+    def test_a_live_trial_is_a_trial_before_it_is_free_access(self):
+        """Both shapes lack a price; the trial classification must win."""
+        result = self._summarize([
+            FakeDoc("trialling", self._paid(
+                subscriptionPrice=None, subscriptionCurrency="EUR",
+                trialEndDate=self.NOW + timedelta(days=2),
+            )),
+        ])
+
+        self.assertEqual(result["trialUsers"], 1)
+        self.assertEqual(result["excludedFreeAccess"], 0)
+
+    def test_offer_code_redemption_is_excluded_via_the_event_mirror(self):
+        """An App Store offer code arrives as APP_STORE with a promotional period."""
+        result = self._summarize(
+            [FakeDoc("offer", self._paid()), FakeDoc("paying", self._paid())],
+            [
+                FakeDoc("e1", {"appUserId": "offer", "store": "APP_STORE",
+                               "periodType": "PROMOTIONAL", "environment": "PRODUCTION",
+                               "occurredAt": self.NOW - timedelta(days=4)}),
+                FakeDoc("e2", {"appUserId": "paying", "store": "APP_STORE",
+                               "periodType": "NORMAL", "environment": "PRODUCTION",
+                               "occurredAt": self.NOW - timedelta(days=4)}),
+            ],
+        )
+
+        self.assertEqual(result["totalSubscribers"], 1)
+        self.assertEqual(result["excludedNonPaying"], 1)
+
+    def test_held_out_uids_never_reach_any_revenue_figure(self):
+        with patch.dict(os.environ, {"ANALYTICS_EXCLUDED_UIDS": "tester-1, tester-2"}):
+            result = self._summarize([
+                FakeDoc("tester-1", self._paid()),
+                FakeDoc("tester-2", self._paid()),
+                FakeDoc("real", self._paid()),
+            ])
+
+        self.assertEqual(result["totalSubscribers"], 1)
+        self.assertEqual(result["mrr"], 9.99)
 
     def test_promotional_and_sandbox_entitlements_are_excluded(self):
         users = [
@@ -344,7 +406,7 @@ class RevenueGuardTests(unittest.TestCase):
         """Why the dashboard reported trialUsers: 0 against 6 trial starts."""
         result = self._summarize([
             FakeDoc("ratcheted", self._paid(
-                subscriptionPrice=None,
+                subscriptionPrice=None, subscriptionCurrency=None,
                 trialEndDate=self.NOW + timedelta(days=2),
                 hasStartedTrial=True,
             )),
@@ -432,7 +494,7 @@ class RevenueGuardTests(unittest.TestCase):
     def test_coverage_counts_account_for_every_confirmed_subscriber(self):
         result = self._summarize([
             FakeDoc("a", self._paid()),
-            FakeDoc("b", self._paid(subscriptionPrice=None)),
+            FakeDoc("b", self._paid(subscriptionPrice=None, subscriptionCurrency=None)),
             FakeDoc("c", self._paid(subscriptionCurrency="JPY", subscriptionPrice=1500)),
         ])
 
