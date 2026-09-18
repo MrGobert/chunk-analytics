@@ -7,7 +7,7 @@ client of production cerebral:
   upload:  Storage users/{uid}/documents/{id}/{name}
            -> Firestore document_metadata/{uid}/files_metadata/{id}
            -> POST {target}/upload (multipart, Bearer)  [backend indexes into Qdrant]
-  wait:    poll Firestore tasks/{documentId}.status until completed/error
+  wait:    poll extraction status, then authenticated Qdrant index readiness
   delete:  POST {target}/api/deleteDocument (removes Qdrant vectors)
            + best-effort Storage/Firestore cleanup
 
@@ -130,29 +130,98 @@ def upload_document(
     return {"document_id": document_id, "storage_path": storage_path}
 
 
-def wait_for_indexing(document_id: str, timeout_s: int = 240, interval_s: float = 5.0) -> dict:
-    """Poll Firestore tasks/{documentId} until status completed/error.
+def wait_for_indexing(
+    identity: EvalIdentity,
+    document_id: str,
+    timeout_s: int = 240,
+    interval_s: float = 5.0,
+) -> dict:
+    """Wait for extraction AND stored chunks under one end-to-end deadline.
 
-    Returns {"status": "completed"|"error"|"timeout", "waited_s": ...}.
+    The legacy task's `completed` means text is available, before embedding
+    jobs are even queued. Only cerebral's user-scoped Qdrant probe establishes
+    readiness for this small fixture. It is not full-document batch progress.
     """
-    deadline = time.monotonic() + timeout_s
     started = time.monotonic()
+    deadline = started + timeout_s
     last_status = "missing"
+    stage = "extraction"
+    last_error = None
+
+    def outcome(status, **extra):
+        return {
+            "status": status,
+            "document_id": document_id,
+            "stage": stage,
+            "extraction_status": last_status,
+            "waited_s": round(time.monotonic() - started, 1),
+            **extra,
+        }
+
     while time.monotonic() < deadline:
-        snapshot = _db().collection("tasks").document(document_id).get()
-        if snapshot.exists:
-            last_status = str((snapshot.to_dict() or {}).get("status", "unknown"))
-            if last_status in ("completed", "error"):
-                return {
-                    "status": last_status,
-                    "waited_s": round(time.monotonic() - started, 1),
-                }
-        time.sleep(interval_s)
-    return {
-        "status": "timeout",
-        "last": last_status,
-        "waited_s": round(time.monotonic() - started, 1),
-    }
+        try:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            snapshot = _db().collection("tasks").document(document_id).get(
+                timeout=min(5.0, remaining), retry=None
+            )
+            task = (snapshot.to_dict() or {}) if snapshot.exists else {}
+            last_status = str(task.get("status", "missing"))
+            stage = "indexing" if last_status == "completed" else "extraction"
+            if last_status in ("failed", "error"):
+                stage = "extraction"
+                return outcome("failed", error_code=task.get("error_code", last_status))
+            errors = {
+                key: value
+                for key, value in (task.get("indexing_errors") or {}).items()
+                if value
+            }
+            if errors:
+                stage = "indexing"
+                first_error = next(iter(errors.values()))
+                return outcome(
+                    "failed",
+                    error_code=first_error.get("error_code", "indexing_failed"),
+                    indexing_errors=errors,
+                )
+            if last_status == "completed":
+                stage = "indexing"
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                response = httpx.post(
+                    f"{config.target_url()}/get-document-index-status",
+                    json={"document_id": document_id},
+                    headers={"Authorization": f"Bearer {identity.token()}"},
+                    timeout=min(5.0, remaining),
+                )
+                if response.status_code == 401:
+                    identity.force_refresh()
+                    last_error = "readiness HTTP 401; refreshed authentication"
+                elif response.status_code == 200:
+                    payload = response.json()
+                    if (
+                        not isinstance(payload, dict)
+                        or payload.get("document_id") != document_id
+                        or type(payload.get("indexed")) is not bool
+                    ):
+                        return outcome("failed", error_code="invalid_readiness_response")
+                    last_error = None
+                    if payload["indexed"]:
+                        return outcome("completed", indexed=True)
+                elif response.status_code == 429 or response.status_code >= 500:
+                    last_error = f"readiness HTTP {response.status_code}"
+                else:
+                    return outcome("failed", error_code=f"readiness_http_{response.status_code}")
+        except Exception as exc:
+            # Transport errors (including Firestore outages) are retryable;
+            # bound polling and retain evidence instead of claiming readiness.
+            last_error = f"{type(exc).__name__}: {str(exc)[:200]}"
+        remaining = deadline - time.monotonic()
+        if remaining > 0:
+            time.sleep(min(interval_s, remaining))
+    return outcome("timeout", indexed=False, last=last_status, error=last_error)
 
 
 def delete_document(identity: EvalIdentity, document_id: str, storage_path: str = "") -> dict:

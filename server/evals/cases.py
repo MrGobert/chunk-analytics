@@ -100,8 +100,11 @@ def _upload_indexed_assertion() -> A.Assertion:
         indexing = execution.extra.get("indexing") or {}
         status = indexing.get("status", "not-run")
         return (
-            status == "completed",
-            f"indexing status={status} waited={indexing.get('waited_s', '?')}s",
+            status == "completed" and indexing.get("indexed") is True,
+            f"indexing status={status} stage={indexing.get('stage', 'unknown')} "
+            f"indexed={indexing.get('indexed', False)} waited={indexing.get('waited_s', '?')}s "
+            f"document={indexing.get('document_id', '?')} "
+            f"error={indexing.get('error_code') or indexing.get('error') or 'none'}",
         )
 
     return A.Assertion("upload_indexed", check)

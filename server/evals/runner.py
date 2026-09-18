@@ -174,7 +174,7 @@ def _execute_once(
             )
             execution.extra["upload"] = upload
             execution.extra["indexing"] = documents.wait_for_indexing(
-                upload["document_id"], timeout_s=240
+                identity, upload["document_id"], timeout_s=240
             )
             if execution.extra["indexing"].get("status") == "completed":
                 _run_turns(client, case, identity, run_id, execution, question)

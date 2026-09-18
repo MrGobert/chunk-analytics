@@ -61,7 +61,9 @@ def seed(force: bool = False) -> dict:
                 data = doc.to_dict() or {}
                 documents.delete_document(identity, doc.id, data.get("storagePath", ""))
         upload = documents.upload_document(identity, SEED_DOC_NAME, SEED_DOC_CONTENT)
-        indexing = documents.wait_for_indexing(upload["document_id"], timeout_s=240)
+        indexing = documents.wait_for_indexing(
+            identity, upload["document_id"], timeout_s=240
+        )
         outcome["document"] = {"uploaded": upload, "indexing": indexing}
         if indexing.get("status") != "completed":
             outcome["warning"] = (
