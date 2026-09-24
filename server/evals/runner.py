@@ -39,7 +39,7 @@ LATENCY_TTFB_BUDGET_MS = 15_000
 # rollback leaves the "free tier" case testing a model no free user is served
 # while the run still reports green. The legacy ids the guest case used to send
 # stay covered by the dedicated `retired_model_id` case.
-FREE_TIER_MODEL = os.environ.get("EVAL_FREE_TIER_MODEL", "gpt-5.6-luna")
+FREE_TIER_MODEL = os.environ.get("EVAL_FREE_TIER_MODEL", "gpt-6-luna")
 
 
 def _db():
@@ -289,7 +289,7 @@ def _evaluate(case: EvalCase, execution: CaseExecution) -> dict:
                 "research_elapsed_s", 0
             )
             # gpt-researcher's own cost accounting — the drift signal for the
-            # now-uncapped gpt-5.6-sol writer.
+            # now-uncapped Sol writer (gpt-6-sol since Sep 23 2026).
             response_summary["research_cost"] = execution.research.get("costs")
         if execution.image_url:
             response_summary["image_url"] = execution.image_url
@@ -579,7 +579,7 @@ def run_suite(
                 "search_mode": last_turn.overrides.get("search_mode", "ASSISTANT"),
                 "model_name": last_turn.overrides.get(
                     "model_name",
-                    FREE_TIER_MODEL if case.kind == "guest" else "gpt-5.6-sol",
+                    FREE_TIER_MODEL if case.kind == "guest" else "gpt-6-sol",
                 ),
                 "user_input": last_turn.user_input[:300],
                 "conversation_id": f"eval-{run_id}-{case.id}",

@@ -226,7 +226,7 @@ ALL_CASES: list = [
         turns=[
             Turn(
                 "Generate an image of a lighthouse at dusk, painted in soft watercolors.",
-                {"canGenerateImage": True, "model_name": "gpt-5.6-sol"},
+                {"canGenerateImage": True, "model_name": "gpt-6-sol"},
             )
         ],
         kind="image",

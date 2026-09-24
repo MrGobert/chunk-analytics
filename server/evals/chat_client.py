@@ -21,7 +21,7 @@ from evals.stream_parser import ParsedStream, parse_stream
 # path, so 90s of silence means the stream is genuinely dead.
 STREAM_TIMEOUT = httpx.Timeout(connect=10.0, read=90.0, write=10.0, pool=10.0)
 
-DEFAULT_MODEL = "gpt-5.6-sol"
+DEFAULT_MODEL = "gpt-6-sol"
 
 
 @dataclass
