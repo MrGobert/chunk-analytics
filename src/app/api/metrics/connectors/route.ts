@@ -249,34 +249,6 @@ export async function GET(request: NextRequest) {
       return { date, connects, operations, disconnects };
     });
 
-    // ── Top error messages (Connect_Failed + OAuth error + op fail) ─
-    const errorCounts = new Map<string, number>();
-    for (const e of connectorEvents) {
-      let msg: unknown = null;
-      if (e.event === 'Connector_Connect_Failed') {
-        msg = e.properties.error_message;
-      } else if (
-        e.event === OAUTH_CALLBACK_EVENT &&
-        e.properties.status === 'error'
-      ) {
-        msg = e.properties.error_message;
-      } else if (e.event === 'Gamma_Generation_Failed') {
-        msg = e.properties.error_message;
-      } else if (e.event === DISCONNECT_FAILED_EVENT) {
-        msg = e.properties.error_message;
-      } else if (e.event === STATUS_DEGRADED_EVENT) {
-        msg = e.properties.error_message;
-      }
-      if (typeof msg === 'string' && msg.trim()) {
-        const trimmed = msg.length > 80 ? `${msg.slice(0, 77)}…` : msg;
-        errorCounts.set(trimmed, (errorCounts.get(trimmed) ?? 0) + 1);
-      }
-    }
-    const topErrors = Array.from(errorCounts.entries())
-      .map(([error, count]) => ({ error, count }))
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 5);
-
     // ── Unique users with any connector activity ─────────────────────
     const uniqueConnectedUsers = new Set<string>(
       connectorEvents.map((e) => e.properties.distinct_id as string)
@@ -303,7 +275,6 @@ export async function GET(request: NextRequest) {
       connectorBreakdown,
       operationBreakdown,
       dailyActivity,
-      topErrors,
       dateRange,
       platform,
       userType,

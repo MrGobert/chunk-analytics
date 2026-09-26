@@ -1,5 +1,5 @@
 // Capture & Monitors — Save-to-Chunk capture volume (by source/content type)
-// and Research Monitor creation (what users watch, cadence/depth mix).
+// and Automation creation (kind, setup, cadence/depth mix).
 export const maxDuration = 60;
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -65,6 +65,25 @@ const CAPTURE_MONITOR_EVENTS = [
   'inbox_viewed',
 ];
 
+/**
+ * What an automation was set up to do, from the enum its Automation_Created
+ * event carries for its kind: a watcher's condition, a digest's template, an
+ * agent task's recipe. Research is already covered by the report-type mix.
+ * Never the topic text: clients no longer send it (free-text denylist).
+ */
+const SETUP_FIELD: Record<string, string> = {
+  watcher: 'condition_type',
+  digest: 'template',
+  agent_task: 'recipe_id',
+};
+
+function automationSetup(kind: string, p: Record<string, unknown>): string | null {
+  const field = SETUP_FIELD[kind];
+  if (!field) return null;
+  const value = String(p[field] ?? '').trim();
+  return value || null;
+}
+
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
@@ -83,7 +102,8 @@ export async function GET(request: NextRequest) {
 
     const cadence = new Map<string, number>();
     const reportType = new Map<string, number>();
-    const topics = new Map<string, number>();
+    // "kind\u0000setup" → automations created with that setup.
+    const setups = new Map<string, number>();
     const monitorPlatform = new Map<string, number>();
     const source = new Map<string, number>();
     const contentType = new Map<string, number>();
@@ -138,8 +158,9 @@ export async function GET(request: NextRequest) {
           bump(kindMix, String(p.kind ?? 'unknown'));
           bump(cadence, String(p.cadence ?? 'unknown'));
           bump(reportType, String(p.report_type ?? 'unknown'));
-          const topic = String(p.query_truncated ?? '').trim();
-          if (topic) bump(topics, topic);
+          const kind = String(p.kind ?? '');
+          const setup = automationSetup(kind, p);
+          if (setup) bump(setups, `${kind}\u0000${setup}`);
           bump(monitorPlatform, platformOf(e));
           ensureDay(dayOf(t)).monitors++;
           break;
@@ -229,8 +250,11 @@ export async function GET(request: NextRequest) {
         .map(([name, value]) => ({ name, value }))
         .sort((a, b) => b.value - a.value);
 
-    const topTopics = Array.from(topics)
-      .map(([topic, count]) => ({ topic, count }))
+    const topSetups = Array.from(setups)
+      .map(([key, count]) => {
+        const [kind, setup] = key.split('\u0000');
+        return { kind, setup, count };
+      })
       .sort((a, b) => b.count - a.count)
       .slice(0, 15);
 
@@ -297,7 +321,7 @@ export async function GET(request: NextRequest) {
         activeSources,
         cadenceMix: toArr(cadence),
         reportTypeMix: toArr(reportType),
-        topTopics,
+        topSetups,
         monitorsByPlatform: toArr(monitorPlatform),
         capturesBySource: toArr(source),
         capturesByContentType: toArr(contentType),

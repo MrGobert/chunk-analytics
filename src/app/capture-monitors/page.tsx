@@ -78,7 +78,7 @@ export default function CaptureMonitorsPage() {
     <div ref={containerRef} className="animate-in fade-in duration-300">
       <PageHeader
         title="Capture & Automations"
-        subtitle="What users save to Chunk and the automations they set on the topics they watch"
+        subtitle="What users save to Chunk and the automations they set up"
         dateRange={dateRange}
         onDateRangeChange={setDateRange}
         platform={platform}
@@ -312,20 +312,21 @@ export default function CaptureMonitorsPage() {
         </div>
       </div>
 
-      {/* Top topics */}
+      {/* Automation setups */}
       <div className="grid grid-cols-1 gap-6">
         <div className="card-animate">
-          <ChartCard title="Top Automation Topics" subtitle="What users watch — the 'topic to watch' (truncated)">
-            {data.topTopics.length > 0 ? (
+          <ChartCard title="Automation Setups" subtitle="What each new automation was set to do: watcher condition · digest template · agent-task recipe">
+            {data.topSetups.length > 0 ? (
               <DataTable
-                data={data.topTopics}
+                data={data.topSetups}
                 columns={[
-                  { key: 'topic', header: 'Topic' },
+                  { key: 'kind', header: 'Kind' },
+                  { key: 'setup', header: 'Setup' },
                   { key: 'count', header: 'Automations', numeric: true },
                 ]}
               />
             ) : (
-              <div className="empty-state py-10">No automation topics yet</div>
+              <div className="empty-state py-10">No automation setups yet</div>
             )}
           </ChartCard>
         </div>

@@ -707,23 +707,6 @@ function ConnectorsSection({ dateRange, platform, userType }: FilterProps) {
           )}
         </ChartCard>
       </div>
-
-      {metrics.topErrors.length > 0 && (
-        <div className="grid grid-cols-1 gap-6">
-          <ChartCard
-            title="Top Errors"
-            subtitle="Most common failures across connect and operation events"
-          >
-            <BarChart
-              data={metrics.topErrors}
-              xKey="error"
-              yKey="count"
-              horizontal
-              color={chart.emberDeep}
-            />
-          </ChartCard>
-        </div>
-      )}
     </div>
   );
 }

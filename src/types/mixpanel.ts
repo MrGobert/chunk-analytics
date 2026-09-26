@@ -23,7 +23,6 @@ export interface MixpanelEvent {
     $ae_session_length?: number;
     tab_name?: string;
     step?: string;
-    error_message?: string;
     [key: string]: unknown;
   };
 }
@@ -326,7 +325,6 @@ export interface ConnectorsMetrics {
   connectorBreakdown: { name: string; value: number }[];
   operationBreakdown: { connector: string; operation: string; count: number }[];
   dailyActivity: { date: string; connects: number; operations: number; disconnects: number }[];
-  topErrors: { error: string; count: number }[];
   lastUpdated: string;
 }
 
@@ -793,7 +791,8 @@ export interface CaptureMonitorsMetrics {
   activeSources: number;
   cadenceMix: { name: string; value: number }[];
   reportTypeMix: { name: string; value: number }[];
-  topTopics: { topic: string; count: number }[];
+  /** Kind + its setup enum (condition_type / template / recipe_id), never typed text. */
+  topSetups: { kind: string; setup: string; count: number }[];
   monitorsByPlatform: { name: string; value: number }[];
   capturesBySource: { name: string; value: number }[];
   capturesByContentType: { name: string; value: number }[];
