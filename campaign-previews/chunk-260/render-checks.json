@@ -1,0 +1,176 @@
+[
+  {
+    "scenario": "desktop",
+    "width": 760,
+    "scrollWidth": 760,
+    "height": 3375,
+    "images": [
+      {
+        "src": "https://www.chunkapp.com/press/brand/chunk-mark-transparent-256.png",
+        "loaded": true,
+        "width": 30
+      },
+      {
+        "src": "https://www.chunkapp.com/press/screenshots/iphone/chunk-iphone-settings-siri-spotlight-1206x2622.png",
+        "loaded": true,
+        "width": 216
+      }
+    ],
+    "fonts": true,
+    "loadedFontFaces": 16,
+    "shortcutWidths": [
+      253,
+      253,
+      253,
+      253
+    ],
+    "headingColor": "rgb(45, 36, 24)",
+    "background": "rgb(255, 253, 248)",
+    "overflow": []
+  },
+  {
+    "scenario": "mobile",
+    "width": 390,
+    "scrollWidth": 390,
+    "height": 4340,
+    "images": [
+      {
+        "src": "https://www.chunkapp.com/press/brand/chunk-mark-transparent-256.png",
+        "loaded": true,
+        "width": 30
+      },
+      {
+        "src": "https://www.chunkapp.com/press/screenshots/iphone/chunk-iphone-settings-siri-spotlight-1206x2622.png",
+        "loaded": true,
+        "width": 242
+      }
+    ],
+    "fonts": true,
+    "loadedFontFaces": 16,
+    "shortcutWidths": [
+      324,
+      324,
+      324,
+      324
+    ],
+    "headingColor": "rgb(45, 36, 24)",
+    "background": "rgb(255, 253, 248)",
+    "overflow": []
+  },
+  {
+    "scenario": "mobile-narrow",
+    "width": 320,
+    "scrollWidth": 320,
+    "height": 4911,
+    "images": [
+      {
+        "src": "https://www.chunkapp.com/press/brand/chunk-mark-transparent-256.png",
+        "loaded": true,
+        "width": 30
+      },
+      {
+        "src": "https://www.chunkapp.com/press/screenshots/iphone/chunk-iphone-settings-siri-spotlight-1206x2622.png",
+        "loaded": true,
+        "width": 242
+      }
+    ],
+    "fonts": true,
+    "loadedFontFaces": 16,
+    "shortcutWidths": [
+      254,
+      254,
+      254,
+      254
+    ],
+    "headingColor": "rgb(45, 36, 24)",
+    "background": "rgb(255, 253, 248)",
+    "overflow": []
+  },
+  {
+    "scenario": "desktop-dark",
+    "width": 760,
+    "scrollWidth": 760,
+    "height": 3375,
+    "images": [
+      {
+        "src": "https://www.chunkapp.com/press/brand/chunk-mark-transparent-256.png",
+        "loaded": true,
+        "width": 30
+      },
+      {
+        "src": "https://www.chunkapp.com/press/screenshots/iphone/chunk-iphone-settings-siri-spotlight-1206x2622.png",
+        "loaded": true,
+        "width": 216
+      }
+    ],
+    "fonts": true,
+    "loadedFontFaces": 16,
+    "shortcutWidths": [
+      253,
+      253,
+      253,
+      253
+    ],
+    "headingColor": "rgb(246, 239, 228)",
+    "background": "rgb(36, 27, 18)",
+    "overflow": []
+  },
+  {
+    "scenario": "mobile-dark",
+    "width": 390,
+    "scrollWidth": 390,
+    "height": 4340,
+    "images": [
+      {
+        "src": "https://www.chunkapp.com/press/brand/chunk-mark-transparent-256.png",
+        "loaded": true,
+        "width": 30
+      },
+      {
+        "src": "https://www.chunkapp.com/press/screenshots/iphone/chunk-iphone-settings-siri-spotlight-1206x2622.png",
+        "loaded": true,
+        "width": 242
+      }
+    ],
+    "fonts": true,
+    "loadedFontFaces": 16,
+    "shortcutWidths": [
+      324,
+      324,
+      324,
+      324
+    ],
+    "headingColor": "rgb(246, 239, 228)",
+    "background": "rgb(36, 27, 18)",
+    "overflow": []
+  },
+  {
+    "scenario": "images-blocked-fallback-fonts",
+    "width": 390,
+    "scrollWidth": 390,
+    "height": 3908,
+    "images": [
+      {
+        "src": "https://www.chunkapp.com/press/brand/chunk-mark-transparent-256.png",
+        "loaded": false,
+        "width": 30
+      },
+      {
+        "src": "https://www.chunkapp.com/press/screenshots/iphone/chunk-iphone-settings-siri-spotlight-1206x2622.png",
+        "loaded": false,
+        "width": 242
+      }
+    ],
+    "fonts": true,
+    "loadedFontFaces": 0,
+    "shortcutWidths": [
+      324,
+      324,
+      324,
+      324
+    ],
+    "headingColor": "rgb(45, 36, 24)",
+    "background": "rgb(255, 253, 248)",
+    "overflow": []
+  }
+]

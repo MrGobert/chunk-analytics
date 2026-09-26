@@ -1,0 +1,67 @@
+Chunk 2.6.0 is here: Siri, Spotlight & Shortcuts
+
+Talk to your notes, find your saved work, and try free Artifacts—plus PDF export and a new Workstation.
+
+Siri, Spotlight & Shortcuts. Now in Chunk.
+
+Chunk 2.6.0 is now available. Find your saved work with Spotlight, ask Siri to act on it, and make everyday tasks your own with Apple Shortcuts.
+
+Update Chunk: https://apps.apple.com/us/app/chunk-ai-research-assistant/id6472682763
+
+Requires iOS/iPadOS 27 or macOS 27. Siri AI must be available and enabled on a compatible device. Also supported on visionOS 27; Siri AI availability varies by device, language, and region.
+
+YOUR SAVED WORK, WITHIN REACH
+Your notes, documents, research, collections, Artifacts, captures, conversations, flashcards, and automations are indexed right on your device. Find, open, and act on them by name.
+
+Talk to your notes.
+Dictate a new note, add to an existing one, or rename and move things into any folder—all hands-free.
+
+Your memories are never indexed.
+Turn indexing on or off for each device in Settings → Integrations → Siri & Spotlight. Turning it off removes Chunk content from Siri and Spotlight on that device.
+
+View the Siri & Spotlight Settings screenshot: https://www.chunkapp.com/press/screenshots/iphone/chunk-iphone-settings-siri-spotlight-1206x2622.png
+
+MAKE IT A SHORTCUT
+Four starting points. Eleven ways to put Chunk to work.
+- Save Artifact: Turn a link, image, or file into notes, summaries, flashcards, and more.
+- Research: Start a cited report that keeps working in the background.
+- Add to Collection: File a note, document, research report, or capture into a collection.
+- Review Flashcards: Open a deck and pick up your next review.
+
+Eleven actions in the Shortcuts app cover creating, appending to, and updating notes; searching and opening Chunk items; and exporting content and original sources.
+
+A spoken “save this” creates a Chunk note from what is on screen. To create an Artifact, use Save Artifact in Shortcuts or the share sheet.
+
+ALSO NEW IN CHUNK 2.6.0
+
+Artifacts are now free.
+Turn a video, article, podcast, or PDF into notes, summaries, flashcards, and more. One a week on Free, unlimited on Pro. Over the limit? Nothing is lost—your work runs at your next weekly reset.
+
+PDFs, ready to share.
+Ask for a document in any chat or export any note on iPhone, iPad, and Mac. Refine it by asking “shorten the intro,” then share it anywhere. Pro PDFs are yours alone, with no Chunk branding.
+
+A Workstation that feels like yours.
+Pick up where you left off with recent items, pins, and a tool dock you can arrange or hide. Your setup follows you across iPhone, iPad, Mac, and web.
+
+Automations that lead with answers.
+Each automation keeps one living result up to date, with run history, version comparison, and Run Now. Ask about it in chat or file it into a collection.
+
+A starting point, just for you. (Pro · Opt-in)
+Personalized chat starters on your empty chat screen draw on recent conversations and Memory. These suggestions live inside Chunk, separately from Apple Shortcuts.
+
+Your next idea is waiting.
+Update to Chunk 2.6.0 and make it yours.
+
+Update Chunk: https://apps.apple.com/us/app/chunk-ai-research-assistant/id6472682763
+
+Explore Siri, Spotlight & Shortcuts: https://www.chunkapp.com/press-kit#siri
+
+Questions? Just reply—we read everything.
+info@chunkapp.com
+
+Chunk · Made for curious minds.
+© 2026 Curious Minds Software, LLC
+
+Unsubscribe: {{{RESEND_UNSUBSCRIBE_URL}}}
+Privacy: https://www.chunkapp.com/privacy
+Terms: https://www.chunkapp.com/tos

@@ -1,0 +1,50 @@
+[
+  {
+    "url": "https://apps.apple.com/us/app/chunk-ai-research-assistant/id6472682763",
+    "status": 200,
+    "type": "text/html",
+    "anchor_found": null
+  },
+  {
+    "url": "https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,600;1,600&family=DM+Sans:wght@400;500;700&family=Spline+Sans+Mono:wght@400;500&display=swap",
+    "status": 200,
+    "type": "text/css; charset=utf-8",
+    "anchor_found": null
+  },
+  {
+    "url": "https://www.chunkapp.com",
+    "status": 200,
+    "type": "text/html; charset=utf-8",
+    "anchor_found": null
+  },
+  {
+    "url": "https://www.chunkapp.com/press-kit#siri",
+    "status": 200,
+    "type": "text/html; charset=utf-8",
+    "anchor_found": true
+  },
+  {
+    "url": "https://www.chunkapp.com/press/brand/chunk-mark-transparent-256.png",
+    "status": 200,
+    "type": "image/png",
+    "anchor_found": null
+  },
+  {
+    "url": "https://www.chunkapp.com/press/screenshots/iphone/chunk-iphone-settings-siri-spotlight-1206x2622.png",
+    "status": 200,
+    "type": "image/png",
+    "anchor_found": null
+  },
+  {
+    "url": "https://www.chunkapp.com/privacy",
+    "status": 200,
+    "type": "text/html; charset=utf-8",
+    "anchor_found": null
+  },
+  {
+    "url": "https://www.chunkapp.com/tos",
+    "status": 200,
+    "type": "text/html; charset=utf-8",
+    "anchor_found": null
+  }
+]
