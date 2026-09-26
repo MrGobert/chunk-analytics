@@ -82,6 +82,7 @@ const AUTH_EVENTS = [
   'Login_Completed',
   'SignUp',
   'Account Created',
+  'onboarding_v2_account_created',
 ];
 
 // Events that indicate a subscriber
@@ -123,6 +124,7 @@ export function categorizeUsers(events: MixpanelEvent[]): Map<string, 'visitor' 
         AUTH_EVENTS.includes(canonicalEvent) ||
         event.properties.$user_id !== undefined ||
         event.properties.user_id !== undefined ||
+        event.properties.account_id !== undefined ||
         event.properties.is_authenticated === true ||
         isServerEvent(event.properties)
       ) {
@@ -580,11 +582,13 @@ export function platformOf(e: MixpanelEvent): string {
   const os = (props.$os as string) || '';
   const mpLib = (props.mp_lib as string) || '';
   const platform = (props.platform as string) || '';
+  const family = String(props.device_family || '').toLowerCase();
+  const model = String(props.$model || '').toLowerCase();
   if (mpLib === 'web' || platform === 'web') return 'Web';
   if (os === 'macOS' || platform === 'macOS') return 'macOS';
-  if (os === 'iPadOS') return 'iPadOS';
-  if (os === 'iOS' || platform === 'iOS') return 'iOS';
   if (os === 'visionOS' || platform === 'visionOS') return 'visionOS';
+  if (os === 'iPadOS' || platform === 'iPadOS' || family === 'ipad' || family === 'tablet' || model.startsWith('ipad')) return 'iPadOS';
+  if (os === 'iOS' || platform === 'iOS') return 'iOS';
   return 'Other';
 }
 
@@ -616,11 +620,13 @@ export function filterByPlatform(
     }
 
     if (platform === 'iOS') {
-      return eventPlatform === 'iOS' || props.$os === 'iOS' || props.$os === 'iPadOS';
+      // Preserve the historical global iOS umbrella; acquisition/journey cohorts
+      // intentionally use exact signup platformOf attribution for iPhone/iPad.
+      return ['iOS', 'iPadOS'].includes(platformOf(e));
     }
 
     if (platform === 'iPadOS') {
-      return props.$os === 'iPadOS';
+      return platformOf(e) === 'iPadOS';
     }
 
     if (platform === 'macOS') {

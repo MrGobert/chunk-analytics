@@ -3,11 +3,14 @@ import {
   fetchMixpanelEvents,
   filterByUserType,
   getLastUpdated,
+  platformOf,
   UserType,
 } from '@/lib/mixpanel';
 import { getDateRange, getDaysInRange, formatDate, safeDiv } from '@/lib/utils';
 import { buildFunnel, uniqueUsersFor } from '@/lib/funnel';
 import { MixpanelEvent } from '@/types/mixpanel';
+import { getJourneySnapshot } from '@/lib/journey-server';
+import { journeyAccountResolver, orderedAccountCounts } from '@/lib/journey';
 import {
   marketingIdentityLinks,
   marketingJourneyId,
@@ -34,16 +37,9 @@ const ONBOARDING_AUTH_EVENTS = ['onboarding_v2_authentication_completed', 'onboa
 const FIRST_RUN_PAYWALL_SOURCE = 'automatic_first_query';
 
 function getPlatformGroup(e: MixpanelEvent): PlatformGroup | null {
-  const props = e.properties;
-  const os = String(props.$os || '');
-  const mpLib = String(props.mp_lib || '');
-  const platform = String(props.platform || '');
-
-  if (mpLib === 'web' || platform === 'web') return 'web';
-  if (os === 'iPadOS') return 'iPadOS';
-  if (os === 'visionOS' || platform === 'visionOS') return 'visionOS';
-  if (os === 'macOS' || platform === 'macOS') return 'macOS';
-  if (os === 'iOS' || platform === 'iOS') return 'iOS';
+  const platform = platformOf(e);
+  if (platform === 'Web') return 'web';
+  if (['iOS', 'iPadOS', 'macOS', 'visionOS'].includes(platform)) return platform as PlatformGroup;
   return null;
 }
 
@@ -59,7 +55,7 @@ function buildDailyData(
   events: MixpanelEvent[],
   days: string[],
   matchers: { key: string; match: (event: MixpanelEvent) => boolean }[],
-  identityLinks?: Map<string, string>,
+  identityLinks?: Map<string, string> | ((event: MixpanelEvent) => string),
 ) {
   return days.map((date) => {
     const dayEvents = events.filter(
@@ -70,7 +66,7 @@ function buildDailyData(
       const matchingEvents = dayEvents.filter(matcher.match);
       row[matcher.key] = identityLinks
         ? new Set(
-            matchingEvents.map((event) => marketingJourneyId(event, identityLinks)),
+            matchingEvents.map((event) => typeof identityLinks === 'function' ? identityLinks(event) : marketingJourneyId(event, identityLinks)),
           ).size
         : usersFor(dayEvents, matcher.match).size;
     }
@@ -180,6 +176,8 @@ function buildWebMetrics(events: MixpanelEvent[]) {
 }
 
 function buildAppleMetrics(events: MixpanelEvent[]) {
+  const accountOf = journeyAccountResolver(events);
+  events = events.map((event) => ({ ...event, properties: { ...event.properties, distinct_id: accountOf(event) } }));
   const onboardingEvents = events.filter(
     (event) => event.properties.onboarding_entry_mode !== 'returning_gate',
   );
@@ -234,30 +232,22 @@ function buildAppleMetrics(events: MixpanelEvent[]) {
     events,
     (event) => event.event === 'Paywall_Viewed' && event.properties.source === FIRST_RUN_PAYWALL_SOURCE,
   );
-  const purchaseStarted = usersFor(
-    events,
-    (event) => event.event === 'Purchase_Initiated' && event.properties.source === FIRST_RUN_PAYWALL_SOURCE,
-  );
-  const planSelected = usersFor(
-    events,
-    (event) => event.event === 'Plan_Selected' && event.properties.source === FIRST_RUN_PAYWALL_SOURCE,
-  );
   const subscribed = usersFor(
     events,
     (event) => PURCHASE_EVENTS.includes(event.event) && event.properties.source === FIRST_RUN_PAYWALL_SOURCE,
   );
 
   return {
-    funnel: buildFunnel([
-      { name: 'Onboarding Started', count: started.size },
-      { name: 'Auth Gate Reached', count: gateUsers.size },
-      { name: 'Account Created', count: accountCreated.size },
-      { name: 'Onboarding Completed', count: completed.size },
-      { name: 'First-Query Paywall', count: paywallUsers.size },
-      { name: 'Plan Selected', count: planSelected.size },
-      { name: 'Purchase Started', count: purchaseStarted.size },
-      { name: 'Subscribed', count: subscribed.size },
-    ]),
+    funnel: buildFunnel(orderedAccountCounts([
+      { name: 'Onboarding Started', events: onboardingEvents.filter((event) => ONBOARDING_START_EVENTS.includes(event.event)) },
+      { name: 'Auth Gate Reached', events: screenEvents.filter((event) => event.properties.screen === 'paper_gate') },
+      { name: 'Account Created', events: events.filter((event) => [...SIGNUP_EVENTS, 'onboarding_v2_account_created'].includes(event.event)) },
+      { name: 'Onboarding Completed', events: onboardingEvents.filter((event) => ONBOARDING_COMPLETE_EVENTS.includes(event.event)) },
+      { name: 'First-Query Paywall', events: events.filter((event) => event.event === 'Paywall_Viewed' && event.properties.source === FIRST_RUN_PAYWALL_SOURCE) },
+      { name: 'Plan Selected', events: events.filter((event) => event.event === 'Plan_Selected' && event.properties.source === FIRST_RUN_PAYWALL_SOURCE) },
+      { name: 'Purchase Started', events: events.filter((event) => event.event === 'Purchase_Initiated' && event.properties.source === FIRST_RUN_PAYWALL_SOURCE) },
+      { name: 'Checkout Completed', events: events.filter((event) => PURCHASE_EVENTS.includes(event.event) && event.properties.source === FIRST_RUN_PAYWALL_SOURCE) },
+    ], (event) => event.properties.distinct_id)),
     statCards: [
       { label: 'Onboarding Completion', value: safeDiv(completed.size, started.size), format: 'percentage' as const },
       { label: 'Gate Reach Rate', value: safeDiv(gateUsers.size, started.size), format: 'percentage' as const },
@@ -294,8 +284,11 @@ export async function GET(request: NextRequest) {
       : 'web';
 
     const dateRange = from && to ? { from, to } : getDateRange(range);
-    const allEvents = await fetchMixpanelEvents(dateRange.from, dateRange.to);
-    const events = filterByUserType(allEvents, userType).filter(
+    const native = platform === 'web' ? null : await getJourneySnapshot({ dateRange, platform, userType });
+    const allEvents = native ? native.events : await fetchMixpanelEvents(dateRange.from, dateRange.to);
+    const nativeAccountOf = native ? journeyAccountResolver(allEvents) : null;
+    const classified = nativeAccountOf ? allEvents.map((event) => ({ ...event, properties: { ...event.properties, distinct_id: nativeAccountOf(event) } })) : allEvents;
+    const events = filterByUserType(classified, userType).filter(
       (event) => getPlatformGroup(event) === platform,
     );
     const days = getDaysInRange(dateRange.from, dateRange.to);
@@ -325,25 +318,38 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    const apple = buildAppleMetrics(events);
+    const accountOf = journeyAccountResolver(allEvents);
+    const selected = new Set(events.filter((event) => [...SIGNUP_EVENTS, 'onboarding_v2_account_created'].includes(event.event) && formatDate(new Date(event.properties.time * 1000)) <= dateRange.to).map(accountOf));
+    const cohortEvents = allEvents.filter((event) => selected.has(accountOf(event)));
+    const apple = buildAppleMetrics(cohortEvents);
+    const journey = native!.metrics;
     return NextResponse.json({
       platform,
-      subtitle: 'Paper onboarding → signup → first-query paywall → subscription',
-      funnel: apple.funnel,
-      statCards: apple.statCards,
-      dailyData: buildDailyData(events, days, [
+      subtitle: 'Same-account signup → successful value → paywall → checkout within 30 days; mature cohorts only. Checkouts include trials.',
+      funnel: journey.funnel,
+      legacyFunnel: apple.funnel,
+      journey,
+      dataUnavailable: native!.status.dataUnavailable,
+      servedStale: native!.status.servedStale,
+      statCards: [
+        { label: 'New Accounts', value: journey.signups, format: 'number' },
+        { label: 'Tour Viewed', value: journey.tour.viewed, format: 'number' },
+        { label: 'Value Delivered ≤24h', value: journey.successful24h, format: 'number' },
+        { label: 'Mature 30-Day Accounts', value: journey.eligible30d, format: 'number' },
+      ],
+      dailyData: buildDailyData(cohortEvents, days, [
         { key: 'onboardingStarted', match: (event) => ONBOARDING_START_EVENTS.includes(event.event) && event.properties.onboarding_entry_mode !== 'returning_gate' },
         { key: 'gateReached', match: (event) => event.event === ONBOARDING_SCREEN_EVENT && event.properties.screen === 'paper_gate' && event.properties.onboarding_entry_mode !== 'returning_gate' },
         { key: 'signup', match: (event) => SIGNUP_EVENTS.includes(event.event) || event.event === 'onboarding_v2_account_created' },
-        { key: 'paywall', match: (event) => event.event === 'Paywall_Viewed' && event.properties.source === FIRST_RUN_PAYWALL_SOURCE },
-        { key: 'subscriber', match: (event) => PURCHASE_EVENTS.includes(event.event) && event.properties.source === FIRST_RUN_PAYWALL_SOURCE },
-      ]),
+        { key: 'paywall', match: (event) => event.event === 'Paywall_Viewed' },
+        { key: 'subscriber', match: (event) => PURCHASE_EVENTS.includes(event.event) },
+      ], accountOf),
       dailyLines: [
         { key: 'onboardingStarted', color: '#f59e0b', name: 'Onboarding Started' },
         { key: 'gateReached', color: '#8b5cf6', name: 'Auth Gate Reached' },
         { key: 'signup', color: '#3b82f6', name: 'Account Created' },
-        { key: 'paywall', color: '#ec4899', name: 'First-Query Paywall' },
-        { key: 'subscriber', color: '#10b981', name: 'Subscribed' },
+        { key: 'paywall', color: '#ec4899', name: 'Paywall Viewed (all sources)' },
+        { key: 'subscriber', color: '#10b981', name: 'Checkout Completed (includes trials)' },
       ],
       appleOnboarding: apple.onboarding,
       lastUpdated: getLastUpdated(),

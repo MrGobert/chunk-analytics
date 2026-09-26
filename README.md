@@ -1,5 +1,7 @@
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
+Native onboarding and conversion metrics are documented in [Native new-user measurement](docs/native-journey.md), including the event contract, cohort maturity, platform attribution, and revenue limitations.
+
 ## Getting Started
 
 First, run the development server:

@@ -81,6 +81,10 @@ export interface AcquisitionFunnelMetrics {
   dailyData: Record<string, string | number>[];
   dailyLines: { key: string; color: string; name: string }[];
   appleOnboarding?: AppleOnboardingMetrics;
+  journey?: JourneyMetrics;
+  legacyFunnel?: FunnelStep[];
+  dataUnavailable?: boolean;
+  servedStale?: boolean;
   topPages?: { page: string; visits: number }[];
   webPageAttribution?: {
     page: string;
@@ -782,6 +786,40 @@ export interface ActivationMetrics {
   weeklyTrend: { week: string; signups: number; rate: number }[];
   dateRange: DateRange;
   lastUpdated: string;
+}
+
+export interface JourneySummary {
+  signups: number;
+  instrumentedSignups: number;
+  eligible24h: number;
+  successful24h: number;
+  successfulValueRate: number | null;
+  eligible7d: number;
+  nonChat7d: number;
+  nonChatRate: number | null;
+  eligibleD7: number;
+  returnedD7: number;
+  returnD7Rate: number | null;
+  eligible30d: number;
+}
+
+export interface JourneyMetrics extends JourneySummary {
+  medianMinutesToValue: number | null;
+  byPlatform: ({ name: string } & JourneySummary)[];
+  byDeviceFamily: ({ name: string } & JourneySummary)[];
+  byJourneyVersion: ({ name: string } & JourneySummary)[];
+  funnel: FunnelStep[];
+  tour: { viewed: number; dismissed: number; actions: { name: string; accounts: number }[]; pages: { name: string; accounts: number }[] };
+  paywallSources: { source: string; viewed: number; dismissed: number; checkouts: number }[];
+  clientCheckouts30d: { trials: number; nonTrial: number; unknown: number };
+  paidConversion30d: number | null;
+  revenuePerNewAccount30d: number | null;
+  revenueUnavailableReason: string;
+  dateRange: DateRange;
+  observedThrough: string;
+  dataUnavailable?: boolean;
+  servedStale?: boolean;
+  lastUpdated?: string;
 }
 
 export interface CaptureMonitorsMetrics {

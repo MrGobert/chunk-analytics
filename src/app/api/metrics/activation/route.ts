@@ -12,6 +12,8 @@ import {
 import { getDateRange, formatDate } from '@/lib/utils';
 import { buildFunnel } from '@/lib/funnel';
 import { KEY_ACTION_EVENTS } from '@/lib/feature-categories';
+import { journeyAccountResolver, journeyObservationRange } from '@/lib/journey';
+import { deduplicateMixpanelEvents } from '@/lib/mixpanel-events';
 
 const SIGNUP = ['Signup_Completed', 'SignUp', 'Account Created'];
 // What counts as activation — single source of truth (canonical names), shared
@@ -28,6 +30,7 @@ const ACTIVATION_EVENTS = [
   ...SESSION,
   'First_Run_Onboarding_Completed',
   'First_Run_Onboarding_Skipped',
+  '$identify', '$create_alias',
 ];
 
 const DAY = 86400;
@@ -61,8 +64,12 @@ export async function GET(request: NextRequest) {
     const platform = searchParams.get('platform') || 'all';
 
     const dateRange = from && to ? { from, to } : getDateRange(range);
-    const raw = await fetchMixpanelEventsFiltered(dateRange.from, dateRange.to, ACTIVATION_EVENTS);
-    const events = filterByPlatform(raw, platform);
+    const observation = journeyObservationRange(dateRange, Date.now() / 1000, 2);
+    const raw = deduplicateMixpanelEvents(await fetchMixpanelEventsFiltered(dateRange.from, observation.to, ACTIVATION_EVENTS));
+    const accountOf = journeyAccountResolver(raw);
+    const selectedAccounts = new Set(filterByPlatform(raw, platform).filter((event) => SIGNUP.includes(event.event)).map(accountOf));
+    // Select by signup platform, then follow the account on all devices.
+    const events = raw.filter((event) => selectedAccounts.has(accountOf(event)));
 
     // Right-censor: only count signups with ≥24h of observable window. Observation
     // extends to "now" (the latest we can see), so a signup is eligible once it is
@@ -73,7 +80,9 @@ export async function GET(request: NextRequest) {
     const signups = new Map<string, { time: number; platform: string; method: string }>();
     for (const e of events) {
       if (!SIGNUP.includes(normalizeEventName(e.event)) && !SIGNUP.includes(e.event)) continue;
-      const uid = e.properties.distinct_id;
+      const signupDate = formatDate(new Date(e.properties.time * 1000));
+      if (signupDate < dateRange.from || signupDate > dateRange.to) continue;
+      const uid = accountOf(e);
       const t = e.properties.time as number;
       const existing = signups.get(uid);
       if (!existing || t < existing.time) {
@@ -91,7 +100,7 @@ export async function GET(request: NextRequest) {
     const onboarding = new Map<string, 'completed' | 'skipped'>();
 
     for (const e of events) {
-      const uid = e.properties.distinct_id;
+      const uid = accountOf(e);
       const canonical = normalizeEventName(e.event);
       const t = e.properties.time as number;
       if (KEY_ACTIONS.has(canonical) || KEY_ACTION_FETCH.includes(e.event)) {

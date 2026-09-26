@@ -5,6 +5,7 @@ import { useDashboardFilters } from '@/hooks/useDashboardFilters';
 import PageHeader from '@/components/layout/PageHeader';
 import StatCard from '@/components/cards/StatCard';
 import ChartCard from '@/components/cards/ChartCard';
+import JourneyMetricsPanel from '@/components/cards/JourneyMetricsPanel';
 import LineChart from '@/components/charts/LineChart';
 import FunnelChart from '@/components/charts/FunnelChart';
 import BarChart from '@/components/charts/BarChart';
@@ -118,11 +119,20 @@ export default function AcquisitionPage() {
             })}
           </div>
 
+          {metrics.dataUnavailable && <p className="text-ember-deep mb-6">Mixpanel data is unavailable. Counts are not an observed zero.</p>}
+          {metrics.journey && <JourneyMetricsPanel data={metrics.journey} />}
+
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
             {metrics.statCards.map((card) => (
               <StatCard key={card.label} title={card.label} value={card.value} format={card.format ?? 'percentage'} icon={<Rocket className="w-5 h-5" />} />
             ))}
           </div>
+
+          {metrics.legacyFunnel && metrics.legacyFunnel.some((step) => step.count > 0) && (
+            <div className="my-6"><ChartCard title="Legacy First-Query Acquisition" subtitle="Historical source automatic_first_query; sequential accounts, preserved separately from the new journey">
+              <FunnelChart data={metrics.legacyFunnel} />
+            </ChartCard></div>
+          )}
 
           <div className="grid grid-cols-1 gap-6 mb-8">
             <ChartCard title={`${PLATFORM_TABS.find((t) => t.key === platformGroup)?.label} Acquisition Funnel`} subtitle={metrics.subtitle}>

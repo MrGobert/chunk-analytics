@@ -12,7 +12,8 @@ import PieChart from '@/components/charts/PieChart';
 import LineChart from '@/components/charts/LineChart';
 import { SkeletonPage } from '@/components/ui/Skeleton';
 import { useAnalytics } from '@/hooks/useAnalytics';
-import type { ActivationMetrics } from '@/types/mixpanel';
+import type { ActivationMetrics, JourneyMetrics } from '@/types/mixpanel';
+import JourneyMetricsPanel from '@/components/cards/JourneyMetricsPanel';
 import { chart } from '@/lib/chartTheme';
 import { Zap, Clock, Target, Flag } from 'lucide-react';
 
@@ -22,6 +23,7 @@ export default function ActivationPage() {
 
   const { data, isLoading, isRefreshing, lastUpdated, error } =
     useAnalytics<ActivationMetrics>('/api/metrics/activation', { range: dateRange, platform });
+  const { data: journey, error: journeyError } = useAnalytics<JourneyMetrics>('/api/metrics/journey', { range: dateRange, platform });
 
   const hasAnimated = useRef(false);
   useEffect(() => {
@@ -51,7 +53,7 @@ export default function ActivationPage() {
     <div ref={containerRef} className="animate-in fade-in duration-300">
       <PageHeader
         title="Activation"
-        subtitle="Do new signups reach first value within 24 hours?"
+        subtitle="Successful outcomes and historical first recorded actions, measured separately"
         dateRange={dateRange}
         onDateRangeChange={setDateRange}
         platform={platform}
@@ -59,6 +61,11 @@ export default function ActivationPage() {
         lastUpdated={lastUpdated}
         isRefreshing={isRefreshing}
       />
+
+      {journeyError && <p className="text-ember-deep mb-6">Successful-value metrics unavailable: {journeyError}</p>}
+      {journey && platform !== 'web' && <JourneyMetricsPanel data={journey} />}
+      <h2 className="font-display text-2xl text-ink mb-2">Historical Action-Based Activation</h2>
+      <p className="text-sm text-ink-soft mb-6">The existing definition is unchanged: a recorded key action such as sending a search or creating a collection. It does not establish a successful result.</p>
 
       {/* KPI row */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
@@ -89,7 +96,7 @@ export default function ActivationPage() {
       {/* Time-to-first-action + by platform */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
         <div className="card-animate">
-          <ChartCard title="Time to First Action" subtitle="How fast new users reach value">
+          <ChartCard title="Time to First Action" subtitle="How fast new users record a key action">
             <BarChart data={data.timeToFirstAction} xKey="bucket" yKey="count" color={chart.series[0]} />
           </ChartCard>
         </div>

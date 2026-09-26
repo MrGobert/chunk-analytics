@@ -7,6 +7,7 @@ import {
   filterByPlatform,
   filterByUserType,
   getLastUpdated,
+  platformOf,
   UserType,
 } from '@/lib/mixpanel';
 import { buildFunnel } from '@/lib/funnel';
@@ -31,16 +32,6 @@ const PURCHASE_EVENTS = new Set(['Purchase_Completed', 'Purchase Completed', '$a
 
 function uniq(events: MixpanelEvent[], predicate: (e: MixpanelEvent) => boolean): number {
   return new Set(events.filter(predicate).map((e) => e.properties.distinct_id)).size;
-}
-
-function platformGroup(e: MixpanelEvent): 'web' | 'iOS' | 'macOS' | 'other' {
-  const os = (e.properties.$os as string) || '';
-  const mpLib = (e.properties.mp_lib as string) || '';
-  const platform = (e.properties.platform as string) || '';
-  if (mpLib === 'web' || platform === 'web') return 'web';
-  if (os === 'macOS' || platform === 'macOS') return 'macOS';
-  if (os === 'iOS' || os === 'iPadOS' || os === 'visionOS' || platform === 'iOS' || platform === 'visionOS') return 'iOS';
-  return 'other';
 }
 
 export async function GET(request: NextRequest) {
@@ -82,9 +73,9 @@ export async function GET(request: NextRequest) {
     const dismissalRate = paywallViews > 0 ? dismissals / paywallViews : 0;
 
     // ---- By platform ----
-    const platforms: ('web' | 'iOS' | 'macOS')[] = ['web', 'iOS', 'macOS'];
+    const platforms = ['web', 'iOS', 'iPadOS', 'macOS', 'visionOS'];
     const byPlatform = platforms.map((p) => {
-      const pe = events.filter((e) => platformGroup(e) === p);
+      const pe = events.filter((e) => platformOf(e) === (p === 'web' ? 'Web' : p));
       const views = uniq(pe, isPaywallView);
       const buys = uniq(pe, isPurchase);
       return { platform: p, views, purchases: buys, conversion: views > 0 ? buys / views : 0 };
