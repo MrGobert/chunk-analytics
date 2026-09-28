@@ -12,8 +12,10 @@ import BarChart from '@/components/charts/BarChart';
 import PieChart from '@/components/charts/PieChart';
 import LineChart from '@/components/charts/LineChart';
 import FunnelChart from '@/components/charts/FunnelChart';
+import DataTable from '@/components/charts/DataTable';
 import FeatureTabBar from '@/components/features/FeatureTabBar';
 import { chart } from '@/lib/chartTheme';
+import { formatPercentage } from '@/lib/utils';
 import { SkeletonPage, SkeletonStatCard, SkeletonChartCard } from '@/components/ui/Skeleton';
 import { useAnalytics } from '@/hooks/useAnalytics';
 import type {
@@ -26,6 +28,8 @@ import type {
   SharingMetrics,
   ConnectorsMetrics,
   ConnectionsMetrics,
+  ChatStartersMetrics,
+  ChatStarterRateRow,
 } from '@/types/mixpanel';
 
 // ─── Color palette ──────────────────────────────────────────────────────────
@@ -153,6 +157,270 @@ function SearchSection({ dateRange, platform, userType }: FilterProps) {
             <BarChart data={responseTimeData} xKey="model" yKey="p90" horizontal color={chart.series[3]} />
           ) : (
             <div className="empty-state h-64">No response-time data captured</div>
+          )}
+        </ChartCard>
+      </div>
+    </div>
+  );
+}
+
+// ─── Starters Tab ───────────────────────────────────────────────────────────
+
+/** 0–1 fraction → percentage points (one decimal) for bar charts. */
+const toPercentPoints = (fraction: number) => Math.round(fraction * 1000) / 10;
+
+const percentCell = (value: unknown) => formatPercentage(Number(value));
+
+/** A row with no Draft_Sent falls back to follow-ups per tap; mark it. */
+function FollowupRateCell({ row }: { row: ChatStarterRateRow }) {
+  if (row.followupBasis === 'tapped' && row.followups > 0) {
+    return <span title="No Draft_Sent in this row, so this is follow-ups per tap">{formatPercentage(row.followupRate)}*</span>;
+  }
+  return <>{formatPercentage(row.followupRate)}</>;
+}
+
+function ChatStartersSection({ dateRange, platform, userType }: FilterProps) {
+  const { data: metrics, isLoading, error } = useAnalytics<ChatStartersMetrics>(
+    '/api/metrics/chat-starters',
+    { range: dateRange, platform, userType },
+  );
+
+  if (isLoading || !metrics) {
+    return error && !isLoading ? (
+      <div className="mt-8 empty-state h-64">Starter metrics couldn’t load ({error}). Retry shortly.</div>
+    ) : (
+      <TabSkeleton />
+    );
+  }
+
+  const count = (n: number) => n.toLocaleString();
+  const intentTapThrough = metrics.byIntent
+    .filter((row) => row.shown > 0)
+    .map((row) => ({ intent: row.key, tapThrough: toPercentPoints(row.tapThrough) }));
+  const slotTapThrough = metrics.bySlot
+    .filter((row) => row.shown > 0)
+    .map((row) => ({
+      slot: /^\d+$/.test(row.key) ? `slot ${row.key}` : row.key,
+      tapThrough: toPercentPoints(row.tapThrough),
+    }));
+  const followupSubtitle =
+    metrics.followupBasis === 'tapped' && metrics.tapped > 0
+      ? `${count(metrics.followups)} follow-ups ÷ ${count(metrics.tapped)} taps (no sends recorded)`
+      : `${count(metrics.followups)} follow-ups ÷ ${count(metrics.draftSent)} sent`;
+  const validationSubtitle =
+    metrics.validationFailedByReason.length > 0
+      ? metrics.validationFailedByReason.map((r) => `${r.name} ${count(r.value)}`).join(' · ')
+      : 'No failed context checks';
+
+  return (
+    <div className="mt-8">
+      {metrics.dataUnavailable && <DataUnavailableBanner />}
+      {!metrics.dataUnavailable && metrics.servedStale && <StaleDataBanner dataAsOf={metrics.dataAsOf} />}
+
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+        <StatCard
+          title="Cards Shown"
+          value={metrics.cardsShown}
+          subtitle={`Personalized · ${count(metrics.uniqueViewers)} user${metrics.uniqueViewers === 1 ? '' : 's'}`}
+        />
+        <StatCard
+          title="Tap-through"
+          value={metrics.tapThrough}
+          format="percentage"
+          subtitle={`${count(metrics.tapped)} taps ÷ ${count(metrics.cardsShown)} shown`}
+        />
+        <StatCard title="Follow-up Rate" value={metrics.followupRate} format="percentage" subtitle={followupSubtitle} />
+        <StatCard
+          title="Not Interested"
+          value={metrics.notInterestedRate}
+          format="percentage"
+          invertTrend
+          subtitle={`${count(metrics.notInterested)} dismissed ÷ ${count(metrics.cardsShown)} shown`}
+        />
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+        <StatCard
+          title="Skeleton Timeouts"
+          value={metrics.skeletonTimeoutRate}
+          format="percentage"
+          invertTrend
+          subtitle={
+            metrics.firstPaintFetches > 0
+              ? `${count(metrics.skeletonTimeouts)} of ${count(metrics.firstPaintFetches)} first paints fell back to generic`
+              : 'No first-paint data yet'
+          }
+        />
+        <StatCard title="“Why this?” Opened" value={metrics.whyOpened} subtitle="Card explanations opened" />
+        <StatCard title="More Ideas Tapped" value={metrics.moreTapped} subtitle="Paged to the next set of cards" />
+        <StatCard title="Validation Failures" value={metrics.validationFailed} subtitle={validationSubtitle} />
+      </div>
+
+      <div className="grid grid-cols-1 gap-6 mb-8">
+        <ChartCard
+          title="Personalized Card Funnel"
+          subtitle="Event counts — Shown → Tapped → Draft_Sent → Followup"
+        >
+          {metrics.funnel.some((step) => step.count > 0) ? (
+            <FunnelChart data={metrics.funnel} />
+          ) : (
+            <div className="empty-state h-64">No personalized cards yet</div>
+          )}
+        </ChartCard>
+      </div>
+
+      <div className="grid grid-cols-1 gap-6 mb-8">
+        <ChartCard
+          title="By Intent"
+          subtitle="Personalized cards; cards without an intent (older clients, or before intents shipped) are none (legacy)"
+          bodyClassName="h-auto"
+        >
+          {metrics.byIntent.length > 0 ? (
+            <DataTable
+              data={metrics.byIntent}
+              columns={[
+                { key: 'key', header: 'Intent' },
+                { key: 'shown', header: 'Shown', numeric: true },
+                { key: 'tapped', header: 'Tapped', numeric: true },
+                { key: 'tapThrough', header: 'Tap-through', numeric: true, render: percentCell },
+                { key: 'followups', header: 'Follow-ups', numeric: true },
+                { key: 'followupRate', header: 'Follow-up rate', numeric: true, render: (_, row) => <FollowupRateCell row={row} /> },
+                { key: 'notInterested', header: 'Not interested', numeric: true },
+                { key: 'notInterestedRate', header: 'Not-interested rate', numeric: true, render: percentCell },
+              ]}
+            />
+          ) : (
+            <div className="empty-state py-10">No personalized cards yet</div>
+          )}
+        </ChartCard>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+        <ChartCard title="Tap-through by Intent" subtitle="Tapped ÷ shown, personalized cards (%)">
+          {intentTapThrough.length > 0 ? (
+            <BarChart data={intentTapThrough} xKey="intent" yKey="tapThrough" horizontal color={chart.series[0]} />
+          ) : (
+            <div className="empty-state h-64">No personalized cards yet</div>
+          )}
+        </ChartCard>
+        <ChartCard title="Tap-through by Slot" subtitle="Tapped ÷ shown by slot_index, 0 = the first card (%)">
+          {slotTapThrough.length > 0 ? (
+            <BarChart data={slotTapThrough} xKey="slot" yKey="tapThrough" horizontal color={chart.series[1]} />
+          ) : (
+            <div className="empty-state h-64">No personalized cards yet</div>
+          )}
+        </ChartCard>
+      </div>
+
+      <div className="grid grid-cols-1 gap-6 mb-8">
+        <ChartCard
+          title="Position Bias"
+          subtitle="Personalized cards by slot_index (0-based position on the visible page)"
+          bodyClassName="h-auto"
+        >
+          {metrics.bySlot.length > 0 ? (
+            <DataTable
+              data={metrics.bySlot}
+              columns={[
+                { key: 'key', header: 'Slot' },
+                { key: 'shown', header: 'Shown', numeric: true },
+                { key: 'shareOfShown', header: 'Share of shown', numeric: true, render: percentCell },
+                { key: 'tapped', header: 'Tapped', numeric: true },
+                { key: 'tapThrough', header: 'Tap-through', numeric: true, render: percentCell },
+                { key: 'followupRate', header: 'Follow-up rate', numeric: true, render: (_, row) => <FollowupRateCell row={row} /> },
+                { key: 'notInterested', header: 'Not interested', numeric: true },
+                { key: 'notInterestedRate', header: 'Not-interested rate', numeric: true, render: percentCell },
+              ]}
+            />
+          ) : (
+            <div className="empty-state py-10">No personalized cards yet</div>
+          )}
+        </ChartCard>
+      </div>
+
+      <div className="grid grid-cols-1 gap-6 mb-8">
+        <ChartCard
+          title="Bundle Age"
+          subtitle="Personalized cards by the age of their bundle when shown, youngest first"
+          bodyClassName="h-auto"
+        >
+          {metrics.byBundleAge.length > 0 ? (
+            <DataTable
+              data={metrics.byBundleAge}
+              columns={[
+                { key: 'key', header: 'Bundle age' },
+                { key: 'shown', header: 'Shown', numeric: true },
+                { key: 'shareOfShown', header: 'Share of shown', numeric: true, render: percentCell },
+                { key: 'tapped', header: 'Tapped', numeric: true },
+                { key: 'tapThrough', header: 'Tap-through', numeric: true, render: percentCell },
+                { key: 'followupRate', header: 'Follow-up rate', numeric: true, render: (_, row) => <FollowupRateCell row={row} /> },
+                { key: 'notInterestedRate', header: 'Not-interested rate', numeric: true, render: percentCell },
+              ]}
+            />
+          ) : (
+            <div className="empty-state py-10">No personalized cards yet</div>
+          )}
+        </ChartCard>
+      </div>
+
+      <div className="grid grid-cols-1 gap-6 mb-8">
+        <ChartCard title="Personalized vs Generic" subtitle="Tap-through by platform" bodyClassName="h-auto">
+          {metrics.byPlatform.length > 0 ? (
+            <DataTable
+              data={metrics.byPlatform}
+              columns={[
+                { key: 'platform', header: 'Platform' },
+                { key: 'personalizedShown', header: 'Personalized shown', numeric: true },
+                { key: 'personalizedTapped', header: 'Personalized tapped', numeric: true },
+                { key: 'personalizedTapThrough', header: 'Personalized tap-through', numeric: true, render: percentCell },
+                { key: 'genericShown', header: 'Generic shown', numeric: true },
+                { key: 'genericTapped', header: 'Generic tapped', numeric: true },
+                { key: 'genericTapThrough', header: 'Generic tap-through', numeric: true, render: percentCell },
+              ]}
+            />
+          ) : (
+            <div className="empty-state py-10">No cards shown yet</div>
+          )}
+        </ChartCard>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+        <ChartCard title="Fetch Statuses" subtitle={`Chat_Starter_Fetched status · ${count(metrics.fetches)} fetches`}>
+          {metrics.fetchStatuses.length > 0 ? (
+            <PieChart data={metrics.fetchStatuses} colors={[...chart.series]} />
+          ) : (
+            <div className="empty-state h-64">No fetch events yet</div>
+          )}
+        </ChartCard>
+        <ChartCard title="First Paint" subtitle="What the cards first showed; generic_timeout = the skeleton timed out">
+          {metrics.firstPaints.length > 0 ? (
+            <BarChart data={metrics.firstPaints} xKey="name" yKey="value" horizontal color={chart.series[4]} />
+          ) : (
+            <div className="empty-state h-64">No first-paint data yet</div>
+          )}
+        </ChartCard>
+      </div>
+
+      <div className="grid grid-cols-1 gap-6">
+        <ChartCard
+          title="Top Generic Cards"
+          subtitle="Generic cards by tap-through; none (legacy) = cards without a generic_id"
+          bodyClassName="h-auto"
+        >
+          {metrics.topGenericCards.length > 0 ? (
+            <DataTable
+              data={metrics.topGenericCards}
+              columns={[
+                { key: 'key', header: 'Card' },
+                { key: 'shown', header: 'Shown', numeric: true },
+                { key: 'tapped', header: 'Tapped', numeric: true },
+                { key: 'tapThrough', header: 'Tap-through', numeric: true, render: percentCell },
+                { key: 'draftSent', header: 'Sent', numeric: true },
+                { key: 'followups', header: 'Follow-ups', numeric: true },
+              ]}
+            />
+          ) : (
+            <div className="empty-state py-10">No generic cards yet</div>
           )}
         </ChartCard>
       </div>
@@ -717,6 +985,8 @@ function TabContent({ activeTab, dateRange, platform, userType }: FilterProps & 
   switch (activeTab) {
     case 'search':
       return <SearchSection dateRange={dateRange} platform={platform} userType={userType} />;
+    case 'starters':
+      return <ChatStartersSection dateRange={dateRange} platform={platform} userType={userType} />;
     case 'research':
       return <ResearchSection dateRange={dateRange} platform={platform} userType={userType} />;
     case 'notes':

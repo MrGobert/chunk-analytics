@@ -998,6 +998,95 @@ export interface ProjectsMetrics {
   lastUpdated: string;
 }
 
+/**
+ * One row of a Starters breakdown (by intent, slot, bundle age or generic card).
+ * Counts are events; rates are 0–1 fractions, 0 when the denominator is 0.
+ * A type alias rather than an interface so DataTable accepts it as a row.
+ */
+export type ChatStarterRateRow = {
+  /** The enum value, or 'none (legacy)' when the client didn't send it, or 'other'. */
+  key: string;
+  shown: number;
+  tapped: number;
+  draftSent: number;
+  followups: number;
+  notInterested: number;
+  /** tapped / shown. */
+  tapThrough: number;
+  /** followups / draftSent, or followups / tapped when the row has no Draft_Sent. */
+  followupRate: number;
+  followupBasis: 'draft_sent' | 'tapped';
+  /** notInterested / shown. */
+  notInterestedRate: number;
+  /** This row's share of the Shown events in its table. */
+  shareOfShown: number;
+};
+
+/** Shown and Tapped per platform, personalized vs generic cards. */
+export type ChatStarterPlatformRow = {
+  platform: string;
+  personalizedShown: number;
+  personalizedTapped: number;
+  personalizedTapThrough: number;
+  genericShown: number;
+  genericTapped: number;
+  genericTapThrough: number;
+};
+
+/**
+ * Product → Features → Starters: the chat-starter cards above an empty chat
+ * (contract §8, 2026-09-27). Card metrics cover personalized cards
+ * (`personalized: true`) unless a field says otherwise.
+ */
+export interface ChatStartersMetrics {
+  /** Chat_Starter_Shown. */
+  cardsShown: number;
+  /** Distinct users shown a personalized card. */
+  uniqueViewers: number;
+  tapped: number;
+  draftSent: number;
+  followups: number;
+  notInterested: number;
+  /** tapped / cardsShown. */
+  tapThrough: number;
+  /** followups / draftSent, or followups / tapped when the window has no Draft_Sent. */
+  followupRate: number;
+  followupBasis: 'draft_sent' | 'tapped';
+  /** notInterested / cardsShown. */
+  notInterestedRate: number;
+  /** Event counts: Shown → Tapped → Draft_Sent → Followup. */
+  funnel: FunnelStep[];
+  /** Cards without an intent (older clients, or the server sent none) are 'none (legacy)'. */
+  byIntent: ChatStarterRateRow[];
+  /** 0-based slot_index on the visible page; position bias. */
+  bySlot: ChatStarterRateRow[];
+  /** bundle_age buckets, youngest first. */
+  byBundleAge: ChatStarterRateRow[];
+  /** Chat_Starter_Fetched (all fetches, not only personalized). */
+  fetches: number;
+  fetchStatuses: { name: string; value: number }[];
+  firstPaints: { name: string; value: number }[];
+  /** Fetches with first_paint set: the skeleton-timeout denominator. */
+  firstPaintFetches: number;
+  /** first_paint == generic_timeout. */
+  skeletonTimeouts: number;
+  skeletonTimeoutRate: number;
+  byPlatform: ChatStarterPlatformRow[];
+  /** Generic cards only, best tap-through first; cards without a generic_id last. */
+  topGenericCards: ChatStarterRateRow[];
+  whyOpened: number;
+  moreTapped: number;
+  validationFailed: number;
+  validationFailedByReason: { name: string; value: number }[];
+  dateRange: DateRange;
+  platform: string;
+  userType: string;
+  dataUnavailable?: boolean;
+  servedStale?: boolean;
+  dataAsOf?: string | null;
+  lastUpdated: string;
+}
+
 export interface MarketingMetrics {
   totalCTAClicks: number;
   tryForFreeClicks: number;
