@@ -32,9 +32,9 @@ except ImportError:
     sys.exit(1)
 
 RESEND_API_KEY = os.getenv("RESEND_API_KEY")
+from broadcast_settings import FROM_EMAIL, REPLY_TO, marketing_segment_id  # noqa: E402
 
 BROADCAST_NAME = "What's New — Summer 2026"
-SEGMENT_ID = "bd174a71-cae1-4af4-8795-a3115d832819"  # General
 
 
 def list_broadcasts():
@@ -70,9 +70,11 @@ def _resend_request(url, payload, method):
         return json.loads(response.read().decode())
 
 
-def update_broadcast(broadcast_id, subject, html, text):
+def update_broadcast(broadcast_id, subject, html, text, segment_id):
     # `subject`/`text` are documented update fields; fall back to html-only if rejected.
-    for payload in ({"html": html, "subject": subject, "text": text}, {"html": html}):
+    # Routing rides along so a draft saved for the old General segment moves to Marketing.
+    routing = {"segment_id": segment_id, "from": FROM_EMAIL, "reply_to": REPLY_TO}
+    for payload in ({**routing, "html": html, "subject": subject, "text": text}, {**routing, "html": html}):
         try:
             _resend_request(f"https://api.resend.com/broadcasts/{broadcast_id}", payload, 'PATCH')
             print(f"Success! Updated Broadcast ID: {broadcast_id}")
@@ -85,14 +87,14 @@ def update_broadcast(broadcast_id, subject, html, text):
     return False
 
 
-def create_broadcast(subject, html, text):
+def create_broadcast(subject, html, text, segment_id):
     base_payload = {
-        "segment_id": SEGMENT_ID,
+        "segment_id": segment_id,
         "name": BROADCAST_NAME,
         "subject": subject,
-        "from": "Chunk AI <info@chunkapp.com>",
+        "from": FROM_EMAIL,
         "html": html,
-        "reply_to": "info@chunkapp.com"
+        "reply_to": REPLY_TO
     }
     # `text` is a documented broadcast field; fall back without it if the API rejects it.
     for payload in ({**base_payload, "text": text}, base_payload):
@@ -129,7 +131,8 @@ if __name__ == "__main__":
         print("or add RESEND_API_KEY=... to .env.vercel and re-run.")
         sys.exit(1)
 
-    print(f"\nUsing segment: General ({SEGMENT_ID})")
+    segment_id = marketing_segment_id()
+    print(f"\nUsing segment: Marketing ({segment_id})")
     print("Checking for existing broadcast draft...")
     broadcasts = list_broadcasts()
     existing = next((b for b in broadcasts if BROADCAST_NAME in b.get('name', '')), None)
@@ -137,9 +140,9 @@ if __name__ == "__main__":
     if existing:
         print(f"Found existing draft: {existing['name']} (ID: {existing['id']})")
         print("Updating broadcast with new content...")
-        update_broadcast(existing['id'], subject, html, text)
+        update_broadcast(existing['id'], subject, html, text, segment_id)
     else:
         print("No existing draft found. Creating new broadcast draft...")
-        create_broadcast(subject, html, text)
+        create_broadcast(subject, html, text, segment_id)
 
     print("\nDraft only — nothing was sent. Review and send from the Resend dashboard.")

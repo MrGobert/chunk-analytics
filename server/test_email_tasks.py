@@ -333,7 +333,7 @@ class SendTaskTests(unittest.TestCase):
     def _run(self, stats, send_result=None, track_fails=False):
         fake_db = object()
         with patch.dict(sys.modules, {"firebase_setup": SimpleNamespace(db=fake_db)}), \
-             patch.object(email_tasks, "check_unsubscribed", return_value=False), \
+             patch.object(email_tasks, "marketing_blocked", return_value=None), \
              patch.object(email_tasks, "_compute_recap_stats", return_value=stats) as compute, \
              patch.object(email_tasks.email_service, "send_monthly_recap",
                           return_value=send_result or {"id": "re_123"}) as send, \
@@ -365,9 +365,11 @@ class SendTaskTests(unittest.TestCase):
         send.assert_called_once()
 
     def test_missing_user_id_skips(self):
-        with patch.object(email_tasks, "check_unsubscribed", return_value=False):
+        # No uid means no switch to check: the consent gate blocks the send.
+        with patch.object(email_tasks.email_service, "send_monthly_recap") as send:
             result = email_tasks.send_monthly_recap_task("james@example.org", "James")
         self.assertEqual(result["reason"], "no_user_id")
+        send.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -476,6 +478,164 @@ class CheckTaskTests(unittest.TestCase):
         self.assertEqual(result["candidates"], [{"uid": "uid1", "email": "a@real.org"}])
         dispatch.assert_not_called()
         docs[0].reference.update.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Marketing consent: which emails check it, and the check itself
+# ---------------------------------------------------------------------------
+
+import email_tracking  # noqa: E402
+
+# task name -> (email_service sender it calls, extra positional args after the name)
+MARKETING_TASKS = {
+    "send_winback_7day_task": ("send_winback_7day", ()),
+    "send_winback_30day_task": ("send_winback_30day", ()),
+    "send_day1_help_center_task": ("send_day1_help_center", ()),
+    "send_day3_artifacts_task": ("send_day3_artifacts", ()),
+    "send_day7_researcher_stories_task": ("send_day7_researcher_stories", ()),
+    "send_reengagement_14day_task": ("send_reengagement_14day", ()),
+    "send_signup_no_trial_nudge_task": ("send_signup_no_trial_nudge", ()),
+    "send_feature_announcement_task": ("send_feature_announcement", ("Feature", "What it does", "✨")),
+}
+ACCOUNT_TASKS = {
+    "send_trial_ending_task": ("send_trial_ending", (12,)),
+    "send_renewal_reminder_task": ("send_renewal_reminder", (7, "$9.99")),
+    "send_billing_issue_task": ("send_billing_issue", ()),
+    "send_subscription_expired_task": ("send_subscription_expired", ()),
+    # send_welcome_task is an account email too, but it raises NameError
+    # (_extract_first_name) before it sends, so it can't be exercised here.
+}
+
+
+def _call(task_name, extra):
+    task = getattr(email_tasks, task_name)
+    return task("ada@example.org", "Ada", *extra, user_id="uid1")
+
+
+class ConsentGateTests(unittest.TestCase):
+    def test_every_marketing_task_checks_consent_before_sending(self):
+        for task_name, (sender, extra) in MARKETING_TASKS.items():
+            with self.subTest(task=task_name), \
+                 patch.object(email_tasks, "marketing_blocked", return_value="opted_out") as gate, \
+                 patch.object(email_tasks.email_service, sender) as send:
+                result = _call(task_name, extra)
+            gate.assert_called_once_with("uid1", "ada@example.org")
+            send.assert_not_called()
+            self.assertEqual(result["reason"], "opted_out")
+
+    def test_a_consenting_account_gets_the_marketing_email(self):
+        for task_name, (sender, extra) in MARKETING_TASKS.items():
+            with self.subTest(task=task_name), \
+                 patch.object(email_tasks, "marketing_blocked", return_value=None), \
+                 patch.object(email_tasks.email_service, sender, return_value={"id": "e1"}) as send, \
+                 patch.object(email_tasks, "track_email_sent"):
+                result = _call(task_name, extra)
+            send.assert_called_once()
+            self.assertEqual(result["status"], "sent")
+
+    def test_an_unreadable_consent_never_sends(self):
+        # Fail closed: the error reaches Celery's autoretry instead of a send.
+        task_name, (sender, extra) = "send_day1_help_center_task", MARKETING_TASKS["send_day1_help_center_task"]
+        boom = email_tracking.MarketingConsentUnavailable("firestore down")
+        with patch.object(email_tasks, "marketing_blocked", side_effect=boom), \
+             patch.object(email_tasks.email_service, sender) as send:
+            with self.assertRaises(Exception):
+                email_tasks.send_day1_help_center_task.run("ada@example.org", "Ada", user_id="uid1")
+        send.assert_not_called()
+
+    def test_account_emails_ignore_marketing_opt_outs(self):
+        # A billing warning or a renewal reminder is not marketing.
+        for task_name, (sender, extra) in ACCOUNT_TASKS.items():
+            with self.subTest(task=task_name), \
+                 patch.object(email_tasks, "marketing_blocked", side_effect=AssertionError("checked consent")), \
+                 patch.object(email_tasks.email_service, sender, return_value={"id": "e1"}) as send, \
+                 patch.object(email_tasks, "track_email_sent"):
+                result = _call(task_name, extra)
+            send.assert_called_once()
+            self.assertEqual(result["status"], "sent")
+
+
+class FakeConsentDB:
+    """users/{uid} and emailUnsubscribes/{id} docs, by path."""
+
+    def __init__(self, docs, fail=False):
+        self.docs = docs
+        self.fail = fail
+
+    def collection(self, name):
+        return SimpleNamespace(document=lambda doc_id: SimpleNamespace(get=lambda: self._get(f"{name}/{doc_id}")))
+
+    def _get(self, path):
+        if self.fail:
+            raise RuntimeError("unavailable")
+        data = self.docs.get(path)
+        return SimpleNamespace(exists=data is not None, to_dict=lambda: data)
+
+
+class MarketingBlockedTests(unittest.TestCase):
+    def _blocked(self, docs, uid="u1", email="Ada@Example.org", fail=False):
+        with patch.object(email_tracking, "db", FakeConsentDB(docs, fail)):
+            return email_tracking.marketing_blocked(uid, email)
+
+    def test_a_consenting_account_may_be_emailed(self):
+        self.assertIsNone(self._blocked({"users/u1": {"isSubscribedToEmails": True}}))
+        self.assertIsNone(self._blocked({"users/u1": {}}))  # a missing field is consent
+
+    def test_the_settings_switch_blocks(self):
+        self.assertEqual(self._blocked({"users/u1": {"isSubscribedToEmails": False}}), "opted_out")
+
+    def test_an_address_record_blocks_in_any_letter_case(self):
+        for record in ("emailUnsubscribes/ada@example.org", "emailUnsubscribes/Ada@Example.org"):
+            with self.subTest(record=record):
+                self.assertEqual(self._blocked({"users/u1": {}, record: {}}), "unsubscribed")
+
+    def test_no_uid_or_no_account_blocks(self):
+        self.assertEqual(self._blocked({}, uid=None), "no_user_id")
+        self.assertEqual(self._blocked({}), "no_account")
+
+    def test_a_failed_read_raises_instead_of_allowing(self):
+        with self.assertRaises(email_tracking.MarketingConsentUnavailable):
+            self._blocked({}, fail=True)
+
+
+class SenderTests(unittest.TestCase):
+    def _send(self, email_type, to="ada+chunk@example.org", secret="test-secret"):
+        sent = {}
+        env = {"EMAIL_UNSUBSCRIBE_SECRET": secret} if secret else {}
+        with patch.dict("os.environ", env, clear=False), \
+             patch.object(email_service.httpx, "post",
+                          side_effect=lambda url, **kw: sent.update(kw) or MagicMock(status_code=200, json=lambda: {"id": "e1"})):
+            if not secret:
+                os_environ = __import__("os").environ
+                os_environ.pop("EMAIL_UNSUBSCRIBE_SECRET", None)
+            email_service.send_email(to, "s", "<p>{UNSUBSCRIBE_LINK_PLACEHOLDER}</p>", "t", email_type=email_type)
+        return sent["json"]
+
+    def test_marketing_comes_from_the_marketing_mailbox(self):
+        for email_type in sorted(email_service.MARKETING_EMAIL_TYPES):
+            with self.subTest(email_type=email_type):
+                payload = self._send(email_type)
+                self.assertEqual(payload["from"], email_service.MARKETING_FROM_EMAIL)
+                self.assertEqual(payload["reply_to"], email_service.MARKETING_REPLY_TO)
+        self.assertIn("meetchunk@chunkapp.com", email_service.MARKETING_FROM_EMAIL)
+
+    def test_account_email_stays_on_info(self):
+        for email_type in ("trial_ending", "renewal_reminder", "billing_issue", "subscription_expired", "welcome"):
+            with self.subTest(email_type=email_type):
+                payload = self._send(email_type)
+                self.assertEqual(payload["from"], email_service.FROM_EMAIL)
+                self.assertNotIn("reply_to", payload)
+
+    def test_a_plus_address_survives_the_unsubscribe_link(self):
+        payload = self._send("day1_help_center")
+        self.assertIn("email=ada%2Bchunk@example.org&", payload["headers"]["List-Unsubscribe"])
+        self.assertIn("email=ada%2Bchunk@example.org&amp;token=", payload["html"])
+        self.assertEqual(payload["headers"]["List-Unsubscribe-Post"], "List-Unsubscribe=One-Click")
+
+    def test_without_the_secret_there_is_no_unsubscribe_link(self):
+        payload = self._send("day1_help_center", secret=None)
+        self.assertEqual(payload["html"], "<p></p>")
+        self.assertNotIn("headers", payload)
 
 
 if __name__ == "__main__":

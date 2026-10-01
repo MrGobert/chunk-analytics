@@ -1,11 +1,19 @@
 """Focused checks for accidental delivery, duplicates, and read-back failures."""
 
+import os
+import subprocess
 import unittest
+from functools import partial
 from unittest.mock import Mock, patch
 
+import broadcast_settings
+from broadcast_settings import LEGACY_GENERAL_SEGMENT_ID, BroadcastConfigError, marketing_segment_id
 from create_chunk_260_broadcast import (
-    BROADCAST_NAME, DraftError, FROM_EMAIL, REPLY_TO, Resend, SEGMENT_ID, save_draft,
+    BROADCAST_NAME, DraftError, FROM_EMAIL, REPLY_TO, Resend, save_draft as _save_draft,
 )
+
+SEGMENT_ID = "seg-marketing"
+save_draft = partial(_save_draft, segment_id=SEGMENT_ID)
 
 
 class BroadcastDraftTests(unittest.TestCase):
@@ -16,7 +24,32 @@ class BroadcastDraftTests(unittest.TestCase):
             "subject": "subject", "html": "html", "text": "text",
             "scheduled_at": None, "sent_at": None,
         }
-        self.segment = {"id": SEGMENT_ID, "name": "General"}
+        self.segment = {"id": SEGMENT_ID, "name": "Marketing"}
+
+    def test_marketing_comes_from_the_marketing_mailbox(self):
+        self.assertEqual(FROM_EMAIL, "Chunk AI <meetchunk@chunkapp.com>")
+        self.assertEqual(REPLY_TO, "meetchunk@chunkapp.com")
+
+    def test_a_draft_saved_for_general_moves_to_marketing(self):
+        legacy = {**self.saved, "segment_id": LEGACY_GENERAL_SEGMENT_ID, "reply_to": ["info@chunkapp.com"],
+                  "from": "Chunk AI <info@chunkapp.com>"}
+        client = Mock()
+        client.request.side_effect = [self.segment, {"data": [legacy], "has_more": False}, legacy,
+                                      {"id": "draft-1"}, self.saved]
+        receipt = save_draft(client, "subject", "html", "text")
+        path, method, payload = client.request.call_args_list[3].args
+        self.assertEqual((path, method), ("broadcasts/draft-1", "PATCH"))
+        self.assertEqual(payload["segment_id"], SEGMENT_ID)
+        self.assertEqual(payload["reply_to"], REPLY_TO)
+        self.assertEqual(payload["from"], FROM_EMAIL)
+        self.assertEqual(receipt["segment_name"], "Marketing")
+
+    def test_a_segment_that_is_not_marketing_is_refused(self):
+        client = Mock()
+        client.request.side_effect = [{"id": SEGMENT_ID, "name": "General"}]
+        with self.assertRaises(DraftError):
+            save_draft(client, "subject", "html", "text")
+        self.assertEqual(client.request.call_count, 1)
 
     def test_creation_explicitly_disables_delivery_and_verifies_readback(self):
         client = Mock()
@@ -94,6 +127,30 @@ class BroadcastDraftTests(unittest.TestCase):
                 with self.subTest(path=path, payload=payload), self.assertRaises(DraftError):
                     client.request(path, "POST", payload)
             network.assert_not_called()
+
+
+class SegmentSettingTests(unittest.TestCase):
+    def _segment(self, env_value, heroku_value=""):
+        env = {k: v for k, v in os.environ.items() if k != broadcast_settings.SEGMENT_ENV}
+        if env_value is not None:
+            env[broadcast_settings.SEGMENT_ENV] = env_value
+        heroku = subprocess.CompletedProcess([], 0, stdout=heroku_value + "\n", stderr="")
+        with patch.dict(os.environ, env, clear=True), \
+             patch.object(broadcast_settings.subprocess, "run", return_value=heroku) as run:
+            return marketing_segment_id(), run
+
+    def test_the_environment_wins(self):
+        segment, run = self._segment("seg-env")
+        self.assertEqual(segment, "seg-env")
+        run.assert_not_called()
+
+    def test_heroku_config_is_the_fallback(self):
+        self.assertEqual(self._segment(None, "seg-heroku")[0], "seg-heroku")
+
+    def test_no_segment_or_the_legacy_one_is_refused(self):
+        for env_value in (None, LEGACY_GENERAL_SEGMENT_ID):
+            with self.subTest(env_value=env_value), self.assertRaises(BroadcastConfigError):
+                self._segment(env_value)
 
 
 if __name__ == "__main__":

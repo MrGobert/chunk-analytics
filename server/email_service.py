@@ -8,9 +8,13 @@ Colors: paper #FAF5EE, card #FFFDF8, ink #2D2418, ember #E84D2B, night #241B12 (
 Content-type coding: Notes ember #E84D2B, Documents lake #3E7CB1, URLs sage #5B8A5E, Reports butter #F5BE4F, Chats ink-soft #6B5D4F
 """
 
+import hashlib
+import hmac
 import logging
 import os
-from typing import Optional
+from html import escape
+from typing import Any, Optional
+from urllib.parse import quote
 
 import httpx
 
@@ -20,6 +24,27 @@ logging.basicConfig(level=logging.INFO)
 RESEND_API_KEY = os.getenv("RESEND_API_KEY")
 RESEND_API_URL = "https://api.resend.com/emails"
 FROM_EMAIL = "Chunk AI <info@chunkapp.com>"
+
+# Marketing email comes from the marketing mailbox and goes only to accounts
+# that consent (email_tasks._marketing_skip). Account email (billing, trial
+# ending, renewal reminder, welcome) stays on FROM_EMAIL and ignores consent.
+# The env vars are a no-deploy way back to info@ if the new sender has
+# deliverability trouble (Apple's private relay accepts only registered
+# senders).
+MARKETING_FROM_EMAIL = os.getenv("MARKETING_FROM_EMAIL", "Chunk AI <meetchunk@chunkapp.com>")
+MARKETING_REPLY_TO = os.getenv("MARKETING_REPLY_TO", "meetchunk@chunkapp.com")
+MARKETING_EMAIL_TYPES = frozenset({
+    "day1_help_center",
+    "day3_artifacts",
+    "day7_researcher_stories",
+    "signup_no_trial_nudge",
+    "reengagement_14day",
+    "winback_7day",
+    "winback_30day",
+    "monthly_recap",
+    "feature_announcement",
+    "memory_2_announcement",
+})
 
 # Brand colors and assets — "Paper & Ember" Design System (Chunk Design System v2)
 BRAND = {
@@ -1655,91 +1680,50 @@ def get_signup_no_trial_nudge_email(user_name: str = "there") -> tuple[str, str,
 # ============================================================
 
 
-async def send_email_async(to_email: str, subject: str, html: str, text: str, email_type: str = None, user_id: str = None) -> dict:
-    """Send email via Resend API (async)."""
-    import hashlib
-    import hmac
+def _unsubscribe_url(to_email: str) -> Optional[str]:
+    """The signed link cerebral's /email/unsubscribe verifies (GET confirms, POST is one-click).
 
-    # Generate unsubscribe token and URL
-    secret = os.getenv("EMAIL_UNSUBSCRIBE_SECRET", "chunk-unsubscribe-default-secret")
+    None without EMAIL_UNSUBSCRIBE_SECRET: cerebral refuses every link then,
+    so the email goes out without one.
+    """
+    secret = os.getenv("EMAIL_UNSUBSCRIBE_SECRET", "")
+    if not secret:
+        logging.error("EMAIL_UNSUBSCRIBE_SECRET is not set; sending without an unsubscribe link")
+        return None
     unsubscribe_base = os.getenv("EMAIL_UNSUBSCRIBE_BASE_URL", "https://cerebral-12658c15cdb1.herokuapp.com")
-    unsubscribe_token = hmac.new(secret.encode(), to_email.encode(), hashlib.sha256).hexdigest()
-    unsubscribe_url = f"{unsubscribe_base}/email/unsubscribe?email={to_email}&token={unsubscribe_token}"
-
-    # Inject unsubscribe link into HTML body (cream-soft text — footer is night bg)
-    unsubscribe_link_html = f'<a href="{unsubscribe_url}" style="color:{BRAND["text_muted_dark"]};text-decoration:none">Unsubscribe</a><span style="color:rgba(246,239,228,0.45)"> · </span>'
-    html = html.replace("{UNSUBSCRIBE_LINK_PLACEHOLDER}", unsubscribe_link_html)
-
-    # Build payload
-    payload = {
-        "from": FROM_EMAIL,
-        "to": [to_email],
-        "subject": subject,
-        "html": html,
-        "text": text,
-        "headers": {
-            "List-Unsubscribe": f"<{unsubscribe_url}>",
-            "List-Unsubscribe-Post": "List-Unsubscribe=One-Click"
-        }
-    }
-
-    # Add tags if provided
-    if email_type or user_id:
-        tags = []
-        if email_type:
-            tags.append({"name": "email_type", "value": email_type})
-        if user_id:
-            tags.append({"name": "user_id", "value": user_id})
-        payload["tags"] = tags
-
-    async with httpx.AsyncClient() as client:
-        response = await client.post(
-            RESEND_API_URL,
-            headers={
-                "Authorization": f"Bearer {RESEND_API_KEY}",
-                "Content-Type": "application/json",
-            },
-            json=payload,
-        )
-
-        if response.status_code == 200:
-            logging.info(f"Email sent successfully to {to_email}: {subject}")
-            result = response.json()
-            return {"id": result.get("id"), **result}
-        else:
-            logging.error(
-                f"Failed to send email to {to_email}: {response.status_code} - {response.text}"
-            )
-            raise Exception(f"Email send failed: {response.status_code}")
+    token = hmac.new(secret.encode(), to_email.encode(), hashlib.sha256).hexdigest()
+    # Percent-encode the address: a raw "+" in a query string decodes to a
+    # space, and the signature is over the "+" spelling.
+    return f"{unsubscribe_base}/email/unsubscribe?email={quote(to_email, safe='@')}&token={token}"
 
 
 def send_email(to_email: str, subject: str, html: str, text: str, email_type: str = None, user_id: str = None) -> dict:
     """Send email via Resend API (sync)."""
-    import hashlib
-    import hmac
-
-    # Generate unsubscribe token and URL
-    secret = os.getenv("EMAIL_UNSUBSCRIBE_SECRET", "chunk-unsubscribe-default-secret")
-    unsubscribe_base = os.getenv("EMAIL_UNSUBSCRIBE_BASE_URL", "https://cerebral-12658c15cdb1.herokuapp.com")
-    unsubscribe_token = hmac.new(secret.encode(), to_email.encode(), hashlib.sha256).hexdigest()
-    unsubscribe_url = f"{unsubscribe_base}/email/unsubscribe?email={to_email}&token={unsubscribe_token}"
+    unsubscribe_url = _unsubscribe_url(to_email)
 
     # Inject unsubscribe link into HTML body (cream-soft text — footer is night bg)
-    unsubscribe_link_html = f'<a href="{unsubscribe_url}" style="color:{BRAND["text_muted_dark"]};text-decoration:none">Unsubscribe</a><span style="color:rgba(246,239,228,0.45)"> · </span>'
+    unsubscribe_link_html = (
+        f'<a href="{escape(unsubscribe_url)}" style="color:{BRAND["text_muted_dark"]};text-decoration:none">Unsubscribe</a><span style="color:rgba(246,239,228,0.45)"> · </span>'
+        if unsubscribe_url
+        else ""
+    )
     html = html.replace("{UNSUBSCRIBE_LINK_PLACEHOLDER}", unsubscribe_link_html)
 
-    # Build payload
-    payload = {
-        "from": FROM_EMAIL,
+    marketing = email_type in MARKETING_EMAIL_TYPES
+    payload: dict[str, Any] = {
+        "from": MARKETING_FROM_EMAIL if marketing else FROM_EMAIL,
         "to": [to_email],
         "subject": subject,
         "html": html,
         "text": text,
-        "headers": {
-            "List-Unsubscribe": f"<{unsubscribe_url}>",
-            "List-Unsubscribe-Post": "List-Unsubscribe=One-Click"
-        }
     }
+    if marketing:
+        payload["reply_to"] = MARKETING_REPLY_TO
+    if unsubscribe_url:
+        payload["headers"] = {
+            "List-Unsubscribe": f"<{unsubscribe_url}>",
+            "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+        }
 
     # Add tags if provided
     if email_type or user_id:

@@ -35,26 +35,11 @@ except ImportError:
     sys.exit(1)
 
 RESEND_API_KEY = os.getenv("RESEND_API_KEY")
+from broadcast_settings import FROM_EMAIL, REPLY_TO, marketing_segment_id  # noqa: E402
 
 if not RESEND_API_KEY:
     print("Missing RESEND_API_KEY")
     sys.exit(1)
-
-def get_segments():
-    req = urllib.request.Request(
-        "https://api.resend.com/segments",
-        headers={
-            "Authorization": f"Bearer {RESEND_API_KEY}",
-            "User-Agent": "ChunkMailer/1.0"
-        }
-    )
-    try:
-        with urllib.request.urlopen(req) as response:
-            data = json.loads(response.read().decode())
-            return data.get('data', [])
-    except Exception as e:
-        print(f"Error fetching segments: {e}")
-        return []
 
 def _use_case_card(emoji, label, label_color, headline, scenario, input_text, output_text):
     """Custom use case card with accent pill and input/output breakdown."""
@@ -274,9 +259,9 @@ def create_broadcast(segment_id, html):
         "segment_id": segment_id,
         "name": "Artifacts Feature Announcement",
         "subject": "New: Turn any content into flashcards, quizzes, and summaries — instantly.",
-        "from": "Chunk AI <info@chunkapp.com>",
+        "from": FROM_EMAIL,
         "html": html,
-        "reply_to": "info@chunkapp.com"
+        "reply_to": REPLY_TO
     }
 
     data = json.dumps(payload).encode('utf-8')
@@ -301,16 +286,8 @@ def create_broadcast(segment_id, html):
         return None
 
 if __name__ == "__main__":
-    print("Fetching segments...")
-    segments = get_segments()
-    if not segments:
-        print("No segments found in Resend account. Cannot create broadcast.")
-        sys.exit(1)
-    
-    # Just use the first segment we find
-    segment_id = segments[0]['id']
-    segment_name = segments[0]['name']
-    print(f"Using segment: {segment_name} ({segment_id})")
+    segment_id = marketing_segment_id()
+    print(f"Using segment: Marketing ({segment_id})")
 
     print("Generating HTML template...")
     html = generate_email_html()

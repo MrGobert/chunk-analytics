@@ -17,11 +17,12 @@ Note: Tasks use email_service.py functions internally.
 import logging
 import re
 from datetime import datetime, timedelta, timezone
+from typing import Optional
 
 from celery import shared_task
 
 import email_service
-from email_tracking import check_unsubscribed, track_email_sent
+from email_tracking import marketing_blocked, track_email_sent
 
 logging.basicConfig(level=logging.INFO)
 
@@ -88,6 +89,20 @@ def _received_recent_email(emails_sent: dict, cooldown_hours: int = EMAIL_COOLDO
             continue
 
     return False
+
+
+def _marketing_skip(email: str, user_id: str = None) -> Optional[dict]:
+    """The skip result when this marketing email must not go out, else None.
+
+    Marketing only (email_service.MARKETING_EMAIL_TYPES); account emails never
+    check consent. A failed consent read raises: autoretry tries again, then
+    the email is dropped rather than sent without consent.
+    """
+    reason = marketing_blocked(user_id, email)
+    if reason is None:
+        return None
+    logging.info(f"[EMAIL_TASK] Skipping marketing email for {user_id}: {reason}")
+    return {"status": "skipped", "email": email, "reason": reason}
 
 
 def is_valid_email(email: str) -> bool:
@@ -330,11 +345,6 @@ def send_trial_ending_task(
     if not is_valid_email(email):
         logging.warning(f"[EMAIL_TASK] Invalid email, skipping trial ending: {email}")
         return {"status": "skipped", "email": email, "reason": "invalid_email"}
-        
-    # Check if user is unsubscribed
-    if check_unsubscribed(email):
-        logging.info(f"[EMAIL_TASK] Skipping {email} - user unsubscribed")
-        return {"status": "skipped", "email": email, "reason": "unsubscribed"}
 
     try:
         logging.info(f"[EMAIL_TASK] Sending trial ending email to {email}")
@@ -385,10 +395,9 @@ def send_winback_7day_task(
         logging.warning(f"[EMAIL_TASK] Invalid email, skipping 7-day winback: {email}")
         return {"status": "skipped", "email": email, "reason": "invalid_email"}
         
-    # Check if user is unsubscribed
-    if check_unsubscribed(email):
-        logging.info(f"[EMAIL_TASK] Skipping {email} - user unsubscribed")
-        return {"status": "skipped", "email": email, "reason": "unsubscribed"}
+    skipped = _marketing_skip(email, user_id)
+    if skipped:
+        return skipped
 
     try:
         logging.info(f"[EMAIL_TASK] Sending 7-day winback email to {email}")
@@ -440,10 +449,9 @@ def send_winback_30day_task(
         logging.warning(f"[EMAIL_TASK] Invalid email, skipping 30-day winback: {email}")
         return {"status": "skipped", "email": email, "reason": "invalid_email"}
         
-    # Check if user is unsubscribed
-    if check_unsubscribed(email):
-        logging.info(f"[EMAIL_TASK] Skipping {email} - user unsubscribed")
-        return {"status": "skipped", "email": email, "reason": "unsubscribed"}
+    skipped = _marketing_skip(email, user_id)
+    if skipped:
+        return skipped
 
     try:
         logging.info(f"[EMAIL_TASK] Sending 30-day winback email to {email}")
@@ -490,10 +498,9 @@ def send_monthly_recap_task(self, email: str, user_name: str = "there", user_id:
         logging.warning(f"[EMAIL_TASK] Invalid email, skipping monthly recap: {email}")
         return {"status": "skipped", "email": email, "reason": "invalid_email"}
 
-    # Check if user is unsubscribed
-    if check_unsubscribed(email):
-        logging.info(f"[EMAIL_TASK] Skipping {email} - user unsubscribed")
-        return {"status": "skipped", "email": email, "reason": "unsubscribed"}
+    skipped = _marketing_skip(email, user_id)
+    if skipped:
+        return skipped
 
     if not user_id:
         logging.warning(f"[EMAIL_TASK] No user_id for monthly recap: {email}")
@@ -555,11 +562,6 @@ def send_subscription_expired_task(
     if not is_valid_email(email):
         logging.warning(f"[EMAIL_TASK] Invalid email, skipping subscription expired: {email}")
         return {"status": "skipped", "email": email, "reason": "invalid_email"}
-        
-    # Check if user is unsubscribed
-    if check_unsubscribed(email):
-        logging.info(f"[EMAIL_TASK] Skipping {email} - user unsubscribed")
-        return {"status": "skipped", "email": email, "reason": "unsubscribed"}
 
     try:
         logging.info(f"[EMAIL_TASK] Sending subscription expired email to {email}")
@@ -859,10 +861,6 @@ def send_welcome_task(self, email: str, user_name: str = "there", user_id: str =
         logging.warning(f"[EMAIL_TASK] Invalid email, skipping welcome: {email}")
         return {"status": "skipped", "email": email, "reason": "invalid_email"}
 
-    if check_unsubscribed(email):
-        logging.info(f"[EMAIL_TASK] User unsubscribed, skipping welcome: {email}")
-        return {"status": "skipped", "email": email, "reason": "unsubscribed"}
-
     try:
         logging.info(f"[EMAIL_TASK] Sending welcome email to {email}")
         first_name = _extract_first_name(user_name)
@@ -963,10 +961,9 @@ def send_day1_help_center_task(self, email: str, user_name: str = "there", user_
         logging.warning(f"[EMAIL_TASK] Invalid email, skipping Day 1: {email}")
         return {"status": "skipped", "email": email, "reason": "invalid_email"}
 
-    # Check if user is unsubscribed
-    if check_unsubscribed(email):
-        logging.info(f"[EMAIL_TASK] Skipping {email} - user unsubscribed")
-        return {"status": "skipped", "email": email, "reason": "unsubscribed"}
+    skipped = _marketing_skip(email, user_id)
+    if skipped:
+        return skipped
 
     try:
         logging.info(f"[EMAIL_TASK] Sending Day 1 help center email to {email}")
@@ -1006,10 +1003,9 @@ def send_day3_artifacts_task(self, email: str, user_name: str = "there", user_id
         logging.warning(f"[EMAIL_TASK] Invalid email, skipping Day 3: {email}")
         return {"status": "skipped", "email": email, "reason": "invalid_email"}
 
-    # Check if user is unsubscribed
-    if check_unsubscribed(email):
-        logging.info(f"[EMAIL_TASK] Skipping {email} - user unsubscribed")
-        return {"status": "skipped", "email": email, "reason": "unsubscribed"}
+    skipped = _marketing_skip(email, user_id)
+    if skipped:
+        return skipped
 
     try:
         logging.info(f"[EMAIL_TASK] Sending Day 3 artifacts email to {email}")
@@ -1051,10 +1047,9 @@ def send_day7_researcher_stories_task(self, email: str, user_name: str = "there"
         logging.warning(f"[EMAIL_TASK] Invalid email, skipping Day 7: {email}")
         return {"status": "skipped", "email": email, "reason": "invalid_email"}
         
-    # Check if user is unsubscribed
-    if check_unsubscribed(email):
-        logging.info(f"[EMAIL_TASK] Skipping {email} - user unsubscribed")
-        return {"status": "skipped", "email": email, "reason": "unsubscribed"}
+    skipped = _marketing_skip(email, user_id)
+    if skipped:
+        return skipped
 
     try:
         logging.info(f"[EMAIL_TASK] Sending Day 7 researcher stories email to {email}")
@@ -1095,11 +1090,6 @@ def send_billing_issue_task(
     if not is_valid_email(email):
         logging.warning(f"[EMAIL_TASK] Invalid email, skipping billing issue: {email}")
         return {"status": "skipped", "email": email, "reason": "invalid_email"}
-        
-    # Check if user is unsubscribed
-    if check_unsubscribed(email):
-        logging.info(f"[EMAIL_TASK] Skipping {email} - user unsubscribed")
-        return {"status": "skipped", "email": email, "reason": "unsubscribed"}
 
     try:
         logging.info(f"[EMAIL_TASK] Sending billing issue email to {email}")
@@ -1143,10 +1133,9 @@ def send_reengagement_14day_task(
         logging.warning(f"[EMAIL_TASK] Invalid email, skipping 14-day re-engagement: {email}")
         return {"status": "skipped", "email": email, "reason": "invalid_email"}
         
-    # Check if user is unsubscribed
-    if check_unsubscribed(email):
-        logging.info(f"[EMAIL_TASK] Skipping {email} - user unsubscribed")
-        return {"status": "skipped", "email": email, "reason": "unsubscribed"}
+    skipped = _marketing_skip(email, user_id)
+    if skipped:
+        return skipped
 
     try:
         logging.info(f"[EMAIL_TASK] Sending 14-day re-engagement email to {email}")
@@ -1195,10 +1184,9 @@ def send_feature_announcement_task(
         logging.warning(f"[EMAIL_TASK] Invalid email, skipping feature announcement: {email}")
         return {"status": "skipped", "email": email, "reason": "invalid_email"}
         
-    # Check if user is unsubscribed
-    if check_unsubscribed(email):
-        logging.info(f"[EMAIL_TASK] Skipping {email} - user unsubscribed")
-        return {"status": "skipped", "email": email, "reason": "unsubscribed"}
+    skipped = _marketing_skip(email, user_id)
+    if skipped:
+        return skipped
 
     try:
         logging.info(f"[EMAIL_TASK] Sending feature announcement email to {email}")
@@ -1243,10 +1231,9 @@ def send_signup_no_trial_nudge_task(
         logging.warning(f"[EMAIL_TASK] Invalid email, skipping no-trial nudge: {email}")
         return {"status": "skipped", "email": email, "reason": "invalid_email"}
         
-    # Check if user is unsubscribed
-    if check_unsubscribed(email):
-        logging.info(f"[EMAIL_TASK] Skipping {email} - user unsubscribed")
-        return {"status": "skipped", "email": email, "reason": "unsubscribed"}
+    skipped = _marketing_skip(email, user_id)
+    if skipped:
+        return skipped
 
     try:
         logging.info(f"[EMAIL_TASK] Sending signup no-trial nudge email to {email}")
@@ -1638,11 +1625,6 @@ def send_renewal_reminder_task(
     if not is_valid_email(email):
         logging.warning(f"[EMAIL_TASK] Invalid email, skipping renewal reminder: {email}")
         return {"status": "skipped", "email": email, "reason": "invalid_email"}
-        
-    # Check if user is unsubscribed
-    if check_unsubscribed(email):
-        logging.info(f"[EMAIL_TASK] Skipping {email} - user unsubscribed")
-        return {"status": "skipped", "email": email, "reason": "unsubscribed"}
 
     try:
         logging.info(f"[EMAIL_TASK] Sending renewal reminder email to {email}")
