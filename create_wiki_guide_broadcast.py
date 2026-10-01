@@ -32,6 +32,7 @@ except ImportError:
     sys.exit(1)
 
 RESEND_API_KEY = os.getenv("RESEND_API_KEY")
+from broadcast_settings import FROM_EMAIL, REPLY_TO, marketing_segment_id  # noqa: E402
 
 if not RESEND_API_KEY:
     print("Missing RESEND_API_KEY")
@@ -114,8 +115,8 @@ def list_broadcasts():
         print(f"Error fetching broadcasts: {e}")
         return []
 
-def update_broadcast(broadcast_id, html, audience_id="bd174a71-cae1-4af4-8795-a3115d832819"):
-    payload = json.dumps({"html": html, "audience_id": audience_id}).encode('utf-8')
+def update_broadcast(broadcast_id, html, segment_id):
+    payload = json.dumps({"html": html, "segment_id": segment_id, "from": FROM_EMAIL, "reply_to": REPLY_TO}).encode('utf-8')
     req = urllib.request.Request(
         f"https://api.resend.com/broadcasts/{broadcast_id}",
         data=payload,
@@ -141,9 +142,9 @@ def create_broadcast(segment_id, html):
         "segment_id": segment_id,
         "name": "How To Turn your notes into a Wiki Guide",
         "subject": "How To Turn your notes into a Wiki 🧠",
-        "from": "Chunk AI <info@chunkapp.com>",
+        "from": FROM_EMAIL,
         "html": html,
-        "reply_to": "info@chunkapp.com"
+        "reply_to": REPLY_TO
     }
 
     data = json.dumps(payload).encode('utf-8')
@@ -168,8 +169,8 @@ def create_broadcast(segment_id, html):
         return None
 
 if __name__ == "__main__":
-    segment_id = "bd174a71-cae1-4af4-8795-a3115d832819"
-    print(f"Using segment: General ({segment_id})")
+    segment_id = marketing_segment_id()
+    print(f"Using segment: Chunk Marketing ({segment_id})")
 
     print("Generating HTML template...")
     html = generate_email_html()
@@ -186,7 +187,7 @@ if __name__ == "__main__":
     if existing:
         print(f"Found existing draft: {existing['name']} (ID: {existing['id']})")
         print("Updating broadcast with fixed HTML...")
-        update_broadcast(existing['id'], html)
+        update_broadcast(existing['id'], html, segment_id)
     else:
         print("No existing draft found. Creating new broadcast...")
         create_broadcast(segment_id, html)

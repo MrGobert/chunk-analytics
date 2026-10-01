@@ -152,10 +152,30 @@ Score → status: ≥60 healthy, ≥30 atRisk, <30 churning.
 
 **Safeguards** (`email_tasks.py`):
 - 24-hour cooldown between marketing emails to the same user
-- Unsubscribe check before every send (Firestore `emailUnsubscribes` collection)
+- Marketing consent before every marketing send (`_marketing_skip` → `email_tracking.marketing_blocked`, details below)
 - Stale account filtering (>12 months old excluded from winback/re-engagement)
 - Deduplication via `emailsSent` flags on user documents
 - Invalid/test email filtering
+
+**Marketing vs account email (Oct 2026).** cerebral owns the consent rule and every write
+(`services/marketing_email/consent.py` there); this app only reads it.
+- **Marketing** = `email_service.MARKETING_EMAIL_TYPES`: day1/day3/day7, signup_no_trial_nudge,
+  reengagement_14day, winback_7day/30day, monthly_recap, feature_announcement (and the old
+  memory_2_announcement). Sent from `MARKETING_FROM_EMAIL` (default `Chunk AI <meetchunk@chunkapp.com>`,
+  reply-to `MARKETING_REPLY_TO`), and only when `marketing_blocked(uid, email)` is None: the account's
+  `users/{uid}.isSubscribedToEmails` is not False and the address has no `emailUnsubscribes` record
+  (lowercase id, or the spelling the link carried). It fails closed: no uid or no user doc blocks, and
+  a failed read raises, so autoretry tries again and then drops the email.
+- **Account** = everything else (trial_started, trial_ending, renewal_reminder, billing_issue,
+  subscription_expired, welcome): from `info@`, never checks consent.
+- Unsubscribe links point at cerebral's `/email/unsubscribe` (GET confirms, POST is RFC 8058
+  one-click). Like Resend's own link, it covers everything: out of Chunk Marketing and General, plus
+  Resend's `unsubscribed` flag; account emails still arrive. Without `EMAIL_UNSUBSCRIBE_SECRET` no link
+  is built (cerebral refuses unsigned links). The address is percent-encoded, so "+" survives.
+- **Broadcasts** (repo-root `create_*_broadcast.py`) target Resend's **Chunk Marketing** segment
+  through `broadcast_settings.py`: `RESEND_MARKETING_SEGMENT_ID` from the environment, else cerebral's
+  Heroku config. Never General: it holds every account, including those that switched marketing off
+  (James, 2026-10-01). Re-saving an old draft moves it to Chunk Marketing.
 
 **Tracking** (`email_tracking.py`):
 - Every sent email logged to Firestore `emailTracking` collection
@@ -169,7 +189,7 @@ Score → status: ≥60 healthy, ≥30 atRisk, <30 churning.
 |------------|---------|
 | `users` | User profiles, subscription status, usage stats, `emailsSent` flags |
 | `emailTracking` | Per-email send records with delivery/conversion tracking |
-| `emailUnsubscribes` | Unsubscribed email addresses |
+| `emailUnsubscribes` | Marketing opt-outs by address (cerebral writes them; ids are the lowercase address) |
 | `analytics_cache` | Firestore fallback for MRR history when Redis is unavailable |
 | `users/{uid}/notes` | User notes (monthly recap: `createdAt` Timestamp range count) |
 | `users/{uid}/collections` | User collections (monthly recap: `createdAt` Timestamp range count) |
@@ -188,8 +208,10 @@ Score → status: ≥60 healthy, ≥30 atRisk, <30 churning.
 | `REDIS_URL` | Heroku Redis (`rediss://` TLS) |
 | `RESEND_API_KEY` | Resend email API |
 | `REVENUECAT_WEBHOOK_AUTH` | Shared auth token (Flask API + RevenueCat webhooks) |
-| `EMAIL_UNSUBSCRIBE_SECRET` | HMAC secret for unsubscribe token generation |
+| `EMAIL_UNSUBSCRIBE_SECRET` | HMAC secret for unsubscribe token generation (same value as cerebral's) |
 | `EMAIL_UNSUBSCRIBE_BASE_URL` | Base URL for unsubscribe links (points to cerebral) |
+| `RESEND_MARKETING_SEGMENT_ID` | Chunk Marketing's id. Set on cerebral; the broadcast scripts fall back to cerebral's config, so this app needn't carry it |
+| `MARKETING_FROM_EMAIL` / `MARKETING_REPLY_TO` | Optional overrides for the marketing sender (default meetchunk@) |
 
 ## Deployment
 

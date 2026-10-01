@@ -5,6 +5,10 @@
 
 Uses RESEND_API_KEY from the environment, or reads the existing key from the
 cerebral-analytics Heroku app into memory. Credentials are never persisted.
+
+The draft targets the Chunk Marketing segment from the marketing mailbox
+(broadcast_settings). Re-saving a draft made earlier for the legacy General
+segment moves it to Chunk Marketing.
 """
 
 import argparse
@@ -18,13 +22,13 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+from broadcast_settings import (
+    FROM_EMAIL, GENERAL_SEGMENT_ID, REPLY_TO, SEGMENT_NAME, BroadcastConfigError, marketing_segment_id,
+)
 from server.chunk_260_email import get_chunk_260_email, UNSUBSCRIBE
 
 
 BROADCAST_NAME = "Chunk 2.6.0 — Siri, Spotlight & Shortcuts"
-SEGMENT_ID = "bd174a71-cae1-4af4-8795-a3115d832819"
-FROM_EMAIL = "Chunk AI <info@chunkapp.com>"
-REPLY_TO = "info@chunkapp.com"
 OUTPUT_DIR = Path(__file__).resolve().parent
 
 
@@ -118,35 +122,37 @@ def ensure_draft(broadcast):
         raise DraftError("The matching broadcast is not an unscheduled draft; it was not changed.")
 
 
-def check_routing(broadcast):
+def check_routing(broadcast, segment_id):
     segment = broadcast.get("segment_id") or broadcast.get("audience_id")
-    if segment != SEGMENT_ID:
-        raise DraftError("The broadcast does not target the expected General segment.")
+    if segment != segment_id:
+        raise DraftError("The broadcast does not target the Chunk Marketing segment.")
     reply = broadcast.get("reply_to")
     if reply not in (REPLY_TO, [REPLY_TO]):
-        raise DraftError("The broadcast reply-to differs from info@chunkapp.com.")
+        raise DraftError(f"The broadcast reply-to differs from {REPLY_TO}.")
 
 
-def save_draft(client, subject, html, text):
-    segment = client.request("segments/" + SEGMENT_ID)
-    if segment.get("id") != SEGMENT_ID or segment.get("name") != "General":
-        raise DraftError("The configured General segment could not be verified.")
+def save_draft(client, subject, html, text, segment_id):
+    segment = client.request("segments/" + segment_id)
+    if segment.get("id") != segment_id or segment.get("name") != SEGMENT_NAME:
+        raise DraftError("The configured Chunk Marketing segment could not be verified.")
     matches = [b for b in list_broadcasts(client) if b.get("name") == BROADCAST_NAME]
     if len(matches) > 1:
         raise DraftError("Multiple broadcasts have this exact name; none was changed.")
     content = {"name": BROADCAST_NAME, "from": FROM_EMAIL, "subject": subject, "html": html, "text": text}
+    routing = {"segment_id": segment_id, "reply_to": REPLY_TO}
     if matches:
         ensure_draft(matches[0])
         broadcast_id = matches[0]["id"]
         current = client.request("broadcasts/" + broadcast_id)
         ensure_draft(current)
-        check_routing(current)
-        client.request("broadcasts/" + broadcast_id, "PATCH", content)
+        # A draft saved before Chunk Marketing existed targets General;
+        # anything else is someone else's change and is left alone.
+        if (current.get("segment_id") or current.get("audience_id")) not in (segment_id, GENERAL_SEGMENT_ID):
+            raise DraftError("The matching draft targets an unexpected segment; it was not changed.")
+        client.request("broadcasts/" + broadcast_id, "PATCH", {**content, **routing})
         action = "updated"
     else:
-        created = client.request("broadcasts", "POST", {
-            **content, "segment_id": SEGMENT_ID, "reply_to": REPLY_TO, "send": False,
-        })
+        created = client.request("broadcasts", "POST", {**content, **routing, "send": False})
         broadcast_id = created.get("id")
         if not broadcast_id:
             raise DraftError("Resend did not return a draft ID; inspect the dashboard before retrying.")
@@ -154,13 +160,13 @@ def save_draft(client, subject, html, text):
 
     saved = client.request("broadcasts/" + broadcast_id)
     ensure_draft(saved)
-    check_routing(saved)
+    check_routing(saved, segment_id)
     for field, expected in content.items():
         if saved.get(field) != expected:
             raise DraftError(f"Saved draft {broadcast_id}: {field} did not match the approved content.")
     return {
         "id": broadcast_id, "name": BROADCAST_NAME, "action": action,
-        "status": saved["status"], "segment_id": SEGMENT_ID, "segment_name": "General",
+        "status": saved["status"], "segment_id": segment_id, "segment_name": SEGMENT_NAME,
         "from": FROM_EMAIL, "reply_to": REPLY_TO, "subject": subject,
         "scheduled_at": saved.get("scheduled_at"), "sent_at": saved.get("sent_at"),
         "html_sha256": hashlib.sha256(html.encode()).hexdigest(),
@@ -186,7 +192,7 @@ def main():
     if not args.save_draft:
         print("Preview only. No Resend changes made.")
         return
-    receipt = save_draft(Resend(get_api_key()), subject, html, text)
+    receipt = save_draft(Resend(get_api_key()), subject, html, text, marketing_segment_id())
     (OUTPUT_DIR / "chunk-260-broadcast-receipt.json").write_text(
         json.dumps(receipt, indent=2, ensure_ascii=False) + "\n", encoding="utf-8",
     )
@@ -197,5 +203,5 @@ def main():
 if __name__ == "__main__":
     try:
         main()
-    except (DraftError, OSError, subprocess.TimeoutExpired) as error:
+    except (DraftError, BroadcastConfigError, OSError, subprocess.TimeoutExpired) as error:
         raise SystemExit(str(error)) from None

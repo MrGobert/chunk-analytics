@@ -263,50 +263,54 @@ def update_email_event(resend_email_id: str, event_type: str, event_data: dict) 
         return False
 
 
-def check_unsubscribed(email: str) -> bool:
-    """
-    Check if an email address is in the unsubscribe list.
+# --- Marketing consent ----------------------------------------------------------
+#
+# cerebral owns the rule and every write (services/marketing_email/consent.py);
+# this app only reads it before a marketing send. An account gets marketing
+# email when users/{uid}.isSubscribedToEmails is not False AND the address has
+# no emailUnsubscribes record. Record ids are the lowercase address; records
+# made before that sit under the spelling a link carried, so reads try both.
+# Account emails (billing, trial ending, renewal reminder, welcome) skip this.
 
-    Args:
-        email: Email address to check
+CONSENT_FIELD = "isSubscribedToEmails"
+UNSUBSCRIBES_COLLECTION = "emailUnsubscribes"
 
-    Returns:
-        True if email is unsubscribed, False otherwise
+
+class MarketingConsentUnavailable(RuntimeError):
+    """Firestore couldn't be read, so consent is unknown and the email must not go out."""
+
+
+def unsubscribe_ids(email: str) -> List[str]:
+    """Every doc id an address's opt-out may be stored under, lowercase first."""
+    raw = email or ""
+    ids: List[str] = []
+    for candidate in (raw.strip().lower(), raw.strip(), raw):
+        if candidate and candidate not in ids:
+            ids.append(candidate)
+    return ids
+
+
+def marketing_blocked(user_id: Optional[str], email: str) -> Optional[str]:
+    """Why a marketing email must not go to this account, or None when it may.
+
+    Fails closed: a send with no uid is blocked (there is no switch to check),
+    and a failed read raises MarketingConsentUnavailable, so the task's
+    autoretry tries again and then drops the email.
     """
+    if not user_id:
+        return "no_user_id"
     try:
-        doc_ref = db.collection("emailUnsubscribes").document(email)
-        doc = doc_ref.get()
-        return doc.exists
-        
+        snap = db.collection("users").document(user_id).get()
+        if not snap.exists:
+            return "no_account"
+        if (snap.to_dict() or {}).get(CONSENT_FIELD) is False:
+            return "opted_out"
+        for doc_id in unsubscribe_ids(email):
+            if db.collection(UNSUBSCRIBES_COLLECTION).document(doc_id).get().exists:
+                return "unsubscribed"
     except Exception as e:
-        logging.error(f"[EMAIL_TRACKING] Failed to check unsubscribe status for {email}: {e}")
-        return False
-
-
-def mark_unsubscribed(email: str) -> bool:
-    """
-    Add an email address to the unsubscribe list.
-
-    Args:
-        email: Email address to unsubscribe
-
-    Returns:
-        True if successful, False otherwise
-    """
-    try:
-        doc_ref = db.collection("emailUnsubscribes").document(email)
-        doc_ref.set({
-            "email": email,
-            "unsubscribedAt": datetime.now(timezone.utc),
-            "source": "manual"  # Could be 'webhook', 'complaint', etc.
-        })
-        
-        logging.info(f"[EMAIL_TRACKING] Marked {email} as unsubscribed")
-        return True
-        
-    except Exception as e:
-        logging.error(f"[EMAIL_TRACKING] Failed to mark {email} as unsubscribed: {e}")
-        return False
+        raise MarketingConsentUnavailable(f"consent read failed: {e}") from e
+    return None
 
 
 def get_conversion_stats(days: int = 30) -> Dict[str, Any]:
