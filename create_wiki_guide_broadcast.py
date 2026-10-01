@@ -170,7 +170,7 @@ def create_broadcast(segment_id, html):
 
 if __name__ == "__main__":
     segment_id = marketing_segment_id()
-    print(f"Using segment: Marketing ({segment_id})")
+    print(f"Using segment: Chunk Marketing ({segment_id})")
 
     print("Generating HTML template...")
     html = generate_email_html()

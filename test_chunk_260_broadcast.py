@@ -24,7 +24,7 @@ class BroadcastDraftTests(unittest.TestCase):
             "subject": "subject", "html": "html", "text": "text",
             "scheduled_at": None, "sent_at": None,
         }
-        self.segment = {"id": SEGMENT_ID, "name": "Marketing"}
+        self.segment = {"id": SEGMENT_ID, "name": "Chunk Marketing"}
 
     def test_marketing_comes_from_the_marketing_mailbox(self):
         self.assertEqual(FROM_EMAIL, "Chunk AI <meetchunk@chunkapp.com>")
@@ -42,7 +42,7 @@ class BroadcastDraftTests(unittest.TestCase):
         self.assertEqual(payload["segment_id"], SEGMENT_ID)
         self.assertEqual(payload["reply_to"], REPLY_TO)
         self.assertEqual(payload["from"], FROM_EMAIL)
-        self.assertEqual(receipt["segment_name"], "Marketing")
+        self.assertEqual(receipt["segment_name"], "Chunk Marketing")
 
     def test_a_segment_that_is_not_marketing_is_refused(self):
         client = Mock()
@@ -144,8 +144,10 @@ class SegmentSettingTests(unittest.TestCase):
         self.assertEqual(segment, "seg-env")
         run.assert_not_called()
 
-    def test_heroku_config_is_the_fallback(self):
-        self.assertEqual(self._segment(None, "seg-heroku")[0], "seg-heroku")
+    def test_cerebral_config_is_the_fallback(self):
+        segment, run = self._segment(None, "seg-heroku")
+        self.assertEqual(segment, "seg-heroku")
+        self.assertEqual(run.call_args.args[0][-2:], ["--app", "cerebral"])
 
     def test_no_segment_or_the_legacy_one_is_refused(self):
         for env_value in (None, LEGACY_GENERAL_SEGMENT_ID):

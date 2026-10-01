@@ -171,10 +171,10 @@ Score → status: ≥60 healthy, ≥30 atRisk, <30 churning.
 - Unsubscribe links point at cerebral's `/email/unsubscribe` (GET confirms, POST is RFC 8058
   one-click) and opt the address out of marketing only. Without `EMAIL_UNSUBSCRIBE_SECRET` no link is
   built (cerebral refuses unsigned links). The address is percent-encoded, so "+" survives.
-- **Broadcasts** (repo-root `create_*_broadcast.py`) target Resend's **Marketing** segment through
-  `broadcast_settings.py`: `RESEND_MARKETING_SEGMENT_ID` from the environment, else
-  cerebral-analytics' Heroku config. Never the legacy General segment, which stopped growing in
-  Nov 2025 and ignores opt-outs. Re-saving an old draft moves it to Marketing.
+- **Broadcasts** (repo-root `create_*_broadcast.py`) target Resend's **Chunk Marketing** segment
+  through `broadcast_settings.py`: `RESEND_MARKETING_SEGMENT_ID` from the environment, else cerebral's
+  Heroku config. Never General: it was filled with the same people once (2026-10-01), but nothing
+  keeps it in sync. Re-saving an old draft moves it to Chunk Marketing.
 
 **Tracking** (`email_tracking.py`):
 - Every sent email logged to Firestore `emailTracking` collection
@@ -209,7 +209,7 @@ Score → status: ≥60 healthy, ≥30 atRisk, <30 churning.
 | `REVENUECAT_WEBHOOK_AUTH` | Shared auth token (Flask API + RevenueCat webhooks) |
 | `EMAIL_UNSUBSCRIBE_SECRET` | HMAC secret for unsubscribe token generation (same value as cerebral's) |
 | `EMAIL_UNSUBSCRIBE_BASE_URL` | Base URL for unsubscribe links (points to cerebral) |
-| `RESEND_MARKETING_SEGMENT_ID` | The Marketing segment; read by the broadcast scripts |
+| `RESEND_MARKETING_SEGMENT_ID` | Chunk Marketing's id. Set on cerebral; the broadcast scripts fall back to cerebral's config, so this app needn't carry it |
 | `MARKETING_FROM_EMAIL` / `MARKETING_REPLY_TO` | Optional overrides for the marketing sender (default meetchunk@) |
 
 ## Deployment

@@ -6,9 +6,9 @@
 Uses RESEND_API_KEY from the environment, or reads the existing key from the
 cerebral-analytics Heroku app into memory. Credentials are never persisted.
 
-The draft targets the Marketing segment from the marketing mailbox
+The draft targets the Chunk Marketing segment from the marketing mailbox
 (broadcast_settings). Re-saving a draft made earlier for the legacy General
-segment moves it to Marketing.
+segment moves it to Chunk Marketing.
 """
 
 import argparse
@@ -125,7 +125,7 @@ def ensure_draft(broadcast):
 def check_routing(broadcast, segment_id):
     segment = broadcast.get("segment_id") or broadcast.get("audience_id")
     if segment != segment_id:
-        raise DraftError("The broadcast does not target the Marketing segment.")
+        raise DraftError("The broadcast does not target the Chunk Marketing segment.")
     reply = broadcast.get("reply_to")
     if reply not in (REPLY_TO, [REPLY_TO]):
         raise DraftError(f"The broadcast reply-to differs from {REPLY_TO}.")
@@ -134,7 +134,7 @@ def check_routing(broadcast, segment_id):
 def save_draft(client, subject, html, text, segment_id):
     segment = client.request("segments/" + segment_id)
     if segment.get("id") != segment_id or segment.get("name") != SEGMENT_NAME:
-        raise DraftError("The configured Marketing segment could not be verified.")
+        raise DraftError("The configured Chunk Marketing segment could not be verified.")
     matches = [b for b in list_broadcasts(client) if b.get("name") == BROADCAST_NAME]
     if len(matches) > 1:
         raise DraftError("Multiple broadcasts have this exact name; none was changed.")
@@ -145,7 +145,7 @@ def save_draft(client, subject, html, text, segment_id):
         broadcast_id = matches[0]["id"]
         current = client.request("broadcasts/" + broadcast_id)
         ensure_draft(current)
-        # A draft saved before the Marketing segment existed targets General;
+        # A draft saved before Chunk Marketing existed targets General;
         # anything else is someone else's change and is left alone.
         if (current.get("segment_id") or current.get("audience_id")) not in (segment_id, LEGACY_GENERAL_SEGMENT_ID):
             raise DraftError("The matching draft targets an unexpected segment; it was not changed.")

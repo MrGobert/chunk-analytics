@@ -72,7 +72,7 @@ def _resend_request(url, payload, method):
 
 def update_broadcast(broadcast_id, subject, html, text, segment_id):
     # `subject`/`text` are documented update fields; fall back to html-only if rejected.
-    # Routing rides along so a draft saved for the old General segment moves to Marketing.
+    # Routing rides along so a draft saved for General moves to Chunk Marketing.
     routing = {"segment_id": segment_id, "from": FROM_EMAIL, "reply_to": REPLY_TO}
     for payload in ({**routing, "html": html, "subject": subject, "text": text}, {**routing, "html": html}):
         try:
@@ -132,7 +132,7 @@ if __name__ == "__main__":
         sys.exit(1)
 
     segment_id = marketing_segment_id()
-    print(f"\nUsing segment: Marketing ({segment_id})")
+    print(f"\nUsing segment: Chunk Marketing ({segment_id})")
     print("Checking for existing broadcast draft...")
     broadcasts = list_broadcasts()
     existing = next((b for b in broadcasts if BROADCAST_NAME in b.get('name', '')), None)
