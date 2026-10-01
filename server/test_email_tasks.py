@@ -23,6 +23,26 @@ import email_service
 import email_tasks
 
 
+_AUTH_GUARDS = []
+
+
+def setUpModule():
+    # Firebase is initialized with this machine's default credentials, so an
+    # unpatched Auth lookup would reach the real project. Fail it instead;
+    # tests patch email_tasks.account_email / account_emails where they need one.
+    from firebase_admin import auth
+
+    for name in ("get_user", "get_users"):
+        patcher = patch.object(auth, name, side_effect=AssertionError(f"real Firebase Auth {name} call"))
+        patcher.start()
+        _AUTH_GUARDS.append(patcher)
+
+
+def tearDownModule():
+    while _AUTH_GUARDS:
+        _AUTH_GUARDS.pop().stop()
+
+
 # ---------------------------------------------------------------------------
 # Fakes
 # ---------------------------------------------------------------------------
@@ -333,6 +353,7 @@ class SendTaskTests(unittest.TestCase):
     def _run(self, stats, send_result=None, track_fails=False):
         fake_db = object()
         with patch.dict(sys.modules, {"firebase_setup": SimpleNamespace(db=fake_db)}), \
+             patch.object(email_tasks, "account_email", return_value="james@example.org"), \
              patch.object(email_tasks, "marketing_blocked", return_value=None), \
              patch.object(email_tasks, "_compute_recap_stats", return_value=stats) as compute, \
              patch.object(email_tasks.email_service, "send_monthly_recap",
@@ -378,9 +399,10 @@ class SendTaskTests(unittest.TestCase):
 
 
 class FakeUserDoc:
-    def __init__(self, doc_id, data):
+    def __init__(self, doc_id, data, auth_email=None):
         self.id = doc_id
         self._data = data
+        self.auth_email = auth_email  # what Firebase Auth holds for this uid
         self.reference = MagicMock()
 
     def to_dict(self):
@@ -431,15 +453,24 @@ class FakeBeatDB:
 
 
 def _active_user(doc_id, email, **extra):
-    data = {"subscriptionStatus": "active", "email": email, "displayName": "U"}
+    data = {"subscriptionStatus": "active", "displayName": "U"}
     data.update(extra)
-    return FakeUserDoc(doc_id, data)
+    return FakeUserDoc(doc_id, data, auth_email=email)
+
+
+def _fake_auth(docs):
+    """account_emails over the docs' Auth addresses."""
+    def account_emails(uids):
+        wanted = set(uids)
+        return {d.id: d.auth_email for d in docs if d.id in wanted and d.auth_email}
+    return account_emails
 
 
 class CheckTaskTests(unittest.TestCase):
     def _run_beat(self, docs, page_size=2, dry_run=False):
         db = FakeBeatDB(docs)
         with patch.dict(sys.modules, {"firebase_setup": SimpleNamespace(db=db)}), \
+             patch.object(email_tasks, "account_emails", _fake_auth(docs)), \
              patch.object(email_tasks, "RECAP_PAGE_SIZE", page_size), \
              patch.object(email_tasks.send_monthly_recap_task, "apply_async") as dispatch:
             result = email_tasks.check_monthly_recap_task(dry_run=dry_run)
@@ -453,9 +484,11 @@ class CheckTaskTests(unittest.TestCase):
         self.assertEqual(dispatch.call_count, 5)
         for doc in docs:
             doc.reference.update.assert_called_once()
-        # user_id travels as a kwarg, stats do not travel at all
+        # Only the name and uid travel: no stats, and no address (the send
+        # task looks it up in Firebase Auth when it runs)
         _, kwargs = dispatch.call_args
-        self.assertEqual(set(kwargs["kwargs"]), {"user_id"})
+        self.assertEqual(set(kwargs["kwargs"]), {"user_name", "user_id"})
+        self.assertNotIn("args", kwargs)
 
     def test_dedupe_and_cooldown_skip(self):
         now = datetime.now(timezone.utc)
@@ -469,7 +502,7 @@ class CheckTaskTests(unittest.TestCase):
         result, dispatch = self._run_beat(docs)
         self.assertEqual(result["emails_queued"], 1)
         dispatch.assert_called_once()
-        self.assertEqual(dispatch.call_args[1]["args"][0], "c@real.org")
+        self.assertEqual(dispatch.call_args[1]["kwargs"]["user_id"], "uid3")
 
     def test_dry_run_dispatches_and_marks_nothing(self):
         docs = [_active_user("uid1", "a@real.org")]
@@ -509,7 +542,8 @@ ACCOUNT_TASKS = {
 
 def _call(task_name, extra):
     task = getattr(email_tasks, task_name)
-    return task("ada@example.org", "Ada", *extra, user_id="uid1")
+    with patch.object(email_tasks, "account_email", return_value="ada@example.org"):
+        return task("ada@example.org", "Ada", *extra, user_id="uid1")
 
 
 class ConsentGateTests(unittest.TestCase):
@@ -537,7 +571,8 @@ class ConsentGateTests(unittest.TestCase):
         # Fail closed: the error reaches Celery's autoretry instead of a send.
         task_name, (sender, extra) = "send_day1_help_center_task", MARKETING_TASKS["send_day1_help_center_task"]
         boom = email_tracking.MarketingConsentUnavailable("firestore down")
-        with patch.object(email_tasks, "marketing_blocked", side_effect=boom), \
+        with patch.object(email_tasks, "account_email", return_value="ada@example.org"), \
+             patch.object(email_tasks, "marketing_blocked", side_effect=boom), \
              patch.object(email_tasks.email_service, sender) as send:
             with self.assertRaises(Exception):
                 email_tasks.send_day1_help_center_task.run("ada@example.org", "Ada", user_id="uid1")
@@ -588,6 +623,14 @@ class MarketingBlockedTests(unittest.TestCase):
         for record in ("emailUnsubscribes/ada@example.org", "emailUnsubscribes/Ada@Example.org"):
             with self.subTest(record=record):
                 self.assertEqual(self._blocked({"users/u1": {}, record: {}}), "unsubscribed")
+
+    def test_an_opt_out_under_the_doc_address_still_blocks(self):
+        # Marketing used to go to users/{uid}.email, so unsubscribe links
+        # carried that address; the email now goes to the Auth address.
+        docs = {"users/u1": {"email": "Old@Example.org"}, "emailUnsubscribes/old@example.org": {}}
+        self.assertEqual(self._blocked(docs, email="new@example.org"), "unsubscribed")
+        self.assertIsNone(self._blocked({"users/u1": {"email": "old@example.org"}}, email="new@example.org"))
+        self.assertIsNone(self._blocked({"users/u1": {"email": 42}}, email="new@example.org"))
 
     def test_no_uid_or_no_account_blocks(self):
         self.assertEqual(self._blocked({}, uid=None), "no_user_id")

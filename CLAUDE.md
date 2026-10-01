@@ -157,6 +157,18 @@ Score → status: ≥60 healthy, ≥30 atRisk, <30 churning.
 - Deduplication via `emailsSent` flags on user documents
 - Invalid/test email filtering
 
+**Never trust what a client can write.** firestore.rules (in cerebral) lets the signed-in owner write
+their own `users/{uid}` doc, so:
+- **Recipients come from Firebase Auth, by uid** (`account_email.py`), never `users/{uid}.email`.
+  Each send task looks the address up when it runs (`_recipient`), so a queued message carries only
+  the uid and the name. The beat tasks do one batched lookup per run (`account_emails`, 100 uids per
+  call) to skip accounts with no usable address before setting their `emailsSent` flag.
+- **Templates escape every supplied value** (`email_service._text`): display names, feature
+  announcement copy, the renewal amount (it carries `subscriptionCurrency`). Subjects go through
+  `_one_line`. `server/test_email_trust.py` renders every `get_*_email` with hostile values.
+- Don't require `email_verified`: neither app ever sends a verification email, so every
+  email/password account is unverified.
+
 **Marketing vs account email (Oct 2026).** cerebral owns the consent rule and every write
 (`services/marketing_email/consent.py` there); this app only reads it.
 - **Marketing** = `email_service.MARKETING_EMAIL_TYPES`: day1/day3/day7, signup_no_trial_nudge,
@@ -164,8 +176,10 @@ Score → status: ≥60 healthy, ≥30 atRisk, <30 churning.
   memory_2_announcement). Sent from `MARKETING_FROM_EMAIL` (default `Chunk AI <meetchunk@chunkapp.com>`,
   reply-to `MARKETING_REPLY_TO`), and only when `marketing_blocked(uid, email)` is None: the account's
   `users/{uid}.isSubscribedToEmails` is not False and the address has no `emailUnsubscribes` record
-  (lowercase id, or the spelling the link carried). It fails closed: no uid or no user doc blocks, and
-  a failed read raises, so autoretry tries again and then drops the email.
+  (lowercase id, or the spelling the link carried). A record under the doc's own `email` blocks too:
+  marketing went to that address before it went to the Auth one, so old links carried it. It fails
+  closed: no uid or no user doc blocks, and a failed read raises, so autoretry tries again and then
+  drops the email.
 - **Account** = everything else (trial_started, trial_ending, renewal_reminder, billing_issue,
   subscription_expired, welcome): from `info@`, never checks consent.
 - Unsubscribe links point at cerebral's `/email/unsubscribe` (GET confirms, POST is RFC 8058
