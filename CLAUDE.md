@@ -169,12 +169,13 @@ Score → status: ≥60 healthy, ≥30 atRisk, <30 churning.
 - **Account** = everything else (trial_started, trial_ending, renewal_reminder, billing_issue,
   subscription_expired, welcome): from `info@`, never checks consent.
 - Unsubscribe links point at cerebral's `/email/unsubscribe` (GET confirms, POST is RFC 8058
-  one-click) and opt the address out of marketing only. Without `EMAIL_UNSUBSCRIBE_SECRET` no link is
-  built (cerebral refuses unsigned links). The address is percent-encoded, so "+" survives.
+  one-click). Like Resend's own link, it covers everything: out of Chunk Marketing and General, plus
+  Resend's `unsubscribed` flag; account emails still arrive. Without `EMAIL_UNSUBSCRIBE_SECRET` no link
+  is built (cerebral refuses unsigned links). The address is percent-encoded, so "+" survives.
 - **Broadcasts** (repo-root `create_*_broadcast.py`) target Resend's **Chunk Marketing** segment
   through `broadcast_settings.py`: `RESEND_MARKETING_SEGMENT_ID` from the environment, else cerebral's
-  Heroku config. Never General: it was filled with the same people once (2026-10-01), but nothing
-  keeps it in sync. Re-saving an old draft moves it to Chunk Marketing.
+  Heroku config. Never General: it holds every account, including those that switched marketing off
+  (James, 2026-10-01). Re-saving an old draft moves it to Chunk Marketing.
 
 **Tracking** (`email_tracking.py`):
 - Every sent email logged to Firestore `emailTracking` collection

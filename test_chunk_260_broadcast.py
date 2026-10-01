@@ -7,7 +7,7 @@ from functools import partial
 from unittest.mock import Mock, patch
 
 import broadcast_settings
-from broadcast_settings import LEGACY_GENERAL_SEGMENT_ID, BroadcastConfigError, marketing_segment_id
+from broadcast_settings import GENERAL_SEGMENT_ID, BroadcastConfigError, marketing_segment_id
 from create_chunk_260_broadcast import (
     BROADCAST_NAME, DraftError, FROM_EMAIL, REPLY_TO, Resend, save_draft as _save_draft,
 )
@@ -31,7 +31,7 @@ class BroadcastDraftTests(unittest.TestCase):
         self.assertEqual(REPLY_TO, "meetchunk@chunkapp.com")
 
     def test_a_draft_saved_for_general_moves_to_marketing(self):
-        legacy = {**self.saved, "segment_id": LEGACY_GENERAL_SEGMENT_ID, "reply_to": ["info@chunkapp.com"],
+        legacy = {**self.saved, "segment_id": GENERAL_SEGMENT_ID, "reply_to": ["info@chunkapp.com"],
                   "from": "Chunk AI <info@chunkapp.com>"}
         client = Mock()
         client.request.side_effect = [self.segment, {"data": [legacy], "has_more": False}, legacy,
@@ -150,7 +150,7 @@ class SegmentSettingTests(unittest.TestCase):
         self.assertEqual(run.call_args.args[0][-2:], ["--app", "cerebral"])
 
     def test_no_segment_or_the_legacy_one_is_refused(self):
-        for env_value in (None, LEGACY_GENERAL_SEGMENT_ID):
+        for env_value in (None, GENERAL_SEGMENT_ID):
             with self.subTest(env_value=env_value), self.assertRaises(BroadcastConfigError):
                 self._segment(env_value)
 

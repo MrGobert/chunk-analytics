@@ -2,9 +2,9 @@
 
 Chunk Marketing holds exactly the people who want marketing email. cerebral
 keeps it in sync with each account's "Product Updates & Offers" switch and
-every unsubscribe (services/marketing_email/consent.py). "General" was filled
-with the same people once (2026-10-01) but nothing keeps it in sync, so no
-broadcast may target it.
+every unsubscribe (services/marketing_email/consent.py). "General" holds every
+account, including the ones that switched marketing off (James, 2026-10-01),
+so a marketing broadcast must never target it.
 
 The segment id lives in RESEND_MARKETING_SEGMENT_ID on cerebral, which owns
 the sync. Scripts read it from the environment, else from cerebral's Heroku
@@ -18,7 +18,7 @@ FROM_EMAIL = "Chunk AI <meetchunk@chunkapp.com>"
 REPLY_TO = "meetchunk@chunkapp.com"
 SEGMENT_NAME = "Chunk Marketing"
 SEGMENT_ENV = "RESEND_MARKETING_SEGMENT_ID"
-LEGACY_GENERAL_SEGMENT_ID = "bd174a71-cae1-4af4-8795-a3115d832819"
+GENERAL_SEGMENT_ID = "bd174a71-cae1-4af4-8795-a3115d832819"
 
 
 class BroadcastConfigError(RuntimeError):
@@ -42,6 +42,8 @@ def marketing_segment_id() -> str:
             f"{SEGMENT_ENV} is not set on cerebral. Find the segment's id with "
             "cerebral's `scripts/marketing_segment.py --create-segment` and set it there."
         )
-    if value == LEGACY_GENERAL_SEGMENT_ID:
-        raise BroadcastConfigError(f"{SEGMENT_ENV} points at General, which is not kept in sync.")
+    if value == GENERAL_SEGMENT_ID:
+        raise BroadcastConfigError(
+            f"{SEGMENT_ENV} points at General, which includes accounts that turned marketing off."
+        )
     return value

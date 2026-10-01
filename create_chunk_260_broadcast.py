@@ -23,7 +23,7 @@ import urllib.parse
 import urllib.request
 
 from broadcast_settings import (
-    FROM_EMAIL, LEGACY_GENERAL_SEGMENT_ID, REPLY_TO, SEGMENT_NAME, BroadcastConfigError, marketing_segment_id,
+    FROM_EMAIL, GENERAL_SEGMENT_ID, REPLY_TO, SEGMENT_NAME, BroadcastConfigError, marketing_segment_id,
 )
 from server.chunk_260_email import get_chunk_260_email, UNSUBSCRIBE
 
@@ -147,7 +147,7 @@ def save_draft(client, subject, html, text, segment_id):
         ensure_draft(current)
         # A draft saved before Chunk Marketing existed targets General;
         # anything else is someone else's change and is left alone.
-        if (current.get("segment_id") or current.get("audience_id")) not in (segment_id, LEGACY_GENERAL_SEGMENT_ID):
+        if (current.get("segment_id") or current.get("audience_id")) not in (segment_id, GENERAL_SEGMENT_ID):
             raise DraftError("The matching draft targets an unexpected segment; it was not changed.")
         client.request("broadcasts/" + broadcast_id, "PATCH", {**content, **routing})
         action = "updated"
