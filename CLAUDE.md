@@ -181,7 +181,13 @@ their own `users/{uid}` doc, so:
   closed: no uid or no user doc blocks, and a failed read raises, so autoretry tries again and then
   drops the email.
 - **Account** = everything else (trial_started, trial_ending, renewal_reminder, billing_issue,
-  subscription_expired, welcome): from `info@`, never checks consent.
+  subscription_expired): from `info@`, never checks consent.
+- **The welcome email isn't this app's.** The Cloud Function `syncEmailToFirestore`
+  (semantic/firebase_functions) sends it at signup and records `welcomeEmailSentAt`. This app's hourly
+  copy (`check_welcome_instant`) never sent: it raised NameError. It was retired in Oct 2026 because
+  its `emailsSent.welcome` flag started the 24-hour cooldown, which kept a third of new users from ever
+  getting day 1. The welcome doesn't count toward the cooldown, and older docs' `emailsSent.welcome` is
+  ignored.
 - Unsubscribe links point at cerebral's `/email/unsubscribe` (GET confirms, POST is RFC 8058
   one-click). Like Resend's own link, it covers everything: out of Chunk Marketing and General, plus
   Resend's `unsubscribed` flag; account emails still arrive. Without `EMAIL_UNSUBSCRIBE_SECRET` no link

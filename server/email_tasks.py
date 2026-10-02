@@ -34,8 +34,11 @@ logging.basicConfig(level=logging.INFO)
 # Marketing email types that should not overlap within 24 hours.
 # Transactional emails (billing_issue, subscription_expired) are excluded —
 # those should always send immediately regardless of recent marketing emails.
+# The welcome email doesn't count: the day-1 email follows it 20-28 hours
+# after signup, and a 24-hour cooldown from it kept a third of new users from
+# ever getting day 1. Older user docs still carry emailsSent.welcome from the
+# retired check_welcome_instant beat; it is ignored.
 MARKETING_EMAIL_FLAGS = [
-    "welcome",
     "winback7Day",
     "winback30Day",
     "reengagement14Day",
@@ -880,108 +883,9 @@ def check_churned_users_30day_task(self):
 
 
 # ============================================================
-# Instant Welcome Email Task
-# ============================================================
-
-
-@shared_task(
-    bind=True,
-    name="send_welcome_email",
-    ignore_result=True,
-    soft_time_limit=30,
-    time_limit=45,
-    autoretry_for=(Exception,),
-    retry_backoff=True,
-    retry_kwargs={"max_retries": 3},
-)
-def send_welcome_task(self, email: str = None, user_name: str = "there", user_id: str = None):
-    """
-    Send instant welcome email on signup.
-
-    Called immediately when a new user signs up (via beat task polling).
-    """
-    email, skipped = _recipient(user_id, "welcome")
-    if skipped:
-        return skipped
-
-    try:
-        logging.info(f"[EMAIL_TASK] Sending welcome email to {email}")
-        first_name = _extract_first_name(user_name)
-        result = email_service.send_welcome(email, first_name, user_id)
-        resend_email_id = result.get("id")
-        if resend_email_id and user_id:
-            track_email_sent(user_id, email, "welcome", resend_email_id)
-        return {"status": "sent", "email": email, "resend_id": resend_email_id}
-    except Exception as e:
-        logging.error(f"[EMAIL_TASK] Failed to send welcome email to {email}: {e}")
-        raise
-
-
-@shared_task(
-    bind=True,
-    name="check_welcome_instant",
-    ignore_result=True,
-    soft_time_limit=300,
-    time_limit=360,
-)
-def check_welcome_instant_task(self):
-    """
-    Beat task: Find users who signed up in the last 2 hours and send instant welcome email.
-
-    Schedule: Run every hour via Celery Beat.
-    Window: users created 5 min to 2 hours ago (5-min buffer to let Firestore settle).
-    """
-    from firebase_setup import db
-
-    try:
-        logging.info("[BEAT_TASK] Checking for new users needing welcome email...")
-
-        now = datetime.now(timezone.utc)
-        # Window: users who signed up 5 minutes to 2 hours ago
-        window_start = now - timedelta(hours=2)
-        window_end = now - timedelta(minutes=5)
-
-        users_ref = db.collection("users")
-        query = (
-            users_ref.where("createdAt", ">=", window_start)
-            .where("createdAt", "<=", window_end)
-            .limit(500)
-        )
-
-        docs = list(query.stream())
-        addresses = account_emails(doc.id for doc in docs)
-
-        count = 0
-        for doc in docs:
-            user_data = doc.to_dict()
-            email = addresses.get(doc.id)
-            if _should_skip_user(email, user_data):
-                continue
-            name = _display_name(user_data)
-
-            # Check if we already sent welcome email
-            emails_sent = user_data.get("emailsSent", {})
-            if emails_sent.get("welcome"):
-                continue
-
-            if email:
-                send_welcome_task.delay(user_name=name, user_id=doc.id)
-                doc.reference.update({"emailsSent.welcome": now})
-                count += 1
-                logging.info(f"[BEAT_TASK] Queued welcome email for {email}")
-
-        logging.info(f"[BEAT_TASK] ✓ Queued {count} welcome emails")
-        return {"status": "completed", "emails_queued": count}
-
-    except Exception as e:
-        logging.error(f"[BEAT_TASK] ❌ Error checking new users for welcome: {e}")
-        import traceback
-        logging.error(f"[BEAT_TASK] Traceback: {traceback.format_exc()}")
-        raise
-
-
-# ============================================================
 # Welcome Sequence Tasks - Onboarding Drip
+# The welcome email itself is sent at signup by the Cloud Function
+# syncEmailToFirestore (semantic/firebase_functions), never from here.
 # ============================================================
 
 

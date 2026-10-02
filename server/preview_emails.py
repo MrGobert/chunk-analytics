@@ -22,11 +22,6 @@ PORT = 8898
 
 # All available email templates with sample data
 TEMPLATES = {
-    "welcome": {
-        "name": "Welcome (Instant)",
-        "category": "Welcome Sequence",
-        "fn": lambda: email_service.get_welcome_email("James"),
-    },
     "day1_help_center": {
         "name": "Day 1 — Help Center",
         "category": "Welcome Sequence",
