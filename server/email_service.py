@@ -27,7 +27,8 @@ FROM_EMAIL = "Chunk AI <info@chunkapp.com>"
 
 # Marketing email comes from the marketing mailbox and goes only to accounts
 # that consent (email_tasks._marketing_skip). Account email (billing, trial
-# ending, renewal reminder, welcome) stays on FROM_EMAIL and ignores consent.
+# ending, renewal reminder) stays on FROM_EMAIL and ignores consent. The
+# welcome email is the Cloud Function syncEmailToFirestore's, not this module's.
 # The env vars are a no-deploy way back to info@ if the new sender has
 # deliverability trouble (Apple's private relay accepts only registered
 # senders).
@@ -137,6 +138,23 @@ def _accent_class(color: str) -> str:
     return _DM_ACCENT_CLASS.get(_TEXT_SAFE.get(color, color), "")
 
 
+# Templates are trusted HTML; the values put into them are not. A display name
+# comes from users/{uid}, which its owner can write, and a feature
+# announcement's copy or a renewal amount comes from outside the template, so
+# each goes through one of these first. (Same helpers as cerebral's
+# email_service.)
+
+
+def _text(value) -> str:
+    """Escape a user-supplied value for HTML text or an attribute."""
+    return escape(str(value), quote=True)
+
+
+def _one_line(value) -> str:
+    """Collapse whitespace so a supplied value can't break a subject line."""
+    return " ".join(str(value).split())
+
+
 def _base_email_template(
     preheader: str,
     hero_title: str,
@@ -155,6 +173,9 @@ def _base_email_template(
     hero_dark: If True, hero uses the night bg (#241B12, "Ember at Night"). If False, paper-deep (#F3EADC).
     hero_label: Optional eyebrow label above the title (e.g., "WELCOME SEQUENCE · DAY 1").
     hero_serif_word: If provided, this word in the hero_title gets the italic-ember "wonk" treatment.
+
+    Every argument except cta_url is inserted as HTML, so a caller escapes any
+    user-supplied part first (_text). cta_url is a plain URL, escaped here.
     """
     hero_bg = BRAND["bg_dark"] if hero_dark else BRAND["surface_elevated"]
     hero_text = BRAND["text_inverse"] if hero_dark else BRAND["text_primary"]
@@ -188,7 +209,7 @@ def _base_email_template(
                 <table border="0" cellpadding="0" cellspacing="0" role="presentation">
                     <tr>
                         <td style="padding:16px 28px;background-color:{BRAND['primary']};border-radius:16px;box-shadow:0 8px 28px rgba(232,77,43,0.28);mso-padding-alt:0" class="cta-btn">
-                            <a href="{cta_url}" style="color:#FFF8F2;font-family:{FONT_SANS};font-weight:700;text-decoration:none;font-size:16px;display:inline-block;line-height:24px" target="_blank">{cta_text}</a>
+                            <a href="{_text(cta_url)}" style="color:#FFF8F2;font-family:{FONT_SANS};font-weight:700;text-decoration:none;font-size:16px;display:inline-block;line-height:24px" target="_blank">{cta_text}</a>
                         </td>
                     </tr>
                 </table>
@@ -551,100 +572,13 @@ def _content_type_legend() -> str:
 # ============================================================
 
 
-def get_welcome_email(user_name: str = "there") -> tuple[str, str, str]:
-    """
-    Instant welcome email — sent immediately on signup.
-    Warm, concise, and curiosity-driven. Introduces the 5 core value props
-    without deep-diving any single one (the drip campaign handles depth).
-    Layout: hero → personal greeting → feature teasers as a compact grid → single CTA.
-    """
-    subject = "Welcome to Chunk ⚡"
-
-    # Feature teaser cards — short, curiosity-sparking descriptions
-    features_html = ""
-
-    # Each feature as a compact, elegant row with accent dot + one-liner
-    feature_items = [
-        (BRAND["color_conversations"], "MODELS", "🧠", "Every Top AI Model",
-         "GPT-5, Claude, Gemini — switch per conversation. One app, every model."),
-        (BRAND["color_documents"], "COLLECTIONS", "📚", "Collections",
-         "Gather notes, docs, and URLs into one workspace. Ask AI across all of it."),
-        (BRAND["color_reports"], "ARTIFACTS", "🧪", "Artifacts",
-         "Turn audio lectures, podcasts, YouTube videos, and PDFs into searchable transcripts, study guides, and more."),
-        (BRAND["color_notes"], "NOTES", "📝", "Connected Notes + Graph",
-         "Wiki-link your ideas with [[brackets]] and watch a living knowledge graph reveal how they connect."),
-        (BRAND["color_urls"], "AUTOMATIONS", "📡", "Automations",
-         "Research on autopilot. Standing agents re-run your query on a schedule and deliver a cited what's-new digest."),
-        (BRAND["accent_blue"], "CAPTURE", "📥", "Share to Chunk",
-         "Save anything from anywhere — the share sheet on iPhone, iPad & Mac, the browser clipper, or forward any email. AI files it in your Inbox."),
-    ]
-
-    for color, label, emoji, title, desc in feature_items:
-        features_html += f"""
-    <table width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation" style="margin-bottom:8px;background-color:{BRAND['surface_elevated']};border-radius:12px;overflow:hidden" class="surface-card">
-        <tr>
-            <td style="width:4px;background-color:{color}" width="4"></td>
-            <td style="padding:16px 18px">
-                <table width="100%" border="0" cellpadding="0" cellspacing="0">
-                    <tr>
-                        <td style="width:32px;vertical-align:top;padding-right:12px;font-size:20px;line-height:32px" width="32">{emoji}</td>
-                        <td style="vertical-align:top">
-                            <p style="margin:0 0 2px 0;font-family:{FONT_SANS};font-weight:700;color:{BRAND['text_primary']};font-size:15px;letter-spacing:-0.01em" class="text-dark">{title}</p>
-                            <p style="margin:0;font-family:{FONT_SANS};color:{BRAND['text_muted']};font-size:13px;line-height:1.5" class="text-muted-dm">{desc}</p>
-                        </td>
-                    </tr>
-                </table>
-            </td>
-        </tr>
-    </table>
-    """
-
-    body = f"""
-    <p style="margin:0 0 20px 0;font-family:{FONT_SANS};font-size:16px;color:{BRAND['text_primary']};line-height:1.6" class="text-dark">
-        Hey {user_name},
-    </p>
-    <p style="margin:0 0 24px 0;font-family:{FONT_SANS};font-size:16px;color:{BRAND['text_primary']};line-height:1.6" class="text-dark">
-        Welcome to Chunk — your AI-powered research workspace. Here's what's at your fingertips:
-    </p>
-
-    {features_html}
-
-    <table width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation" style="margin:24px 0 0 0">
-        <tr>
-            <td align="center" style="padding:8px 0">
-                <p style="margin:0;font-family:{FONT_SERIF};font-weight:600;font-size:24px;color:{BRAND['text_primary']};line-height:1.2;text-align:center" class="text-dark">One app. Every model. All your <span style="font-style:italic;color:{BRAND['primary']}">research</span>, connected.</p>
-            </td>
-        </tr>
-    </table>
-    """
-
-    html = _base_email_template(
-        preheader="Welcome to Chunk — every top AI model, connected notes, and a research workspace that thinks with you.",
-        hero_title="Welcome to Chunk",
-        hero_subtitle="Your AI research workspace is ready.",
-        body_content=body,
-        cta_text="Start Exploring",
-        cta_url=BRAND["web_url"] + "/chat?source=welcome_email",
-        footer_tip="Try this: type [[ in any note to create a wiki link. Your ideas start connecting themselves.",
-        hero_dark=True,
-        hero_label="WELCOME",
-        hero_serif_word="Chunk",
-    )
-
-    return (
-        subject,
-        html,
-        f"Welcome to Chunk! Your AI research workspace is ready. Every top AI model, connected notes, collections, artifacts, Automations, and Share to Chunk capture — all in one app. Get started: {BRAND['login_url']}",
-    )
-
-
 def get_trial_started_email(user_name: str = "there") -> tuple[str, str, str]:
     """Generate trial started email — activation focus."""
     subject = "🎉 Your Pro Trial is Active"
 
     body = f"""
     <p style="margin:0 0 20px 0;font-family:{FONT_SANS};font-size:16px;color:{BRAND['text_primary']};line-height:1.6" class="text-dark">
-        Hey {user_name},
+        Hey {_text(user_name)},
     </p>
     <p style="margin:0 0 24px 0;font-family:{FONT_SANS};font-size:16px;color:{BRAND['text_primary']};line-height:1.6" class="text-dark">
         Your <strong>3-day Pro trial</strong> just unlocked the full Chunk research workspace. Here's what you can do right now:
@@ -704,7 +638,7 @@ def get_trial_ending_email(
 
     body = f"""
     <p style="margin:0 0 20px 0;font-family:{FONT_SANS};font-size:16px;color:{BRAND['text_primary']};line-height:1.6" class="text-dark">
-        Hey {user_name},
+        Hey {_text(user_name)},
     </p>
     <p style="margin:0 0 24px 0;font-family:{FONT_SANS};font-size:16px;color:{BRAND['text_primary']};line-height:1.6" class="text-dark">
         Your Pro trial ends <strong>{urgency}</strong>. After that, you'll lose access to:
@@ -741,7 +675,7 @@ def get_subscription_expired_email(user_name: str = "there") -> tuple[str, str, 
 
     body = f"""
     <p style="margin:0 0 20px 0;font-family:{FONT_SANS};font-size:16px;color:{BRAND['text_primary']};line-height:1.6" class="text-dark">
-        Hey {user_name},
+        Hey {_text(user_name)},
     </p>
     <p style="margin:0 0 20px 0;font-family:{FONT_SANS};font-size:16px;color:{BRAND['text_primary']};line-height:1.6" class="text-dark">
         Your Chunk Pro subscription has ended. We're sorry to see you go.
@@ -778,7 +712,7 @@ def get_winback_7day_email(user_name: str = "there") -> tuple[str, str, str]:
 
     body = f"""
     <p style="margin:0 0 20px 0;font-family:{FONT_SANS};font-size:16px;color:{BRAND['text_primary']};line-height:1.6" class="text-dark">
-        Hey {user_name},
+        Hey {_text(user_name)},
     </p>
     <p style="margin:0 0 24px 0;font-family:{FONT_SANS};font-size:16px;color:{BRAND['text_primary']};line-height:1.6" class="text-dark">
         It's been a week. Your collections, notes, and knowledge graph are still here — but they're missing their AI superpowers.
@@ -817,7 +751,7 @@ def get_winback_30day_email(user_name: str = "there") -> tuple[str, str, str]:
 
     body = f"""
     <p style="margin:0 0 20px 0;font-family:{FONT_SANS};font-size:16px;color:{BRAND['text_primary']};line-height:1.6" class="text-dark">
-        Hey {user_name},
+        Hey {_text(user_name)},
     </p>
     <p style="margin:0 0 24px 0;font-family:{FONT_SANS};font-size:16px;color:{BRAND['text_primary']};line-height:1.6" class="text-dark">
         It's been a month since you left Chunk, and we've been building. Here's what's new:
@@ -895,7 +829,7 @@ def get_monthly_recap_email(
 
     body = f"""
     <p style="margin:0 0 20px 0;font-family:{FONT_SANS};font-size:16px;color:{BRAND['text_primary']};line-height:1.6" class="text-dark">
-        Hey {user_name},
+        Hey {_text(user_name)},
     </p>
     <p style="margin:0 0 24px 0;font-family:{FONT_SANS};font-size:16px;color:{BRAND['text_primary']};line-height:1.6" class="text-dark">
         Here's what you accomplished with Chunk this month:
@@ -936,7 +870,7 @@ def get_renewal_reminder_email(
 
     body = f"""
     <p style="margin:0 0 20px 0;font-family:{FONT_SANS};font-size:16px;color:{BRAND['text_primary']};line-height:1.6" class="text-dark">
-        Hey {user_name},
+        Hey {_text(user_name)},
     </p>
     <p style="margin:0 0 24px 0;font-family:{FONT_SANS};font-size:16px;color:{BRAND['text_primary']};line-height:1.6" class="text-dark">
         Just a heads up — your Chunk Pro subscription will automatically renew in <strong>{days_until_renewal} day{'s' if days_until_renewal > 1 else ''}</strong>.
@@ -948,7 +882,7 @@ def get_renewal_reminder_email(
             <tr>
                 <td>
                     <p style="margin:0 0 4px 0;font-family:{FONT_MONO};font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:{BRAND['text_muted_dark']}">Renewal Amount</p>
-                    <p style="margin:0;font-family:{FONT_SERIF};font-size:28px;font-weight:600;color:{BRAND['text_inverse']}">{amount}</p>
+                    <p style="margin:0;font-family:{FONT_SERIF};font-size:28px;font-weight:600;color:{BRAND['text_inverse']}">{_text(amount)}</p>
                 </td>
                 <td align="right" style="vertical-align:middle">
                     <div style="width:10px;height:10px;border-radius:50%;background-color:{BRAND['signal_green']};display:inline-block"></div>
@@ -967,7 +901,7 @@ def get_renewal_reminder_email(
     """
 
     html = _base_email_template(
-        preheader=f"Your Chunk Pro subscription ({amount}) renews in {days_until_renewal} days. No action needed.",
+        preheader=f"Your Chunk Pro subscription ({_text(amount)}) renews in {days_until_renewal} days. No action needed.",
         hero_title="Renewal Reminder",
         hero_subtitle=f"Your Pro subscription renews in {days_until_renewal} day{'s' if days_until_renewal > 1 else ''}.",
         body_content=body,
@@ -992,7 +926,7 @@ def get_day1_help_center_email(user_name: str = "there") -> tuple[str, str, str]
 
     body = f"""
     <p style="margin:0 0 20px 0;font-family:{FONT_SANS};font-size:16px;color:{BRAND['text_primary']};line-height:1.6" class="text-dark">
-        Hey {user_name},
+        Hey {_text(user_name)},
     </p>
     <p style="margin:0 0 16px 0;font-family:{FONT_SANS};font-size:16px;color:{BRAND['text_primary']};line-height:1.6" class="text-dark">
         Chunk is a powerful workspace — AI chat, research reports, connected notes, collections, artifacts, and more. That's a lot to explore.
@@ -1041,7 +975,7 @@ def get_day3_artifacts_email(user_name: str = "there") -> tuple[str, str, str]:
 
     body = f"""
     <p style="margin:0 0 20px 0;font-family:{FONT_SANS};font-size:16px;color:{BRAND['text_primary']};line-height:1.6" class="text-dark">
-        Hey {user_name},
+        Hey {_text(user_name)},
     </p>
     <p style="margin:0 0 24px 0;font-family:{FONT_SANS};font-size:16px;color:{BRAND['text_primary']};line-height:1.6" class="text-dark">
         Turn any content into knowledge. Instantly.
@@ -1095,7 +1029,7 @@ def get_day7_researcher_stories_email(user_name: str = "there") -> tuple[str, st
 
     body = f"""
     <p style="margin:0 0 20px 0;font-family:{FONT_SANS};font-size:16px;color:{BRAND['text_primary']};line-height:1.6" class="text-dark">
-        Hey {user_name},
+        Hey {_text(user_name)},
     </p>
     <p style="margin:0 0 24px 0;font-family:{FONT_SANS};font-size:16px;color:{BRAND['text_primary']};line-height:1.6" class="text-dark">
         After a week with Chunk, we wanted to share how others are getting the most out of it.
@@ -1153,7 +1087,7 @@ def get_billing_issue_email(user_name: str = "there") -> tuple[str, str, str]:
 
     body = f"""
     <p style="margin:0 0 20px 0;font-family:{FONT_SANS};font-size:16px;color:{BRAND['text_primary']};line-height:1.6" class="text-dark">
-        Hey {user_name},
+        Hey {_text(user_name)},
     </p>
     <p style="margin:0 0 24px 0;font-family:{FONT_SANS};font-size:16px;color:{BRAND['text_primary']};line-height:1.6" class="text-dark">
         We tried to process your Chunk Pro payment, but it didn't go through. This usually happens when a card expires, gets replaced, or the bank blocks the charge.
@@ -1201,7 +1135,7 @@ def get_reengagement_14day_email(user_name: str = "there") -> tuple[str, str, st
 
     body = f"""
     <p style="margin:0 0 20px 0;font-family:{FONT_SANS};font-size:16px;color:{BRAND['text_primary']};line-height:1.6" class="text-dark">
-        Hey {user_name},
+        Hey {_text(user_name)},
     </p>
     <p style="margin:0 0 24px 0;font-family:{FONT_SANS};font-size:16px;color:{BRAND['text_primary']};line-height:1.6" class="text-dark">
         It's been a couple weeks since you last opened Chunk. Here are features you might not have discovered yet:
@@ -1256,7 +1190,7 @@ def get_memory_2_announcement_email(
     </table>
 
     <p style="margin:0 0 20px 0;font-family:{FONT_SANS};font-size:16px;color:{BRAND['text_primary']};line-height:1.7" class="text-dark">
-        Hey {user_name},
+        Hey {_text(user_name)},
     </p>
     <p style="margin:0 0 24px 0;font-family:{FONT_SANS};font-size:16px;color:{BRAND['text_primary']};line-height:1.7" class="text-dark">
         Most AI tools forget you the moment the conversation ends. Starting today, <strong>Chunk doesn't.</strong>
@@ -1471,7 +1405,7 @@ def get_whats_new_summer_2026_email(
 
     body = f"""
     <p style="margin:0 0 20px 0;font-family:{FONT_SANS};font-size:16px;color:{BRAND['text_primary']};line-height:1.7" class="text-dark">
-        Hey {user_name},
+        Hey {_text(user_name)},
     </p>
     <p style="margin:0 0 16px 0;font-family:{FONT_SANS};font-size:16px;color:{BRAND['text_primary']};line-height:1.7" class="text-dark">
         We've spent the summer shipping &mdash; the biggest wave of updates in Chunk's history. Every one of them points the same direction: <strong>everything you save should work together.</strong>
@@ -1594,24 +1528,25 @@ def get_feature_announcement_email(
     feature_emoji: str = "🆕",
 ) -> tuple[str, str, str]:
     """Generate feature announcement email — new feature spotlight."""
-    subject = f"{feature_emoji} New in Chunk: {feature_name}"
+    subject = _one_line(f"{feature_emoji} New in Chunk: {feature_name}")
+    name_html, description_html = _text(feature_name), _text(feature_description)
 
     body = f"""
     <p style="margin:0 0 20px 0;font-family:{FONT_SANS};font-size:16px;color:{BRAND['text_primary']};line-height:1.6" class="text-dark">
-        Hey {user_name},
+        Hey {_text(user_name)},
     </p>
     <p style="margin:0 0 24px 0;font-family:{FONT_SANS};font-size:16px;color:{BRAND['text_primary']};line-height:1.6" class="text-dark">
         We just shipped something new:
     </p>
-    {_feature_card(feature_emoji, feature_name, feature_description, BRAND['primary'], "JUST SHIPPED")}
+    {_feature_card(_text(feature_emoji), name_html, description_html, BRAND['primary'], "JUST SHIPPED")}
     <p style="margin:20px 0 0 0;font-family:{FONT_SANS};font-size:16px;color:{BRAND['text_primary']};line-height:1.6" class="text-dark">
         Update the app and give it a try — we built this one for you.
     </p>
     """
 
     html = _base_email_template(
-        preheader=f"New in Chunk: {feature_name} — {feature_description}",
-        hero_title=f"New: {feature_name}",
+        preheader=f"New in Chunk: {name_html} — {description_html}",
+        hero_title=f"New: {name_html}",
         hero_subtitle="A new feature just shipped.",
         body_content=body,
         cta_text="Try It Now",
@@ -1633,7 +1568,7 @@ def get_signup_no_trial_nudge_email(user_name: str = "there") -> tuple[str, str,
 
     body = f"""
     <p style="margin:0 0 20px 0;font-family:{FONT_SANS};font-size:16px;color:{BRAND['text_primary']};line-height:1.6" class="text-dark">
-        Hey {user_name},
+        Hey {_text(user_name)},
     </p>
     <p style="margin:0 0 24px 0;font-family:{FONT_SANS};font-size:16px;color:{BRAND['text_primary']};line-height:1.6" class="text-dark">
         You signed up for Chunk but haven't started your <strong>free 3-day Pro trial</strong> yet. That means you're missing out on the full research workspace:
@@ -1758,12 +1693,6 @@ def send_email(to_email: str, subject: str, html: str, text: str, email_type: st
 # ============================================================
 # Convenience Functions
 # ============================================================
-
-
-def send_welcome(to_email: str, user_name: str = "there", user_id: str = None) -> dict:
-    """Send instant welcome email."""
-    subject, html, text = get_welcome_email(user_name)
-    return send_email(to_email, subject, html, text, email_type="welcome", user_id=user_id)
 
 
 def send_trial_started(to_email: str, user_name: str = "there", user_id: str = None) -> dict:

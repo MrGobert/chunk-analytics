@@ -7,11 +7,15 @@ Environment Variables Required:
 - RESEND_API_KEY: Resend API key for sending emails
 
 Usage:
-1. Immediate send: send_trial_ending_task.delay(email, name, hours_remaining)
-2. Scheduled send: send_trial_ending_task.apply_async(args=[...], eta=datetime)
+1. Immediate send: send_trial_ending_task.delay(user_name=name, hours_remaining=12, user_id=uid)
+2. Scheduled send: send_trial_ending_task.apply_async(kwargs={...}, eta=datetime)
 3. Beat schedule: Configured in celery_config.py
 
-Note: Tasks use email_service.py functions internally.
+Note: Tasks use email_service.py functions internally. Each send goes to the
+account's Firebase Auth address, looked up by user_id when the task runs
+(_recipient), never to users/{uid}.email: the account's owner can write that
+doc. The send tasks still take an email first, so messages queued by older
+code bind, but they ignore it.
 """
 
 import logging
@@ -22,6 +26,7 @@ from typing import Optional
 from celery import shared_task
 
 import email_service
+from account_email import account_email, account_emails
 from email_tracking import marketing_blocked, track_email_sent
 
 logging.basicConfig(level=logging.INFO)
@@ -29,8 +34,11 @@ logging.basicConfig(level=logging.INFO)
 # Marketing email types that should not overlap within 24 hours.
 # Transactional emails (billing_issue, subscription_expired) are excluded —
 # those should always send immediately regardless of recent marketing emails.
+# The welcome email doesn't count: the day-1 email follows it 20-28 hours
+# after signup, and a 24-hour cooldown from it kept a third of new users from
+# ever getting day 1. Older user docs still carry emailsSent.welcome from the
+# retired check_welcome_instant beat; it is ignored.
 MARKETING_EMAIL_FLAGS = [
-    "welcome",
     "winback7Day",
     "winback30Day",
     "reengagement14Day",
@@ -138,9 +146,12 @@ def _is_stale_account(user_data: dict, max_age_months: int = 12) -> bool:
     return (now - created).days > (max_age_months * 30)
 
 
-def _should_skip_user(user_data: dict, check_stale: bool = False) -> bool:
-    """Common pre-send checks for beat tasks. Returns True if user should be skipped."""
-    email = user_data.get("email")
+def _should_skip_user(email: Optional[str], user_data: dict, check_stale: bool = False) -> bool:
+    """Common pre-send checks for beat tasks. Returns True if user should be skipped.
+
+    email is the account's Firebase Auth address (account_emails), not
+    user_data["email"], which a client can set to anyone's inbox.
+    """
     if not email or not is_valid_email(email):
         return True
     if _is_test_email(email):
@@ -148,6 +159,42 @@ def _should_skip_user(user_data: dict, check_stale: bool = False) -> bool:
     if check_stale and _is_stale_account(user_data):
         return True
     return False
+
+
+def _recipient(user_id: Optional[str], label: str) -> tuple[Optional[str], Optional[dict]]:
+    """(address, None) for the account's Firebase Auth email, or (None, skip result).
+
+    Every send task addresses its email here, never to an address it was
+    handed: the beat tasks used to pass users/{uid}.email, which the account's
+    owner can point at anyone's inbox. A failed lookup raises, so autoretry
+    tries again and then drops the email.
+    """
+    email = None
+    if not user_id:
+        reason = "no_user_id"
+    else:
+        email = account_email(user_id)
+        if not email:
+            reason = "no_account_email"
+        elif not is_valid_email(email) or _is_test_email(email):
+            reason = "invalid_email"
+        else:
+            return email, None
+    logging.warning(f"[EMAIL_TASK] Skipping {label} for {user_id}: {reason}")
+    return None, {"status": "skipped", "email": email, "reason": reason}
+
+
+def _display_name(user_data: dict) -> str:
+    """The name for "Hey {name},", or "there".
+
+    Clients write displayName and name, so the templates escape it. This only
+    keeps a blank or non-text value from rendering as "Hey ," or "Hey None,".
+    """
+    for field in ("displayName", "name"):
+        value = user_data.get(field)
+        if isinstance(value, str) and value.strip():
+            return " ".join(value.split())
+    return "there"
 
 
 # ============================================================
@@ -323,7 +370,7 @@ def _recap_should_send(stats: dict) -> bool:
 )
 def send_trial_ending_task(
     self,
-    email: str,
+    email: str = None,
     user_name: str = "there",
     hours_remaining: int = 12,
     user_id: str = None,
@@ -338,13 +385,13 @@ def send_trial_ending_task(
         trial_end = datetime.now(timezone.utc) + timedelta(days=3)
         send_time = trial_end - timedelta(hours=12)
         send_trial_ending_task.apply_async(
-            args=[email, user_name, 12, user_id],
+            kwargs={"user_name": user_name, "hours_remaining": 12, "user_id": user_id},
             eta=send_time
         )
     """
-    if not is_valid_email(email):
-        logging.warning(f"[EMAIL_TASK] Invalid email, skipping trial ending: {email}")
-        return {"status": "skipped", "email": email, "reason": "invalid_email"}
+    email, skipped = _recipient(user_id, "trial ending")
+    if skipped:
+        return skipped
 
     try:
         logging.info(f"[EMAIL_TASK] Sending trial ending email to {email}")
@@ -377,7 +424,7 @@ def send_trial_ending_task(
     retry_kwargs={"max_retries": 3},
 )
 def send_winback_7day_task(
-    self, email: str, user_name: str = "there", user_id: str = None
+    self, email: str = None, user_name: str = "there", user_id: str = None
 ):
     """
     Send 7-day winback email with discount offer.
@@ -387,13 +434,13 @@ def send_winback_7day_task(
     Example:
         expiry_date = datetime.now(timezone.utc)
         send_winback_7day_task.apply_async(
-            args=[email, user_name, user_id],
+            kwargs={"user_name": user_name, "user_id": user_id},
             eta=expiry_date + timedelta(days=7)
         )
     """
-    if not is_valid_email(email):
-        logging.warning(f"[EMAIL_TASK] Invalid email, skipping 7-day winback: {email}")
-        return {"status": "skipped", "email": email, "reason": "invalid_email"}
+    email, skipped = _recipient(user_id, "7-day winback")
+    if skipped:
+        return skipped
         
     skipped = _marketing_skip(email, user_id)
     if skipped:
@@ -430,7 +477,7 @@ def send_winback_7day_task(
     retry_kwargs={"max_retries": 3},
 )
 def send_winback_30day_task(
-    self, email: str, user_name: str = "there", user_id: str = None
+    self, email: str = None, user_name: str = "there", user_id: str = None
 ):
     """
     Send 30-day winback email ("What's new" update).
@@ -441,13 +488,13 @@ def send_winback_30day_task(
     Example:
         expiry_date = datetime.now(timezone.utc)
         send_winback_30day_task.apply_async(
-            args=[email, user_name, user_id],
+            kwargs={"user_name": user_name, "user_id": user_id},
             eta=expiry_date + timedelta(days=30)
         )
     """
-    if not is_valid_email(email):
-        logging.warning(f"[EMAIL_TASK] Invalid email, skipping 30-day winback: {email}")
-        return {"status": "skipped", "email": email, "reason": "invalid_email"}
+    email, skipped = _recipient(user_id, "30-day winback")
+    if skipped:
+        return skipped
         
     skipped = _marketing_skip(email, user_id)
     if skipped:
@@ -483,7 +530,7 @@ def send_winback_30day_task(
     retry_backoff=True,
     retry_kwargs={"max_retries": 3},
 )
-def send_monthly_recap_task(self, email: str, user_name: str = "there", user_id: str = None):
+def send_monthly_recap_task(self, email: str = None, user_name: str = "there", user_id: str = None):
     """
     Compute previous-month usage for one user and send the recap email.
 
@@ -492,19 +539,15 @@ def send_monthly_recap_task(self, email: str, user_name: str = "there", user_id:
     replaying a stale payload.
 
     Example:
-        send_monthly_recap_task.delay(email, user_name, user_id="uid")
+        send_monthly_recap_task.delay(user_name=user_name, user_id="uid")
     """
-    if not is_valid_email(email):
-        logging.warning(f"[EMAIL_TASK] Invalid email, skipping monthly recap: {email}")
-        return {"status": "skipped", "email": email, "reason": "invalid_email"}
+    email, skipped = _recipient(user_id, "monthly recap")
+    if skipped:
+        return skipped
 
     skipped = _marketing_skip(email, user_id)
     if skipped:
         return skipped
-
-    if not user_id:
-        logging.warning(f"[EMAIL_TASK] No user_id for monthly recap: {email}")
-        return {"status": "skipped", "email": email, "reason": "no_user_id"}
 
     try:
         from firebase_setup import db
@@ -552,16 +595,16 @@ def send_monthly_recap_task(self, email: str, user_name: str = "there", user_id:
     retry_kwargs={"max_retries": 3},
 )
 def send_subscription_expired_task(
-    self, email: str, user_name: str = "there", user_id: str = None
+    self, email: str = None, user_name: str = "there", user_id: str = None
 ):
     """
     Send subscription expired email.
 
     Called immediately when subscription expires.
     """
-    if not is_valid_email(email):
-        logging.warning(f"[EMAIL_TASK] Invalid email, skipping subscription expired: {email}")
-        return {"status": "skipped", "email": email, "reason": "invalid_email"}
+    email, skipped = _recipient(user_id, "subscription expired")
+    if skipped:
+        return skipped
 
     try:
         logging.info(f"[EMAIL_TASK] Sending subscription expired email to {email}")
@@ -623,15 +666,16 @@ def check_trials_ending_soon_task(self):
             .limit(500)
         )
 
-        docs = query.stream()
+        docs = list(query.stream())
+        addresses = account_emails(doc.id for doc in docs)
 
         count = 0
         for doc in docs:
             user_data = doc.to_dict()
-            if _should_skip_user(user_data):
+            email = addresses.get(doc.id)
+            if _should_skip_user(email, user_data):
                 continue
-            email = user_data.get("email")
-            name = user_data.get("displayName", user_data.get("name", "there"))
+            name = _display_name(user_data)
             trial_end = user_data.get("trialEndDate")
 
             # Check if we already sent trial ending email
@@ -656,7 +700,7 @@ def check_trials_ending_soon_task(self):
                 )
 
                 # Send email with user_id for conversion tracking
-                send_trial_ending_task.delay(email, name, hours_remaining, doc.id)
+                send_trial_ending_task.delay(user_name=name, hours_remaining=hours_remaining, user_id=doc.id)
 
                 # Mark as sent
                 doc.reference.update({"emailsSent.trialEnding": now})
@@ -714,15 +758,16 @@ def check_churned_users_7day_task(self):
             .limit(500)
         )
 
-        docs = query.stream()
+        docs = list(query.stream())
+        addresses = account_emails(doc.id for doc in docs)
 
         count = 0
         for doc in docs:
             user_data = doc.to_dict()
-            if _should_skip_user(user_data, check_stale=True):
+            email = addresses.get(doc.id)
+            if _should_skip_user(email, user_data, check_stale=True):
                 continue
-            email = user_data.get("email")
-            name = user_data.get("displayName", user_data.get("name", "there"))
+            name = _display_name(user_data)
 
             # Check if we already sent 7-day winback email
             emails_sent = user_data.get("emailsSent", {})
@@ -741,7 +786,7 @@ def check_churned_users_7day_task(self):
 
             if email:
                 # Send email with user_id for conversion tracking
-                send_winback_7day_task.delay(email, name, doc.id)
+                send_winback_7day_task.delay(user_name=name, user_id=doc.id)
 
                 # Mark as sent
                 doc.reference.update({"emailsSent.winback7Day": now})
@@ -791,15 +836,16 @@ def check_churned_users_30day_task(self):
             .limit(500)
         )
 
-        docs = query.stream()
+        docs = list(query.stream())
+        addresses = account_emails(doc.id for doc in docs)
 
         count = 0
         for doc in docs:
             user_data = doc.to_dict()
-            if _should_skip_user(user_data, check_stale=True):
+            email = addresses.get(doc.id)
+            if _should_skip_user(email, user_data, check_stale=True):
                 continue
-            email = user_data.get("email")
-            name = user_data.get("displayName", user_data.get("name", "there"))
+            name = _display_name(user_data)
 
             # Check if we already sent 30-day winback email
             emails_sent = user_data.get("emailsSent", {})
@@ -818,7 +864,7 @@ def check_churned_users_30day_task(self):
 
             if email:
                 # Send email with user_id for conversion tracking
-                send_winback_30day_task.delay(email, name, doc.id)
+                send_winback_30day_task.delay(user_name=name, user_id=doc.id)
 
                 doc.reference.update({"emailsSent.winback30Day": now})
 
@@ -837,107 +883,9 @@ def check_churned_users_30day_task(self):
 
 
 # ============================================================
-# Instant Welcome Email Task
-# ============================================================
-
-
-@shared_task(
-    bind=True,
-    name="send_welcome_email",
-    ignore_result=True,
-    soft_time_limit=30,
-    time_limit=45,
-    autoretry_for=(Exception,),
-    retry_backoff=True,
-    retry_kwargs={"max_retries": 3},
-)
-def send_welcome_task(self, email: str, user_name: str = "there", user_id: str = None):
-    """
-    Send instant welcome email on signup.
-
-    Called immediately when a new user signs up (via beat task polling).
-    """
-    if not is_valid_email(email):
-        logging.warning(f"[EMAIL_TASK] Invalid email, skipping welcome: {email}")
-        return {"status": "skipped", "email": email, "reason": "invalid_email"}
-
-    try:
-        logging.info(f"[EMAIL_TASK] Sending welcome email to {email}")
-        first_name = _extract_first_name(user_name)
-        result = email_service.send_welcome(email, first_name, user_id)
-        resend_email_id = result.get("id")
-        if resend_email_id and user_id:
-            track_email_sent(user_id, email, "welcome", resend_email_id)
-        return {"status": "sent", "email": email, "resend_id": resend_email_id}
-    except Exception as e:
-        logging.error(f"[EMAIL_TASK] Failed to send welcome email to {email}: {e}")
-        raise
-
-
-@shared_task(
-    bind=True,
-    name="check_welcome_instant",
-    ignore_result=True,
-    soft_time_limit=300,
-    time_limit=360,
-)
-def check_welcome_instant_task(self):
-    """
-    Beat task: Find users who signed up in the last 2 hours and send instant welcome email.
-
-    Schedule: Run every hour via Celery Beat.
-    Window: users created 5 min to 2 hours ago (5-min buffer to let Firestore settle).
-    """
-    from firebase_setup import db
-
-    try:
-        logging.info("[BEAT_TASK] Checking for new users needing welcome email...")
-
-        now = datetime.now(timezone.utc)
-        # Window: users who signed up 5 minutes to 2 hours ago
-        window_start = now - timedelta(hours=2)
-        window_end = now - timedelta(minutes=5)
-
-        users_ref = db.collection("users")
-        query = (
-            users_ref.where("createdAt", ">=", window_start)
-            .where("createdAt", "<=", window_end)
-            .limit(500)
-        )
-
-        docs = query.stream()
-
-        count = 0
-        for doc in docs:
-            user_data = doc.to_dict()
-            if _should_skip_user(user_data):
-                continue
-            email = user_data.get("email")
-            name = user_data.get("displayName", user_data.get("name", "there"))
-
-            # Check if we already sent welcome email
-            emails_sent = user_data.get("emailsSent", {})
-            if emails_sent.get("welcome"):
-                continue
-
-            if email:
-                send_welcome_task.delay(email, name, doc.id)
-                doc.reference.update({"emailsSent.welcome": now})
-                count += 1
-                logging.info(f"[BEAT_TASK] Queued welcome email for {email}")
-
-        logging.info(f"[BEAT_TASK] ✓ Queued {count} welcome emails")
-        return {"status": "completed", "emails_queued": count}
-
-    except Exception as e:
-        logging.error(f"[BEAT_TASK] ❌ Error checking new users for welcome: {e}")
-        import traceback
-        logging.error(f"[BEAT_TASK] Traceback: {traceback.format_exc()}")
-        raise
-
-
-# ============================================================
 # Welcome Sequence Tasks - Onboarding Drip
+# The welcome email itself is sent at signup by the Cloud Function
+# syncEmailToFirestore (semantic/firebase_functions), never from here.
 # ============================================================
 
 
@@ -951,15 +899,15 @@ def check_welcome_instant_task(self):
     retry_backoff=True,
     retry_kwargs={"max_retries": 3},
 )
-def send_day1_help_center_task(self, email: str, user_name: str = "there", user_id: str = None):
+def send_day1_help_center_task(self, email: str = None, user_name: str = "there", user_id: str = None):
     """
     Send Day 1 welcome email: Help Center.
 
     Called 24 hours after signup.
     """
-    if not is_valid_email(email):
-        logging.warning(f"[EMAIL_TASK] Invalid email, skipping Day 1: {email}")
-        return {"status": "skipped", "email": email, "reason": "invalid_email"}
+    email, skipped = _recipient(user_id, "Day 1")
+    if skipped:
+        return skipped
 
     skipped = _marketing_skip(email, user_id)
     if skipped:
@@ -993,15 +941,15 @@ def send_day1_help_center_task(self, email: str, user_name: str = "there", user_
     retry_backoff=True,
     retry_kwargs={"max_retries": 3},
 )
-def send_day3_artifacts_task(self, email: str, user_name: str = "there", user_id: str = None):
+def send_day3_artifacts_task(self, email: str = None, user_name: str = "there", user_id: str = None):
     """
     Send Day 3 welcome email: Artifacts feature highlight.
 
     Called 72 hours after signup.
     """
-    if not is_valid_email(email):
-        logging.warning(f"[EMAIL_TASK] Invalid email, skipping Day 3: {email}")
-        return {"status": "skipped", "email": email, "reason": "invalid_email"}
+    email, skipped = _recipient(user_id, "Day 3")
+    if skipped:
+        return skipped
 
     skipped = _marketing_skip(email, user_id)
     if skipped:
@@ -1037,15 +985,15 @@ def send_day3_artifacts_task(self, email: str, user_name: str = "there", user_id
     retry_backoff=True,
     retry_kwargs={"max_retries": 3},
 )
-def send_day7_researcher_stories_task(self, email: str, user_name: str = "there", user_id: str = None):
+def send_day7_researcher_stories_task(self, email: str = None, user_name: str = "there", user_id: str = None):
     """
     Send Day 7 welcome email: How researchers use Chunk.
 
     Called 7 days after signup.
     """
-    if not is_valid_email(email):
-        logging.warning(f"[EMAIL_TASK] Invalid email, skipping Day 7: {email}")
-        return {"status": "skipped", "email": email, "reason": "invalid_email"}
+    email, skipped = _recipient(user_id, "Day 7")
+    if skipped:
+        return skipped
         
     skipped = _marketing_skip(email, user_id)
     if skipped:
@@ -1080,16 +1028,16 @@ def send_day7_researcher_stories_task(self, email: str, user_name: str = "there"
     retry_kwargs={"max_retries": 3},
 )
 def send_billing_issue_task(
-    self, email: str, user_name: str = "there", user_id: str = None
+    self, email: str = None, user_name: str = "there", user_id: str = None
 ):
     """
     Send billing issue notification email.
 
     Called immediately when RevenueCat reports a billing issue.
     """
-    if not is_valid_email(email):
-        logging.warning(f"[EMAIL_TASK] Invalid email, skipping billing issue: {email}")
-        return {"status": "skipped", "email": email, "reason": "invalid_email"}
+    email, skipped = _recipient(user_id, "billing issue")
+    if skipped:
+        return skipped
 
     try:
         logging.info(f"[EMAIL_TASK] Sending billing issue email to {email}")
@@ -1122,16 +1070,16 @@ def send_billing_issue_task(
     retry_kwargs={"max_retries": 3},
 )
 def send_reengagement_14day_task(
-    self, email: str, user_name: str = "there", user_id: str = None
+    self, email: str = None, user_name: str = "there", user_id: str = None
 ):
     """
     Send 14-day re-engagement email to inactive users.
 
     Called when a user hasn't been active for 14 days.
     """
-    if not is_valid_email(email):
-        logging.warning(f"[EMAIL_TASK] Invalid email, skipping 14-day re-engagement: {email}")
-        return {"status": "skipped", "email": email, "reason": "invalid_email"}
+    email, skipped = _recipient(user_id, "14-day re-engagement")
+    if skipped:
+        return skipped
         
     skipped = _marketing_skip(email, user_id)
     if skipped:
@@ -1168,7 +1116,7 @@ def send_reengagement_14day_task(
 )
 def send_feature_announcement_task(
     self,
-    email: str,
+    email: str = None,
     user_name: str = "there",
     feature_name: str = "",
     feature_description: str = "",
@@ -1180,9 +1128,9 @@ def send_feature_announcement_task(
 
     Called when a new feature is released and users should be notified.
     """
-    if not is_valid_email(email):
-        logging.warning(f"[EMAIL_TASK] Invalid email, skipping feature announcement: {email}")
-        return {"status": "skipped", "email": email, "reason": "invalid_email"}
+    email, skipped = _recipient(user_id, "feature announcement")
+    if skipped:
+        return skipped
         
     skipped = _marketing_skip(email, user_id)
     if skipped:
@@ -1220,16 +1168,16 @@ def send_feature_announcement_task(
     retry_kwargs={"max_retries": 3},
 )
 def send_signup_no_trial_nudge_task(
-    self, email: str, user_name: str = "there", user_id: str = None
+    self, email: str = None, user_name: str = "there", user_id: str = None
 ):
     """
     Send nudge email to users who signed up but never started a trial.
 
     Called 3-4 days after signup if user has no trial history.
     """
-    if not is_valid_email(email):
-        logging.warning(f"[EMAIL_TASK] Invalid email, skipping no-trial nudge: {email}")
-        return {"status": "skipped", "email": email, "reason": "invalid_email"}
+    email, skipped = _recipient(user_id, "no-trial nudge")
+    if skipped:
+        return skipped
         
     skipped = _marketing_skip(email, user_id)
     if skipped:
@@ -1289,15 +1237,16 @@ def check_welcome_sequence_day1_task(self):
             .limit(500)
         )
 
-        docs = query.stream()
+        docs = list(query.stream())
+        addresses = account_emails(doc.id for doc in docs)
 
         count = 0
         for doc in docs:
             user_data = doc.to_dict()
-            if _should_skip_user(user_data):
+            email = addresses.get(doc.id)
+            if _should_skip_user(email, user_data):
                 continue
-            email = user_data.get("email")
-            name = user_data.get("displayName", user_data.get("name", "there"))
+            name = _display_name(user_data)
 
             # Check if we already sent Day 1 email
             emails_sent = user_data.get("emailsSent", {})
@@ -1309,7 +1258,7 @@ def check_welcome_sequence_day1_task(self):
                 continue
 
             if email:
-                send_day1_help_center_task.delay(email, name, doc.id)
+                send_day1_help_center_task.delay(user_name=name, user_id=doc.id)
 
                 doc.reference.update({"emailsSent.welcomeDay1": now})
 
@@ -1361,15 +1310,16 @@ def check_welcome_sequence_day3_task(self):
             .limit(500)
         )
 
-        docs = query.stream()
+        docs = list(query.stream())
+        addresses = account_emails(doc.id for doc in docs)
 
         count = 0
         for doc in docs:
             user_data = doc.to_dict()
-            if _should_skip_user(user_data):
+            email = addresses.get(doc.id)
+            if _should_skip_user(email, user_data):
                 continue
-            email = user_data.get("email")
-            name = user_data.get("displayName", user_data.get("name", "there"))
+            name = _display_name(user_data)
 
             # Check if we already sent Day 3 email
             emails_sent = user_data.get("emailsSent", {})
@@ -1381,7 +1331,7 @@ def check_welcome_sequence_day3_task(self):
                 continue
 
             if email:
-                send_day3_artifacts_task.delay(email, name, doc.id)
+                send_day3_artifacts_task.delay(user_name=name, user_id=doc.id)
 
                 doc.reference.update({"emailsSent.welcomeDay3": now})
 
@@ -1429,15 +1379,16 @@ def check_welcome_sequence_day7_task(self):
             .limit(500)
         )
 
-        docs = query.stream()
+        docs = list(query.stream())
+        addresses = account_emails(doc.id for doc in docs)
 
         count = 0
         for doc in docs:
             user_data = doc.to_dict()
-            if _should_skip_user(user_data):
+            email = addresses.get(doc.id)
+            if _should_skip_user(email, user_data):
                 continue
-            email = user_data.get("email")
-            name = user_data.get("displayName", user_data.get("name", "there"))
+            name = _display_name(user_data)
 
             # Check if we already sent Day 7 email
             emails_sent = user_data.get("emailsSent", {})
@@ -1449,7 +1400,7 @@ def check_welcome_sequence_day7_task(self):
                 continue
 
             if email:
-                send_day7_researcher_stories_task.delay(email, name, doc.id)
+                send_day7_researcher_stories_task.delay(user_name=name, user_id=doc.id)
 
                 doc.reference.update({"emailsSent.welcomeDay7": now})
 
@@ -1519,13 +1470,14 @@ def check_monthly_recap_task(self, dry_run: bool = False):
             if not page:
                 break
             last_doc = page[-1]
+            addresses = account_emails(doc.id for doc in page)
 
             for doc in page:
                 user_data = doc.to_dict()
-                if _should_skip_user(user_data):
+                email = addresses.get(doc.id)
+                if _should_skip_user(email, user_data):
                     continue
-                email = user_data.get("email")
-                name = user_data.get("displayName", user_data.get("name", "there"))
+                name = _display_name(user_data)
 
                 # Check if we already sent this month's recap
                 emails_sent = user_data.get("emailsSent", {})
@@ -1545,8 +1497,7 @@ def check_monthly_recap_task(self, dry_run: bool = False):
                 # Stagger dispatch so the worker doesn't slam Resend with the
                 # whole cohort at once
                 send_monthly_recap_task.apply_async(
-                    args=[email, name],
-                    kwargs={"user_id": doc.id},
+                    kwargs={"user_name": name, "user_id": doc.id},
                     countdown=queued * 2,
                 )
 
@@ -1611,7 +1562,7 @@ def _format_renewal_amount(user_data: dict, fallback: str = "$9.99") -> str:
 )
 def send_renewal_reminder_task(
     self,
-    email: str,
+    email: str = None,
     user_name: str = "there",
     days_until_renewal: int = 7,
     amount: str = "$9.99",
@@ -1622,9 +1573,9 @@ def send_renewal_reminder_task(
 
     Called 7 days before subscription renewal date.
     """
-    if not is_valid_email(email):
-        logging.warning(f"[EMAIL_TASK] Invalid email, skipping renewal reminder: {email}")
-        return {"status": "skipped", "email": email, "reason": "invalid_email"}
+    email, skipped = _recipient(user_id, "renewal reminder")
+    if skipped:
+        return skipped
 
     try:
         logging.info(f"[EMAIL_TASK] Sending renewal reminder email to {email}")
@@ -1685,15 +1636,16 @@ def check_renewal_reminders_task(self):
             .limit(500)
         )
 
-        docs = query.stream()
+        docs = list(query.stream())
+        addresses = account_emails(doc.id for doc in docs)
 
         count = 0
         for doc in docs:
             user_data = doc.to_dict()
-            if _should_skip_user(user_data):
+            email = addresses.get(doc.id)
+            if _should_skip_user(email, user_data):
                 continue
-            email = user_data.get("email")
-            name = user_data.get("displayName", user_data.get("name", "there"))
+            name = _display_name(user_data)
 
             # Check if we already sent renewal reminder
             emails_sent = user_data.get("emailsSent", {})
@@ -1713,7 +1665,7 @@ def check_renewal_reminders_task(self):
             amount = _format_renewal_amount(user_data)
 
             # Send renewal reminder
-            send_renewal_reminder_task.delay(email, name, 7, amount, doc.id)
+            send_renewal_reminder_task.delay(user_name=name, days_until_renewal=7, amount=amount, user_id=doc.id)
 
             # Mark as sent
             doc.reference.update({"emailsSent.renewalReminder": now})
@@ -1771,15 +1723,16 @@ def check_reengagement_14day_task(self):
             .limit(500)
         )
 
-        docs = query.stream()
+        docs = list(query.stream())
+        addresses = account_emails(doc.id for doc in docs)
 
         count = 0
         for doc in docs:
             user_data = doc.to_dict()
-            if _should_skip_user(user_data, check_stale=True):
+            email = addresses.get(doc.id)
+            if _should_skip_user(email, user_data, check_stale=True):
                 continue
-            email = user_data.get("email")
-            name = user_data.get("displayName", user_data.get("name", "there"))
+            name = _display_name(user_data)
 
             # Check if we already sent re-engagement email
             emails_sent = user_data.get("emailsSent", {})
@@ -1797,7 +1750,7 @@ def check_reengagement_14day_task(self):
                 continue
 
             if email:
-                send_reengagement_14day_task.delay(email, name, doc.id)
+                send_reengagement_14day_task.delay(user_name=name, user_id=doc.id)
 
                 doc.reference.update({"emailsSent.reengagement14Day": now})
 
@@ -1850,15 +1803,16 @@ def check_signup_no_trial_task(self):
             .limit(500)
         )
 
-        docs = query.stream()
+        docs = list(query.stream())
+        addresses = account_emails(doc.id for doc in docs)
 
         count = 0
         for doc in docs:
             user_data = doc.to_dict()
-            if _should_skip_user(user_data, check_stale=True):
+            email = addresses.get(doc.id)
+            if _should_skip_user(email, user_data, check_stale=True):
                 continue
-            email = user_data.get("email")
-            name = user_data.get("displayName", user_data.get("name", "there"))
+            name = _display_name(user_data)
 
             # Check if we already sent this nudge
             emails_sent = user_data.get("emailsSent", {})
@@ -1878,7 +1832,7 @@ def check_signup_no_trial_task(self):
                 continue
 
             if email:
-                send_signup_no_trial_nudge_task.delay(email, name, doc.id)
+                send_signup_no_trial_nudge_task.delay(user_name=name, user_id=doc.id)
 
                 doc.reference.update({"emailsSent.signupNoTrialNudge": now})
 

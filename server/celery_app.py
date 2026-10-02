@@ -55,14 +55,10 @@ celery.conf.update(
             "schedule": crontab(minute=30, hour=10),
         },
         # ============================================================
-        # Instant Welcome Email
-        # ============================================================
-        "check-welcome-instant-hourly": {
-            "task": "check_welcome_instant",
-            "schedule": crontab(minute=5, hour="*"),
-        },
-        # ============================================================
         # Welcome Sequence (Onboarding Drip)
+        # The welcome email itself is the Cloud Function
+        # syncEmailToFirestore's (semantic/firebase_functions), sent at
+        # signup. This server must not send a second one.
         # ============================================================
         "check-welcome-day1-every-6-hours": {
             "task": "check_welcome_sequence_day1",

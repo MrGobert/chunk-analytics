@@ -293,6 +293,11 @@ def unsubscribe_ids(email: str) -> List[str]:
 def marketing_blocked(user_id: Optional[str], email: str) -> Optional[str]:
     """Why a marketing email must not go to this account, or None when it may.
 
+    email is the address the email goes to (the account's Firebase Auth
+    email). An opt-out recorded under the doc's own users/{uid}.email blocks
+    too: marketing used to go to that address, so its unsubscribe links
+    carried it.
+
     Fails closed: a send with no uid is blocked (there is no switch to check),
     and a failed read raises MarketingConsentUnavailable, so the task's
     autoretry tries again and then drops the email.
@@ -303,9 +308,13 @@ def marketing_blocked(user_id: Optional[str], email: str) -> Optional[str]:
         snap = db.collection("users").document(user_id).get()
         if not snap.exists:
             return "no_account"
-        if (snap.to_dict() or {}).get(CONSENT_FIELD) is False:
+        data = snap.to_dict() or {}
+        if data.get(CONSENT_FIELD) is False:
             return "opted_out"
-        for doc_id in unsubscribe_ids(email):
+        mirrored = data.get("email") if isinstance(data.get("email"), str) else ""
+        ids = unsubscribe_ids(email)
+        ids += [doc_id for doc_id in unsubscribe_ids(mirrored) if doc_id not in ids]
+        for doc_id in ids:
             if db.collection(UNSUBSCRIBES_COLLECTION).document(doc_id).get().exists:
                 return "unsubscribed"
     except Exception as e:

@@ -2373,13 +2373,6 @@ def get_broadcasts():
 
 # Template metadata (no HTML — lightweight list)
 _EMAIL_TEMPLATES = {
-    "welcome": {
-        "name": "Welcome (Instant)",
-        "category": "Welcome Sequence",
-        "description": "Instant welcome email introducing the core value props, sent shortly after signup.",
-        "trigger": "beat",
-        "schedule": "Hourly (check_welcome_instant)",
-    },
     "trial_started": {
         "name": "Trial Started",
         "category": "Trial & Subscription",
@@ -2500,7 +2493,6 @@ def _render_email_template(key: str) -> dict | None:
     import email_service
 
     renderers = {
-        "welcome": lambda: email_service.get_welcome_email("James"),
         "memory_2_announcement": lambda: email_service.get_memory_2_announcement_email("James"),
         "whats_new_summer_2026": lambda: email_service.get_whats_new_summer_2026_email("James"),
         "trial_started": lambda: email_service.get_trial_started_email("James"),
