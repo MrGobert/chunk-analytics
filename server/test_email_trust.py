@@ -126,8 +126,8 @@ class TemplateEscapingTests(unittest.TestCase):
         _, html, _ = email_service.get_renewal_reminder_email("Ada Lovelace", 7, "249,000 VND")
         self.assertIn("Hey Ada Lovelace,", html)
         self.assertIn(">249,000 VND</p>", html)
-        _, html, _ = email_service.get_welcome_email("there")
-        self.assertIn('href="https://chunkapp.com/chat?source=welcome_email"', html)
+        _, html, _ = email_service.get_day1_help_center_email("there")
+        self.assertIn('href="https://www.chunkapp.com/help"', html)
 
 
 # ---------------------------------------------------------------------------
@@ -149,9 +149,8 @@ SEND_TASKS = {
     "send_signup_no_trial_nudge_task": ("send_signup_no_trial_nudge", ()),
     "send_renewal_reminder_task": ("send_renewal_reminder", (7, "$9.99")),
 }
-# Covered separately: the recap computes stats first, and send_welcome_task
-# raises NameError (_extract_first_name) after the lookup, before it sends.
-OTHER_SEND_TASKS = {"send_monthly_recap_task", "send_welcome_task"}
+# Covered separately: the recap computes stats first.
+OTHER_SEND_TASKS = {"send_monthly_recap_task"}
 
 
 class SendTaskRecipientTests(unittest.TestCase):
@@ -252,7 +251,6 @@ BEATS = {
     "check_trials_ending_soon_task": ("send_trial_ending_task", "trialEnding", {"trialEndDate": NOW + timedelta(hours=6)}),
     "check_churned_users_7day_task": ("send_winback_7day_task", "winback7Day", {}),
     "check_churned_users_30day_task": ("send_winback_30day_task", "winback30Day", {}),
-    "check_welcome_instant_task": ("send_welcome_task", "welcome", {}),
     "check_welcome_sequence_day1_task": ("send_day1_help_center_task", "welcomeDay1", {}),
     "check_welcome_sequence_day3_task": ("send_day3_artifacts_task", "welcomeDay3", {}),
     "check_welcome_sequence_day7_task": ("send_day7_researcher_stories_task", "welcomeDay7", {}),

@@ -27,7 +27,8 @@ FROM_EMAIL = "Chunk AI <info@chunkapp.com>"
 
 # Marketing email comes from the marketing mailbox and goes only to accounts
 # that consent (email_tasks._marketing_skip). Account email (billing, trial
-# ending, renewal reminder, welcome) stays on FROM_EMAIL and ignores consent.
+# ending, renewal reminder) stays on FROM_EMAIL and ignores consent. The
+# welcome email is the Cloud Function syncEmailToFirestore's, not this module's.
 # The env vars are a no-deploy way back to info@ if the new sender has
 # deliverability trouble (Apple's private relay accepts only registered
 # senders).
@@ -569,93 +570,6 @@ def _content_type_legend() -> str:
 # ============================================================
 # Email Templates
 # ============================================================
-
-
-def get_welcome_email(user_name: str = "there") -> tuple[str, str, str]:
-    """
-    Instant welcome email — sent immediately on signup.
-    Warm, concise, and curiosity-driven. Introduces the 5 core value props
-    without deep-diving any single one (the drip campaign handles depth).
-    Layout: hero → personal greeting → feature teasers as a compact grid → single CTA.
-    """
-    subject = "Welcome to Chunk ⚡"
-
-    # Feature teaser cards — short, curiosity-sparking descriptions
-    features_html = ""
-
-    # Each feature as a compact, elegant row with accent dot + one-liner
-    feature_items = [
-        (BRAND["color_conversations"], "MODELS", "🧠", "Every Top AI Model",
-         "GPT-5, Claude, Gemini — switch per conversation. One app, every model."),
-        (BRAND["color_documents"], "COLLECTIONS", "📚", "Collections",
-         "Gather notes, docs, and URLs into one workspace. Ask AI across all of it."),
-        (BRAND["color_reports"], "ARTIFACTS", "🧪", "Artifacts",
-         "Turn audio lectures, podcasts, YouTube videos, and PDFs into searchable transcripts, study guides, and more."),
-        (BRAND["color_notes"], "NOTES", "📝", "Connected Notes + Graph",
-         "Wiki-link your ideas with [[brackets]] and watch a living knowledge graph reveal how they connect."),
-        (BRAND["color_urls"], "AUTOMATIONS", "📡", "Automations",
-         "Research on autopilot. Standing agents re-run your query on a schedule and deliver a cited what's-new digest."),
-        (BRAND["accent_blue"], "CAPTURE", "📥", "Share to Chunk",
-         "Save anything from anywhere — the share sheet on iPhone, iPad & Mac, the browser clipper, or forward any email. AI files it in your Inbox."),
-    ]
-
-    for color, label, emoji, title, desc in feature_items:
-        features_html += f"""
-    <table width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation" style="margin-bottom:8px;background-color:{BRAND['surface_elevated']};border-radius:12px;overflow:hidden" class="surface-card">
-        <tr>
-            <td style="width:4px;background-color:{color}" width="4"></td>
-            <td style="padding:16px 18px">
-                <table width="100%" border="0" cellpadding="0" cellspacing="0">
-                    <tr>
-                        <td style="width:32px;vertical-align:top;padding-right:12px;font-size:20px;line-height:32px" width="32">{emoji}</td>
-                        <td style="vertical-align:top">
-                            <p style="margin:0 0 2px 0;font-family:{FONT_SANS};font-weight:700;color:{BRAND['text_primary']};font-size:15px;letter-spacing:-0.01em" class="text-dark">{title}</p>
-                            <p style="margin:0;font-family:{FONT_SANS};color:{BRAND['text_muted']};font-size:13px;line-height:1.5" class="text-muted-dm">{desc}</p>
-                        </td>
-                    </tr>
-                </table>
-            </td>
-        </tr>
-    </table>
-    """
-
-    body = f"""
-    <p style="margin:0 0 20px 0;font-family:{FONT_SANS};font-size:16px;color:{BRAND['text_primary']};line-height:1.6" class="text-dark">
-        Hey {_text(user_name)},
-    </p>
-    <p style="margin:0 0 24px 0;font-family:{FONT_SANS};font-size:16px;color:{BRAND['text_primary']};line-height:1.6" class="text-dark">
-        Welcome to Chunk — your AI-powered research workspace. Here's what's at your fingertips:
-    </p>
-
-    {features_html}
-
-    <table width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation" style="margin:24px 0 0 0">
-        <tr>
-            <td align="center" style="padding:8px 0">
-                <p style="margin:0;font-family:{FONT_SERIF};font-weight:600;font-size:24px;color:{BRAND['text_primary']};line-height:1.2;text-align:center" class="text-dark">One app. Every model. All your <span style="font-style:italic;color:{BRAND['primary']}">research</span>, connected.</p>
-            </td>
-        </tr>
-    </table>
-    """
-
-    html = _base_email_template(
-        preheader="Welcome to Chunk — every top AI model, connected notes, and a research workspace that thinks with you.",
-        hero_title="Welcome to Chunk",
-        hero_subtitle="Your AI research workspace is ready.",
-        body_content=body,
-        cta_text="Start Exploring",
-        cta_url=BRAND["web_url"] + "/chat?source=welcome_email",
-        footer_tip="Try this: type [[ in any note to create a wiki link. Your ideas start connecting themselves.",
-        hero_dark=True,
-        hero_label="WELCOME",
-        hero_serif_word="Chunk",
-    )
-
-    return (
-        subject,
-        html,
-        f"Welcome to Chunk! Your AI research workspace is ready. Every top AI model, connected notes, collections, artifacts, Automations, and Share to Chunk capture — all in one app. Get started: {BRAND['login_url']}",
-    )
 
 
 def get_trial_started_email(user_name: str = "there") -> tuple[str, str, str]:
@@ -1779,12 +1693,6 @@ def send_email(to_email: str, subject: str, html: str, text: str, email_type: st
 # ============================================================
 # Convenience Functions
 # ============================================================
-
-
-def send_welcome(to_email: str, user_name: str = "there", user_id: str = None) -> dict:
-    """Send instant welcome email."""
-    subject, html, text = get_welcome_email(user_name)
-    return send_email(to_email, subject, html, text, email_type="welcome", user_id=user_id)
 
 
 def send_trial_started(to_email: str, user_name: str = "there", user_id: str = None) -> dict:

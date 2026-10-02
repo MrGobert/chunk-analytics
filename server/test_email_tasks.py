@@ -10,9 +10,10 @@ Run:
     python -m pytest server/test_email_tasks.py -v
 """
 
+import ast
 import sys
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -514,6 +515,103 @@ class CheckTaskTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# The welcome email: the Cloud Function's, never this server's
+# ---------------------------------------------------------------------------
+
+
+class CreatedAtWindowQuery:
+    """users where(createdAt >= / <=) → limit(n) → stream(), filtered for real."""
+
+    def __init__(self, docs):
+        self._docs = docs
+
+    def where(self, field, op, value):
+        assert field == "createdAt" and op in (">=", "<=")
+        if op == ">=":
+            return CreatedAtWindowQuery([d for d in self._docs if d.to_dict()[field] >= value])
+        return CreatedAtWindowQuery([d for d in self._docs if d.to_dict()[field] <= value])
+
+    def limit(self, _n):
+        return self
+
+    def stream(self):
+        return iter(self._docs)
+
+
+class RetiredInstantWelcomeTests(unittest.TestCase):
+    """The Cloud Function syncEmailToFirestore sends the welcome email at
+    signup. This server's copy (check_welcome_instant) never sent one: it
+    raised NameError. But it set emailsSent.welcome about an hour after
+    signup, and that flag started the 24-hour cooldown. The day-1 beat sees a
+    user once or twice, 20-28 hours after signup, so a user whose only run
+    came within 24 hours of the flag never got day 1. That was 22 of the 65
+    accounts created in September 2026."""
+
+    def _run_day1(self, docs):
+        db = SimpleNamespace(collection=lambda name: CreatedAtWindowQuery(docs))
+        with patch.dict(sys.modules, {"firebase_setup": SimpleNamespace(db=db)}), \
+             patch.object(email_tasks, "account_emails", _fake_auth(docs)), \
+             patch.object(email_tasks.send_day1_help_center_task, "delay") as delay:
+            result = email_tasks.check_welcome_sequence_day1_task()
+        return result, delay
+
+    def test_an_old_welcome_flag_does_not_hold_back_day_one(self):
+        # 23 hours after signup is the run that used to skip the account for
+        # good: within 24 hours of the flag, and the next run is past 28.
+        now = datetime.now(timezone.utc)
+        doc = FakeUserDoc(
+            "uid1",
+            {
+                "displayName": "Ada",
+                "createdAt": now - timedelta(hours=23),
+                "emailsSent": {"welcome": now - timedelta(hours=22)},
+            },
+            auth_email="ada@example.org",
+        )
+        result, delay = self._run_day1([doc])
+        self.assertEqual(result["emails_queued"], 1)
+        self.assertEqual(delay.call_args.kwargs, {"user_name": "Ada", "user_id": "uid1"})
+        doc.reference.update.assert_called_once()
+
+    def test_a_recent_campaign_email_still_holds_back_day_one(self):
+        now = datetime.now(timezone.utc)
+        doc = FakeUserDoc(
+            "uid1",
+            {
+                "createdAt": now - timedelta(hours=23),
+                # a trial account that signed up just before the 1st-of-month recap
+                "emailsSent": {"monthlyRecap": now - timedelta(hours=2)},
+            },
+            auth_email="ada@example.org",
+        )
+        result, delay = self._run_day1([doc])
+        self.assertEqual(result["emails_queued"], 0)
+        delay.assert_not_called()
+
+    def test_nothing_here_sends_a_welcome_email(self):
+        # Read the beat schedule from source: importing celery_app runs
+        # sentry_sdk.init, which patches libraries for every later test.
+        source = (Path(__file__).parent / "celery_app.py").read_text()
+        scheduled = {
+            value.value
+            for node in ast.walk(ast.parse(source))
+            if isinstance(node, ast.Dict)
+            for key, value in zip(node.keys, node.values)
+            if isinstance(key, ast.Constant) and key.value == "task"
+            and isinstance(value, ast.Constant)
+        }
+        self.assertIn("check_welcome_sequence_day1", scheduled)
+        self.assertNotIn("check_welcome_instant", scheduled)
+        registered = {
+            getattr(email_tasks, name).name
+            for name in dir(email_tasks)
+            if name.endswith("_task") and hasattr(getattr(email_tasks, name), "name")
+        }
+        self.assertNotIn("send_welcome_email", registered)
+        self.assertNotIn("welcome", email_tasks.MARKETING_EMAIL_FLAGS)
+
+
+# ---------------------------------------------------------------------------
 # Marketing consent: which emails check it, and the check itself
 # ---------------------------------------------------------------------------
 
@@ -535,8 +633,6 @@ ACCOUNT_TASKS = {
     "send_renewal_reminder_task": ("send_renewal_reminder", (7, "$9.99")),
     "send_billing_issue_task": ("send_billing_issue", ()),
     "send_subscription_expired_task": ("send_subscription_expired", ()),
-    # send_welcome_task is an account email too, but it raises NameError
-    # (_extract_first_name) before it sends, so it can't be exercised here.
 }
 
 
@@ -663,7 +759,7 @@ class SenderTests(unittest.TestCase):
         self.assertIn("meetchunk@chunkapp.com", email_service.MARKETING_FROM_EMAIL)
 
     def test_account_email_stays_on_info(self):
-        for email_type in ("trial_ending", "renewal_reminder", "billing_issue", "subscription_expired", "welcome"):
+        for email_type in ("trial_ending", "renewal_reminder", "billing_issue", "subscription_expired"):
             with self.subTest(email_type=email_type):
                 payload = self._send(email_type)
                 self.assertEqual(payload["from"], email_service.FROM_EMAIL)
