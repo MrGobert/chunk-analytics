@@ -16,7 +16,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -33,7 +33,7 @@ def setUpModule():
     # tests patch email_tasks.account_email / account_emails where they need one.
     from firebase_admin import auth
 
-    for name in ("get_user", "get_users"):
+    for name in ("get_user", "get_users", "list_users"):
         patcher = patch.object(auth, name, side_effect=AssertionError(f"real Firebase Auth {name} call"))
         patcher.start()
         _AUTH_GUARDS.append(patcher)
@@ -775,6 +775,262 @@ class SenderTests(unittest.TestCase):
         payload = self._send("day1_help_center", secret=None)
         self.assertEqual(payload["html"], "<p></p>")
         self.assertNotIn("headers", payload)
+
+
+# ---------------------------------------------------------------------------
+# The 14-day re-engagement email: who counts as 14 days idle
+# ---------------------------------------------------------------------------
+
+import account_activity  # noqa: E402
+from firebase_admin import auth as firebase_auth  # noqa: E402
+
+DAY_MS = 24 * 3600 * 1000
+
+
+def _auth_user(uid, idle_days, email="", disabled=False, signed_in_days=None):
+    """A Firebase Auth record whose last token refresh was idle_days ago.
+    It was created and last signed in a month before that, unless given."""
+    now_ms = datetime.now(timezone.utc).timestamp() * 1000
+    signed_in_days = idle_days + 30 if signed_in_days is None else signed_in_days
+    return SimpleNamespace(
+        uid=uid,
+        email=f"{uid}@real.org" if email == "" else email,
+        disabled=disabled,
+        user_metadata=SimpleNamespace(
+            creation_timestamp=int(now_ms - (idle_days + 30) * DAY_MS),
+            last_sign_in_timestamp=int(now_ms - signed_in_days * DAY_MS),
+            last_refresh_timestamp=int(now_ms - idle_days * DAY_MS),
+        ),
+    )
+
+
+def _list_users(records):
+    return lambda *_args, **_kwargs: SimpleNamespace(iterate_all=lambda: iter(records))
+
+
+class FakeSnap:
+    def __init__(self, uid, data):
+        self.id = uid
+        self.exists = data is not None
+        self._data = data
+        self.reference = MagicMock()
+
+    def to_dict(self):
+        return self._data
+
+
+class FakeUserDocsDB:
+    """users/{uid} docs read by reference through get_all. There are no
+    queries: the beat must not pick accounts by a users-doc field."""
+
+    def __init__(self, docs):
+        self.snaps = {uid: FakeSnap(uid, data) for uid, data in docs.items()}
+        self.read = []
+
+    def collection(self, name):
+        assert name == "users"
+        return SimpleNamespace(document=lambda uid: uid)
+
+    def get_all(self, refs):
+        refs = list(refs)
+        self.read.extend(refs)
+        return [self.snaps.get(uid) or FakeSnap(uid, None) for uid in refs]
+
+
+class ReengagementBeatTests(unittest.TestCase):
+    """users.lastActiveAt has no writer and no prod doc carries it, so the
+    beat that selected by it never sent (0 sent as of 2026-10-03). It selects
+    by Firebase Auth activity now."""
+
+    def _run(self, records, docs, used=(), dry_run=False, limit=None):
+        db = FakeUserDocsDB(docs)
+        since = []
+
+        def used_since(_db, uid, when):
+            since.append(when)
+            return uid in used
+
+        with patch.dict(sys.modules, {"firebase_setup": SimpleNamespace(db=db)}), \
+             patch.object(firebase_auth, "list_users", _list_users(records)), \
+             patch.object(email_tasks, "used_since", side_effect=used_since), \
+             patch.object(email_tasks, "REENGAGEMENT_DAILY_LIMIT", limit or email_tasks.REENGAGEMENT_DAILY_LIMIT), \
+             patch.object(email_tasks.send_reengagement_14day_task, "delay") as delay:
+            result = email_tasks.check_reengagement_14day_task(dry_run=dry_run)
+        return result, delay, db, since
+
+    def test_emails_an_account_last_used_fourteen_days_ago(self):
+        result, delay, db, _ = self._run([_auth_user("uid1", 14)], {"uid1": {"displayName": "Ada"}})
+        self.assertEqual(result, {"status": "completed", "emails_queued": 1})
+        delay.assert_called_once_with(user_name="Ada", user_id="uid1")
+        db.snaps["uid1"].reference.update.assert_called_once_with({"emailsSent.reengagement14Day": ANY})
+
+    def test_only_one_day_of_idle_accounts_qualifies(self):
+        # No backlog on the first run: 15 days, a month and a year idle are
+        # past the window, and 13 days isn't there yet.
+        records = [_auth_user(f"uid{days}", days) for days in (1, 13, 14, 15, 30, 365)]
+        result, delay, db, _ = self._run(records, {r.uid: {} for r in records})
+        self.assertEqual(result["emails_queued"], 1)
+        delay.assert_called_once_with(user_name="there", user_id="uid14")
+        self.assertEqual(db.read, ["uid14"])
+
+    def test_an_app_still_refreshing_its_token_is_in_use(self):
+        # Signed in 14 days ago; the app has refreshed its token since.
+        result, delay, _, _ = self._run([_auth_user("uid1", 2, signed_in_days=14)], {"uid1": {}})
+        self.assertEqual(result["emails_queued"], 0)
+        delay.assert_not_called()
+
+    def test_a_left_over_last_active_at_means_nothing(self):
+        now = datetime.now(timezone.utc)
+        records = [_auth_user("uid1", 3)]
+        result, delay, _, _ = self._run(records, {"uid1": {"lastActiveAt": now - timedelta(days=14)}})
+        self.assertEqual(result["emails_queued"], 0)
+        delay.assert_not_called()
+
+    def test_a_capture_since_the_window_counts_as_use(self):
+        # The share sheet, the web clipper and email-in never refresh a token.
+        records = [_auth_user("uid1", 14), _auth_user("uid2", 14)]
+        result, delay, _, since = self._run(records, {"uid1": {}, "uid2": {}}, used={"uid1"})
+        self.assertEqual(result["emails_queued"], 1)
+        delay.assert_called_once_with(user_name="there", user_id="uid2")
+        # activity after the window's end: newer than 13.5 days
+        window_end = datetime.now(timezone.utc) - timedelta(days=13, hours=12)
+        for when in since:
+            self.assertLess(abs((when - window_end).total_seconds()), 60)
+
+    def test_keeps_every_guard(self):
+        now = datetime.now(timezone.utc)
+        records = [
+            _auth_user("sent", 14),
+            _auth_user("cooldown", 14),
+            _auth_user("stale", 14),
+            _auth_user("nodoc", 14),
+            _auth_user("noaddress", 14, email=None),
+            _auth_user("testdomain", 14, email="qa@example.com"),
+            _auth_user("disabled", 14, disabled=True),
+            _auth_user("ok", 14),
+        ]
+        docs = {
+            "sent": {"emailsSent": {"reengagement14Day": now - timedelta(days=200)}},  # once ever
+            "cooldown": {"emailsSent": {"welcomeDay7": now - timedelta(hours=3)}},
+            "stale": {"createdAt": now - timedelta(days=400)},
+            "noaddress": {},
+            "testdomain": {},
+            "disabled": {},
+            "ok": {"emailsSent": None},
+        }
+        result, delay, db, _ = self._run(records, docs)
+        self.assertEqual(result["emails_queued"], 1)
+        delay.assert_called_once_with(user_name="there", user_id="ok")
+        for uid, snap in db.snaps.items():
+            if uid != "ok":
+                snap.reference.update.assert_not_called()
+
+    def test_the_send_still_checks_marketing_consent(self):
+        self.assertIn("send_reengagement_14day_task", MARKETING_TASKS)
+        self.assertIn("reengagement_14day", email_service.MARKETING_EMAIL_TYPES)
+
+    def test_dry_run_dispatches_and_marks_nothing(self):
+        records = [_auth_user("uid1", 14, email="ada@real.org")]
+        result, delay, db, _ = self._run(records, {"uid1": {}}, dry_run=True)
+        self.assertEqual(result, {"status": "dry_run", "candidates": [{"uid": "uid1", "email": "ada@real.org"}]})
+        delay.assert_not_called()
+        db.snaps["uid1"].reference.update.assert_not_called()
+
+    def test_a_run_stops_at_the_daily_limit(self):
+        records = [_auth_user(f"uid{i}", 14) for i in range(3)]
+        result, delay, _, _ = self._run(records, {r.uid: {} for r in records}, limit=2)
+        self.assertEqual(result["emails_queued"], 2)
+        self.assertEqual(delay.call_count, 2)
+
+
+class AccountActivityTests(unittest.TestCase):
+    def test_last_seen_is_the_latest_auth_timestamp(self):
+        user = SimpleNamespace(user_metadata=SimpleNamespace(
+            creation_timestamp=1_000, last_sign_in_timestamp=3_000, last_refresh_timestamp=2_000,
+        ))
+        self.assertEqual(account_activity.last_seen(user), datetime.fromtimestamp(3, timezone.utc))
+
+    def test_an_account_without_timestamps_is_never_idle(self):
+        user = SimpleNamespace(uid="u1", email="u1@real.org", disabled=False, user_metadata=SimpleNamespace(
+            creation_timestamp=None, last_sign_in_timestamp=None, last_refresh_timestamp=None,
+        ))
+        self.assertIsNone(account_activity.last_seen(user))
+        with patch.object(firebase_auth, "list_users", _list_users([user])):
+            found = account_activity.accounts_last_seen_between(
+                datetime(2000, 1, 1, tzinfo=timezone.utc), datetime.now(timezone.utc),
+            )
+        self.assertEqual(found, {})
+
+    def test_lists_enabled_accounts_in_the_window_with_their_auth_address(self):
+        now = datetime.now(timezone.utc)
+        records = [
+            _auth_user("in", 14, email="in@real.org"),
+            _auth_user("no-email", 14, email=None),
+            _auth_user("disabled", 14, disabled=True),
+            _auth_user("before", 20),
+            _auth_user("after", 5),
+        ]
+        with patch.object(firebase_auth, "list_users", _list_users(records)):
+            found = account_activity.accounts_last_seen_between(now - timedelta(days=15), now - timedelta(days=13))
+        self.assertEqual(found, {"in": "in@real.org", "no-email": None})
+
+
+class TypedRangeQuery:
+    """where(field, ">=", bound) → limit → stream. Like Firestore, a range
+    filter matches only values of the bound's own type."""
+
+    def __init__(self, rows):
+        self._rows = rows
+
+    def where(self, field, op, bound):
+        assert op == ">="
+
+        def same_type(value):
+            if isinstance(bound, datetime):
+                return isinstance(value, datetime)
+            if isinstance(bound, (int, float)):
+                return isinstance(value, (int, float)) and not isinstance(value, bool)
+            return isinstance(value, type(bound))
+
+        return TypedRangeQuery([r for r in self._rows if same_type(r.get(field)) and r[field] >= bound])
+
+    def limit(self, _n):
+        return self
+
+    def stream(self):
+        return iter(self._rows)
+
+
+def _activity_db(subcollections):
+    """users/{uid}/{name} rows for one account."""
+    user = SimpleNamespace(collection=lambda name: TypedRangeQuery(subcollections.get(name, [])))
+    return SimpleNamespace(collection=lambda _name: SimpleNamespace(document=lambda _uid: user))
+
+
+class UsedSinceTests(unittest.TestCase):
+    SINCE = datetime(2026, 9, 19, 12, tzinfo=timezone.utc)
+
+    def test_each_signal_that_never_refreshes_a_token_counts(self):
+        after = self.SINCE + timedelta(hours=1)
+        signals = {
+            "a capture through cerebral": {"inbox": [{"createdAt": after}]},
+            "a share-sheet capture (epoch seconds)": {"inbox": [{"createdAt": after.timestamp()}]},
+            "an inbox ISO string": {"inbox": [{"createdAt": after.isoformat()}]},
+            "a chat counted in usage_monthly": {"usage_monthly": [{"updated_at": after.isoformat()}]},
+            "an App Intents job": {"intent_jobs": [{"updated_at": after.isoformat().replace("+00:00", "Z")}]},
+        }
+        for label, subcollections in signals.items():
+            with self.subTest(label):
+                self.assertTrue(account_activity.used_since(_activity_db(subcollections), "uid1", self.SINCE))
+
+    def test_older_activity_does_not(self):
+        before = self.SINCE - timedelta(hours=1)
+        db = _activity_db({
+            "inbox": [{"createdAt": before}, {"createdAt": before.timestamp()}, {"createdAt": before.isoformat()}],
+            "usage_monthly": [{"updated_at": before.isoformat()}],
+            "intent_jobs": [{"updated_at": before.isoformat().replace("+00:00", "Z")}],
+        })
+        self.assertFalse(account_activity.used_since(db, "uid1", self.SINCE))
 
 
 if __name__ == "__main__":
