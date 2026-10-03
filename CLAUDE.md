@@ -180,6 +180,20 @@ The window is one day wide, so a run never mails a backlog; `REENGAGEMENT_DAILY_
 ceiling. cerebral's document retention sweep reads the same signals
 (`services/documents/retention.py` there); keep them in step.
 
+**Who counts as churned** (`subscription_status.py`). Two writers spell a cancellation differently.
+cerebral's RevenueCat webhook writes `"cancelled"` on CANCELLATION and `"expired"` on EXPIRATION. The
+Cloud Function `updateSubscriptionStatus` (semantic/firebase_functions) writes `"canceled"` on both,
+and whichever lands last stays. On 2026-10-03, 457 prod accounts read `"canceled"` (449 last saw an
+EXPIRATION). The win-back beats matched only `"expired"` and `"cancelled"`, so none of those 457 got
+one. Every comparison and the email beats' queries match both spellings through `CANCELLED_STATUSES`
+/ `CHURNED_STATUSES`.
+
+The analytics snapshot's status scans still read cerebral's spellings only. Adding `"canceled"`
+would more than double the snapshot's Firestore reads, about 440k more a day. On 2026-10-03 it
+changed one figure, and made it wrong: the 90-day churn rate went from 33.9% to 64.9%. Most
+`"canceled"` docs are a July 2026 batch of about 100 web trials with no trial or webhook fields, and
+churn intelligence has no provenance screen. `subscription_status.py` has the details.
+
 **Marketing vs account email (Oct 2026).** cerebral owns the consent rule and every write
 (`services/marketing_email/consent.py` there); this app only reads it.
 - **Marketing** = `email_service.MARKETING_EMAIL_TYPES`: day1/day3/day7, signup_no_trial_nudge,

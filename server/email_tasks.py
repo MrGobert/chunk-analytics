@@ -29,6 +29,7 @@ import email_service
 from account_activity import accounts_last_seen_between, used_since
 from account_email import account_email, account_emails
 from email_tracking import marketing_blocked, track_email_sent
+from subscription_status import CHURNED_STATUSES
 
 logging.basicConfig(level=logging.INFO)
 
@@ -739,7 +740,7 @@ def check_churned_users_7day_task(self):
     Daily task: Find users who churned exactly 7 days ago and send winback email.
 
     Queries Firestore for users with:
-    - Expired/cancelled subscription
+    - Expired or cancelled subscription, either spelling (CHURNED_STATUSES)
     - Expiration date ~7 days ago
     - Haven't received 7-day winback email yet
 
@@ -758,7 +759,7 @@ def check_churned_users_7day_task(self):
         # Query users collection for churned users
         users_ref = db.collection("users")
         query = (
-            users_ref.where("subscriptionStatus", "in", ["expired", "cancelled"])
+            users_ref.where("subscriptionStatus", "in", list(CHURNED_STATUSES))
             .where("expirationDate", ">=", window_start)
             .where("expirationDate", "<=", window_end)
             .limit(500)
@@ -836,7 +837,7 @@ def check_churned_users_30day_task(self):
 
         users_ref = db.collection("users")
         query = (
-            users_ref.where("subscriptionStatus", "in", ["expired", "cancelled"])
+            users_ref.where("subscriptionStatus", "in", list(CHURNED_STATUSES))
             .where("expirationDate", ">=", window_start)
             .where("expirationDate", "<=", window_end)
             .limit(500)
@@ -1826,7 +1827,7 @@ def check_signup_no_trial_task(self):
 
     Queries Firestore for users with:
     - createdAt 3-4 days ago
-    - No trial ever started (subscriptionStatus not in active/trial/expired/cancelled)
+    - No trial ever started (subscriptionStatus not active, trial or CHURNED_STATUSES)
     - Haven't received signupNoTrialNudge email yet
 
     Schedule: Run daily via Celery Beat
@@ -1866,7 +1867,7 @@ def check_signup_no_trial_task(self):
 
             # Skip users who have already started a trial or subscribed
             sub_status = user_data.get("subscriptionStatus", "")
-            if sub_status in ("active", "trial", "expired", "cancelled"):
+            if sub_status in ("active", "trial", *CHURNED_STATUSES):
                 continue
 
             # Cooldown: skip if user received any marketing email in last 24h
