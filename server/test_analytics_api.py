@@ -129,7 +129,7 @@ class SubscriberFunnelTests(unittest.TestCase):
                 "environment": "PRODUCTION",
             }),
         ]
-        fake_db = FakeDB({"users": users, "subscription_events": events})
+        fake_db = FakeDB({"users": users, "subscription_ledger": events})
 
         with patch.dict(sys.modules, {"firebase_setup": SimpleNamespace(db=fake_db)}):
             result = analytics_api._compute_subscriber_funnel(30)
@@ -155,7 +155,7 @@ class SubscriberFunnelTests(unittest.TestCase):
                 "platform": "ios",
             }),
         ]
-        fake_db = FakeDB({"users": users, "subscription_events": []})
+        fake_db = FakeDB({"users": users, "subscription_ledger": []})
 
         with patch.dict(sys.modules, {"firebase_setup": SimpleNamespace(db=fake_db)}):
             result = analytics_api._compute_subscriber_funnel(30)
@@ -168,6 +168,133 @@ class SubscriberFunnelTests(unittest.TestCase):
             "Active (30d)": 1,
             "Churned": 0,
         })
+
+
+class LedgerQuery(FakeCollection):
+    """Logs each read: the field it was bounded by, and how many docs came back."""
+
+    def __init__(self, docs, log, bound_by=None):
+        super().__init__(docs)
+        self.log = log
+        self.bound_by = bound_by
+
+    def where(self, field, operator, value):
+        narrowed = super().where(field, operator, value)
+        return LedgerQuery(narrowed.docs, self.log, self.bound_by or field)
+
+    def stream(self):
+        self.log.append((self.bound_by, len(self.docs)))
+        return iter(self.docs)
+
+
+class LedgerDB(FakeDB):
+    def __init__(self, events):
+        super().__init__({"subscription_ledger": list(events)})
+        self.reads = []
+
+    def collection(self, name):
+        return LedgerQuery(self.collections.get(name, []), self.reads)
+
+
+class LedgerReadTests(unittest.TestCase):
+    """subscription_ledger is cerebral's record of every RevenueCat event. Its
+    400-day screen is about 1,300 events, and a snapshot run computes three
+    revenue and three funnel windows every 15 minutes: one read serves them
+    all, and later runs read only the records written since."""
+
+    NOW = datetime.now(timezone.utc)
+
+    def _event(self, name, days_ago, environment="PRODUCTION", updated_at=None):
+        occurred = self.NOW - timedelta(days=days_ago)
+        return FakeDoc(name, {
+            "appUserId": f"uid-{name}",
+            "type": "RENEWAL",
+            "periodType": "NORMAL",
+            "store": "APP_STORE",
+            "environment": environment,
+            "occurredAt": occurred,
+            "updatedAt": updated_at or occurred,
+        })
+
+    def _week(self, db):
+        events = analytics_api._subscription_events_since(db, self.NOW - timedelta(days=7))
+        return sorted(event["appUserId"] for event in events)
+
+    def _written_now(self, name, days_ago):
+        return self._event(name, days_ago, updated_at=datetime.now(timezone.utc))
+
+    def test_one_read_serves_every_window(self):
+        db = LedgerDB([
+            self._event("recent", 1),
+            self._event("sandbox", 2, environment="SANDBOX"),
+            self._event("older", 200),
+            self._event("ancient", 500),
+        ])
+
+        week = analytics_api._subscription_events_since(db, self.NOW - timedelta(days=7))
+        quarter = analytics_api._subscription_events_since(db, self.NOW - timedelta(days=90))
+        sandbox_only, _ = analytics_api._non_paying_uids_from_events(db, self.NOW - timedelta(days=400))
+
+        # One read, bounded by date: the 500-day-old event never came back.
+        self.assertEqual(db.reads, [("occurredAt", 3)])
+        self.assertEqual([e["appUserId"] for e in week], ["uid-recent"])
+        self.assertEqual([e["appUserId"] for e in quarter], ["uid-recent"])
+        self.assertEqual(sandbox_only, {"uid-sandbox"})
+
+    def test_no_read_before_a_refresh_is_due(self):
+        db = LedgerDB([self._event("recent", 1)])
+        self._week(db)
+        self._week(db)
+        self.assertEqual(db.reads, [("occurredAt", 1)])
+
+    def test_a_refresh_reads_only_what_was_written_since(self):
+        db = LedgerDB([self._event("old", 3)])
+        self._week(db)
+        db.collections["subscription_ledger"].append(self._written_now("new", 0))
+        with patch.object(analytics_api, "LEDGER_REFRESH_SECONDS", 0):
+            week = self._week(db)
+        self.assertEqual(db.reads, [("occurredAt", 1), ("updatedAt", 1)])
+        self.assertEqual(week, ["uid-new", "uid-old"])
+
+    def test_a_retried_event_counts_once(self):
+        db = LedgerDB([self._event("evt", 1)])
+        self._week(db)
+        # RevenueCat sent it again, and cerebral rewrote the same record.
+        db.collections["subscription_ledger"] = [self._written_now("evt", 1)]
+        with patch.object(analytics_api, "LEDGER_REFRESH_SECONDS", 0):
+            week = self._week(db)
+        self.assertEqual(db.reads, [("occurredAt", 1), ("updatedAt", 1)])
+        self.assertEqual(week, ["uid-evt"])
+
+    def test_reads_the_whole_look_back_again_every_few_hours(self):
+        db = LedgerDB([self._event("recent", 1)])
+        self._week(db)
+        with patch.object(analytics_api, "LEDGER_FULL_READ_SECONDS", 0):
+            self._week(db)
+        self.assertEqual(db.reads, [("occurredAt", 1), ("occurredAt", 1)])
+
+    def test_a_refresh_that_fills_a_read_reads_everything_instead(self):
+        db = LedgerDB([self._event("old", 3)])
+        self._week(db)
+        db.collections["subscription_ledger"].append(self._written_now("new", 0))
+        with patch.object(analytics_api, "LEDGER_REFRESH_SECONDS", 0), \
+             patch.object(analytics_api, "LEDGER_READ_LIMIT", 1):
+            week = self._week(db)
+        self.assertEqual(db.reads, [("occurredAt", 1), ("updatedAt", 1), ("occurredAt", 2)])
+        self.assertEqual(week, ["uid-new", "uid-old"])
+
+    def test_a_window_older_than_the_read_reads_again(self):
+        db = LedgerDB([self._event("ancient", 500)])
+        self._week(db)
+        older = analytics_api._subscription_events_since(db, self.NOW - timedelta(days=600))
+        self.assertEqual(db.reads, [("occurredAt", 0), ("occurredAt", 1)])
+        self.assertEqual([e["appUserId"] for e in older], ["uid-ancient"])
+
+    def test_another_database_never_gets_this_ones_events(self):
+        self._week(LedgerDB([self._event("recent", 1)]))
+        other = LedgerDB([])
+        self.assertEqual(self._week(other), [])
+        self.assertEqual(other.reads, [("occurredAt", 0)])
 
 
 class RevenueSummaryTests(unittest.TestCase):
@@ -212,7 +339,7 @@ class RevenueSummaryTests(unittest.TestCase):
         ]
         fake_db = FakeDB({
             "users": users,
-            "subscription_events": [],
+            "subscription_ledger": [],
             "analytics_cache": [],
         })
 
@@ -255,7 +382,7 @@ class RevenueGuardTests(unittest.TestCase):
     def _summarize(self, users, events=()):
         fake_db = FakeDB({
             "users": users,
-            "subscription_events": list(events),
+            "subscription_ledger": list(events),
             "analytics_cache": [],
         })
         with patch.dict(sys.modules, {"firebase_setup": SimpleNamespace(db=fake_db)}), \
@@ -346,6 +473,25 @@ class RevenueGuardTests(unittest.TestCase):
         self.assertEqual(result["mrr"], 9.99)
         self.assertEqual(result["mrrSource"], "firestore")
 
+    def test_todays_revenue_counts_a_foreign_sale_at_its_usd_price(self):
+        """The ledger's price is RevenueCat's USD figure; priceLocal is what the buyer paid."""
+        now = datetime.now(timezone.utc)
+        sale = FakeDoc("sale", {
+            "appUserId": "eur-buyer",
+            "type": "INITIAL_PURCHASE",
+            "periodType": "NORMAL",
+            "store": "APP_STORE",
+            "environment": "PRODUCTION",
+            "occurredAt": now,
+            "updatedAt": now,
+            "price": 10.49,
+            "priceLocal": 9.99,
+            "currency": "EUR",
+        })
+        result = self._summarize([], events=[sale])
+
+        self.assertEqual(result["todayRevenue"], 10.49)
+
     def test_usd_price_field_is_trusted_whatever_the_buyer_was_charged_in(self):
         """After the webhook fix a VND subscriber carries a USD price too."""
         result = self._summarize([
@@ -400,7 +546,7 @@ class RevenueGuardTests(unittest.TestCase):
         self.assertEqual(result["trialUsers"], 1)
         self.assertEqual(result["excludedFreeAccess"], 0)
 
-    def test_offer_code_redemption_is_excluded_via_the_event_mirror(self):
+    def test_offer_code_redemption_is_excluded_via_the_event_ledger(self):
         """An App Store offer code arrives as APP_STORE with a promotional period."""
         result = self._summarize(
             [FakeDoc("offer", self._paid()), FakeDoc("paying", self._paid())],
@@ -780,7 +926,7 @@ class CustomerDetailTests(unittest.TestCase):
     ):
         fake_db = FakeDB({
             "users": users or [],
-            "subscription_events": events or [],
+            "subscription_ledger": events or [],
             "emailTracking": emails or [],
         })
         rc_module = SimpleNamespace(
@@ -847,7 +993,7 @@ class CustomerDetailTests(unittest.TestCase):
         self.assertFalse(result["hasUsageStats"])
         self.assertEqual(result["usageStats"], {})
 
-    def test_timeline_uses_subscription_events(self):
+    def test_timeline_uses_the_event_ledger(self):
         events = [
             FakeDoc("e2", {
                 "appUserId": "u1",
@@ -1192,7 +1338,7 @@ class CustomerDetailTests(unittest.TestCase):
             analytics_api, "_fetch_usage_monthly", return_value={}
         ), patch.dict(sys.modules, {
             "firebase_setup": SimpleNamespace(db=DB({
-                "subscription_events": [],
+                "subscription_ledger": [],
                 "emailTracking": [],
             })),
             "revenuecat_client": SimpleNamespace(

@@ -2,13 +2,13 @@
 The values of ``users/{uid}.subscriptionStatus`` that mean a subscription was
 cancelled or has expired.
 
-Two writers spell a cancellation differently:
+Two writers spelled a cancellation differently:
 
 - cerebral's RevenueCat webhook (webhooks_revenuecat.py) writes "cancelled" on
   CANCELLATION and "expired" on EXPIRATION.
 - The Cloud Function ``updateSubscriptionStatus`` (semantic/firebase_functions)
-  writes "canceled" on both. It runs on every new ``subscription_events`` doc,
-  and whichever writer lands last keeps its value.
+  wrote "canceled" on both, racing the webhook, until it was deleted on
+  2026-10-03. The accounts it last wrote still read "canceled".
 
 On 2026-10-03, 457 prod accounts read "canceled", against 51 "expired" and 7
 "cancelled". 449 of the 457 last saw an EXPIRATION, and none had a win-back:
