@@ -45,6 +45,52 @@ def _cache_result(redis, key, data, ttl):
         logging.warning(f"[ANALYTICS_TASKS] Failed to cache {key}: {e}")
 
 
+def _load_history(redis, key, doc_id):
+    """(history, recorded): a chart's daily points, and whether they came
+    from Firestore's analytics_cache/{doc_id}, the record.
+
+    Redis only speeds the dashboard up: its copy expires and the plan keeps
+    nothing across a restart, so an empty key must never shorten the record.
+    Its copy is read only when Firestore can't be, and then the caller must
+    not overwrite the record.
+    """
+    try:
+        from firebase_setup import db
+
+        snap = db.collection("analytics_cache").document(doc_id).get()
+        history = ((snap.to_dict() or {}).get("history") or []) if snap.exists else []
+        return [p for p in history if isinstance(p, dict)], True
+    except Exception as e:
+        logging.warning(f"[ANALYTICS_TASKS] Failed to read {doc_id} from Firestore: {e}")
+
+    history = []
+    if redis:
+        try:
+            existing = redis.get(key)
+            history = json.loads(existing) if existing else []
+        except Exception:
+            history = []
+    return [p for p in history if isinstance(p, dict)], False
+
+
+def _save_history(redis, key, doc_id, history, recorded):
+    """Write a chart history to Redis, and to Firestore unless its copy there
+    couldn't be read."""
+    _cache_result(redis, key, history, HISTORY_TTL)
+    if not recorded:
+        logging.warning(f"[ANALYTICS_TASKS] Not overwriting {doc_id} in Firestore: it couldn't be read")
+        return
+    try:
+        from firebase_setup import db
+
+        db.collection("analytics_cache").document(doc_id).set({
+            "history": history,
+            "_updated_at": datetime.now(timezone.utc),
+        })
+    except Exception as e:
+        logging.warning(f"[ANALYTICS_TASKS] Failed to persist {doc_id} to Firestore: {e}")
+
+
 @shared_task(
     bind=True,
     name="compute_analytics_snapshot",
@@ -124,8 +170,8 @@ def compute_analytics_snapshot_task(self):
 )
 def snapshot_daily_mrr_task(self):
     """
-    Daily task: Snapshot today's MRR into a Redis list for mrrTrend chart.
-    Keeps 366 days of history.
+    Daily task: Snapshot today's MRR into the mrrTrend chart's history
+    (Firestore, cached in Redis). Keeps 366 days of history.
 
     Schedule: Daily at 23:55 UTC via Celery Beat
     """
@@ -140,47 +186,15 @@ def snapshot_daily_mrr_task(self):
         mrr_point = {"date": today, "mrr": revenue.get("mrr", 0)}
 
         redis = _get_redis()
-        history = []
-        if redis:
-            # Load existing history
-            try:
-                existing = redis.get("analytics_cache:mrr_history")
-                history = json.loads(existing) if existing else []
-            except Exception:
-                history = []
-
-        # Redis is an acceleration layer, not the source of truth. Recover
-        # from Firestore before appending when the key expired or Redis is down;
-        # otherwise a cache miss would collapse the chart to a single point.
-        if not history:
-            try:
-                from firebase_setup import db
-                history_doc = db.collection("analytics_cache").document("mrr_history").get()
-                if history_doc.exists:
-                    history = (history_doc.to_dict() or {}).get("history", []) or []
-            except Exception as e:
-                logging.warning(f"[ANALYTICS_TASKS] Failed to restore MRR history from Firestore: {e}")
+        history, recorded = _load_history(redis, "analytics_cache:mrr_history", "mrr_history")
 
         # Append or update today's entry and retain the dashboard's 12-month scope.
         history = [p for p in history if p.get("date") != today]
         history.append(mrr_point)
         history = sorted(history, key=lambda p: p.get("date", ""))[-366:]
 
-        if redis:
-            _cache_result(redis, "analytics_cache:mrr_history", history, HISTORY_TTL)
-            logging.info(f"[ANALYTICS_TASKS] MRR snapshot: ${mrr_point['mrr']:.2f} on {today} ({len(history)} days of history)")
-        else:
-            logging.warning("[ANALYTICS_TASKS] Redis unavailable, MRR snapshot not saved")
-
-        # Also persist to Firestore as fallback
-        try:
-            from firebase_setup import db
-            db.collection("analytics_cache").document("mrr_history").set({
-                "history": history,
-                "_updated_at": datetime.now(timezone.utc),
-            })
-        except Exception as e:
-            logging.warning(f"[ANALYTICS_TASKS] Failed to persist MRR to Firestore: {e}")
+        _save_history(redis, "analytics_cache:mrr_history", "mrr_history", history, recorded)
+        logging.info(f"[ANALYTICS_TASKS] MRR snapshot: ${mrr_point['mrr']:.2f} on {today} ({len(history)} days of history)")
 
     except Exception as e:
         logging.error(f"[ANALYTICS_TASKS] Daily MRR snapshot failed: {e}", exc_info=True)
@@ -195,8 +209,8 @@ def snapshot_daily_mrr_task(self):
 )
 def snapshot_daily_churn_rate_task(self):
     """
-    Daily task: Snapshot today's churn rate into a Redis list for churnRateTrend chart.
-    Keeps 90 days of history. Also persists to Firestore as fallback.
+    Daily task: Snapshot today's churn rate into the churnRateTrend chart's
+    history (Firestore, cached in Redis). Keeps 90 days of history.
 
     Schedule: Daily at 23:50 UTC via Celery Beat
     """
@@ -215,37 +229,18 @@ def snapshot_daily_churn_rate_task(self):
             "churnedCount": len(churn.get("churnedUsers", [])),
         }
 
+        # It used to start from Redis alone and wrote one point when Redis was
+        # down, so the Firestore copy held a single day (2026-10).
         redis = _get_redis()
-        if redis:
-            # Load existing history
-            try:
-                existing = redis.get("analytics_cache:churn_rate_history")
-                history = json.loads(existing) if existing else []
-            except Exception:
-                history = []
+        history, recorded = _load_history(redis, "analytics_cache:churn_rate_history", "churn_rate_history")
 
-            # Append or update today's entry
-            history = [p for p in history if p.get("date") != today]
-            history.append(churn_point)
+        # Append or update today's entry; keep only the last 90 days
+        history = [p for p in history if p.get("date") != today]
+        history.append(churn_point)
+        history = sorted(history, key=lambda p: p.get("date", ""))[-90:]
 
-            # Keep only last 90 days
-            history = history[-90:]
-
-            _cache_result(redis, "analytics_cache:churn_rate_history", history, HISTORY_TTL)
-            logging.info(f"[ANALYTICS_TASKS] Churn rate snapshot: {churn_point['rate']}% on {today} ({len(history)} days of history)")
-        else:
-            history = [churn_point]
-            logging.warning("[ANALYTICS_TASKS] Redis unavailable, churn snapshot only persisted to Firestore")
-
-        # Persist to Firestore as fallback
-        try:
-            from firebase_setup import db
-            db.collection("analytics_cache").document("churn_rate_history").set({
-                "history": history,
-                "_updated_at": datetime.now(timezone.utc),
-            })
-        except Exception as e:
-            logging.warning(f"[ANALYTICS_TASKS] Failed to persist churn rate to Firestore: {e}")
+        _save_history(redis, "analytics_cache:churn_rate_history", "churn_rate_history", history, recorded)
+        logging.info(f"[ANALYTICS_TASKS] Churn rate snapshot: {churn_point['rate']}% on {today} ({len(history)} days of history)")
 
     except Exception as e:
         logging.error(f"[ANALYTICS_TASKS] Daily churn rate snapshot failed: {e}", exc_info=True)

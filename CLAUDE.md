@@ -137,7 +137,8 @@ Score → status: ≥60 healthy, ≥30 atRisk, <30 churning.
 | `check_signup_no_trial` | Daily 12:30 UTC | Nudge for users who signed up but never started trial |
 | `refresh_email_stats_cache` | Every 5 min | Pre-compute email conversion stats in Redis |
 | `compute_analytics_snapshot` | Every 15 min | Pre-compute revenue/funnel/churn/health data in Redis |
-| `snapshot_daily_mrr` | Daily 23:55 UTC | Snapshot MRR to Redis + Firestore for trend chart |
+| `snapshot_daily_churn_rate` | Daily 23:50 UTC | Snapshot churn rate to Firestore + Redis for trend chart |
+| `snapshot_daily_mrr` | Daily 23:55 UTC | Snapshot MRR to Firestore + Redis for trend chart |
 
 ### Email System
 
@@ -221,7 +222,7 @@ ceiling. cerebral's document retention sweep reads the same signals
 | `users` | User profiles, subscription status, usage stats, `emailsSent` flags |
 | `emailTracking` | Per-email send records with delivery/conversion tracking |
 | `emailUnsubscribes` | Marketing opt-outs by address (cerebral writes them; ids are the lowercase address) |
-| `analytics_cache` | Firestore fallback for MRR history when Redis is unavailable |
+| `analytics_cache` | The record for the dashboard's chart histories (`mrr_history`, `churn_rate_history`); Redis only caches them |
 | `users/{uid}/notes` | User notes (monthly recap: `createdAt` Timestamp range count) |
 | `users/{uid}/collections` | User collections (monthly recap: `createdAt` Timestamp range count) |
 | `users/{uid}/generated_images` | Generated images (monthly recap: numeric `timestamp` range count — NOT `createdAt`, which is mixed-type) |
@@ -233,12 +234,35 @@ ceiling. cerebral's document retention sweep reads the same signals
 | `document_metadata/{uid}/files_metadata` | Uploaded documents (monthly recap: numeric epoch `timestamp` range count) |
 | `users/{uid}/deleted_notes` | Deletion tombstones for cross-platform sync |
 
+### Redis (`redis_setup.py`)
+
+`REDIS_URL` is this app's own Heroku Redis (Mini: 25 MB, `noeviction`, no persistence, 20
+connections, connections idle for 300 s are closed); cerebral has a separate one. It is also the
+Celery broker, so if it ever filled up, emails couldn't be queued. The caches hold about 0.2 MB
+(2026-10). It requires TLS and serves a self-signed chain, so the client skips certificate checks as
+`celery_app.py` does. Until Oct 2026 it didn't: `redis_client` was None, and every cache, the eval
+lock and the eval daily budget were skipped. The client connects on first use and retries once on a
+dropped connection.
+
+What it holds:
+- `analytics_cache:*`: dashboard results, 15–20 minutes old at most.
+- `email_stats:{days}`: 5–10 minutes, cleared on every tracked email and Resend event.
+- The chart histories, for 8 days. Firestore `analytics_cache/{mrr_history,churn_rate_history}` is
+  the record: the daily snapshot reads it, never an empty Redis key, and doesn't overwrite it after a
+  failed read.
+- `eval_suite:lock` (one eval run at a time) and `eval_suite:runs:{day}` (`EVAL_MAX_RUNS_PER_DAY`,
+  default 6).
+
+With Redis working, the precompute beats do their work: the 15-minute snapshot reads about 3,000
+Firestore docs per run and the 5-minute email-stats refresh about 1,500, roughly 730k reads a day
+together (2026-10). Without Redis they skip.
+
 ### Environment Variables (Heroku)
 
 | Variable | Purpose |
 |----------|---------|
 | `GOOGLE_APPLICATION_CREDENTIALS` | Firebase service account JSON |
-| `REDIS_URL` | Heroku Redis (`rediss://` TLS) |
+| `REDIS_URL` | This app's Heroku Redis (`rediss://`, self-signed; see Redis above) |
 | `RESEND_API_KEY` | Resend email API |
 | `REVENUECAT_WEBHOOK_AUTH` | Shared auth token (Flask API + RevenueCat webhooks) |
 | `EMAIL_UNSUBSCRIBE_SECRET` | HMAC secret for unsubscribe token generation (same value as cerebral's) |
