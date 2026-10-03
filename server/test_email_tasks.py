@@ -1033,5 +1033,110 @@ class UsedSinceTests(unittest.TestCase):
         self.assertFalse(account_activity.used_since(db, "uid1", self.SINCE))
 
 
+# ---------------------------------------------------------------------------
+# Win-back and the no-trial nudge: both spellings of a cancellation
+# ---------------------------------------------------------------------------
+
+
+class ChurnWindowQuery:
+    """users where(subscriptionStatus in) → where(expirationDate >= / <=) →
+    limit(n) → stream(), filtered for real."""
+
+    def __init__(self, docs):
+        self._docs = docs
+
+    def where(self, field, op, value):
+        if (field, op) == ("subscriptionStatus", "in"):
+            # Firestore rejects an `in` filter with more than 30 values
+            assert 0 < len(value) <= 30, value
+            keep = lambda doc: doc.to_dict().get(field) in value  # noqa: E731
+        elif (field, op) == ("expirationDate", ">="):
+            keep = lambda doc: doc.to_dict()[field] >= value  # noqa: E731
+        elif (field, op) == ("expirationDate", "<="):
+            keep = lambda doc: doc.to_dict()[field] <= value  # noqa: E731
+        else:
+            raise AssertionError(f"unexpected filter: {field} {op}")
+        return ChurnWindowQuery([doc for doc in self._docs if keep(doc)])
+
+    def limit(self, _n):
+        return self
+
+    def stream(self):
+        return iter(self._docs)
+
+
+class WinbackSpellingTests(unittest.TestCase):
+    """cerebral's webhook writes subscriptionStatus "cancelled"; the Cloud
+    Function updateSubscriptionStatus writes "canceled", on EXPIRATION too.
+    On 2026-10-03, 457 prod accounts read "canceled", and none had a win-back:
+    the beats matched only "expired" and "cancelled"."""
+
+    BEATS = {
+        "check_churned_users_7day_task": ("send_winback_7day_task", "winback7Day", 7),
+        "check_churned_users_30day_task": ("send_winback_30day_task", "winback30Day", 30),
+    }
+
+    def _churned(self, uid, status, days_ago, **extra):
+        data = {
+            "subscriptionStatus": status,
+            "expirationDate": datetime.now(timezone.utc) - timedelta(days=days_ago),
+            "displayName": "U",
+        }
+        data.update(extra)
+        return FakeUserDoc(uid, data, auth_email=f"{uid}@real.org")
+
+    def _run(self, beat_name, docs):
+        send_task = getattr(email_tasks, self.BEATS[beat_name][0])
+        db = SimpleNamespace(collection=lambda name: ChurnWindowQuery(docs))
+        with patch.dict(sys.modules, {"firebase_setup": SimpleNamespace(db=db)}), \
+             patch.object(email_tasks, "account_emails", _fake_auth(docs)), \
+             patch.object(send_task, "delay") as delay:
+            result = getattr(email_tasks, beat_name)()
+        return result, sorted(c.kwargs["user_id"] for c in delay.call_args_list)
+
+    def test_both_spellings_of_a_cancellation_get_the_winback(self):
+        for beat_name, (_, flag, days) in self.BEATS.items():
+            with self.subTest(beat_name):
+                churned = [self._churned(status, status, days) for status in ("canceled", "cancelled", "expired")]
+                renewed = self._churned("active", "active", days)
+                result, queued = self._run(beat_name, churned + [renewed])
+                self.assertEqual(queued, ["canceled", "cancelled", "expired"])
+                self.assertEqual(result["emails_queued"], 3)
+                for doc in churned:
+                    doc.reference.update.assert_called_once_with({f"emailsSent.{flag}": ANY})
+                renewed.reference.update.assert_not_called()
+
+    def test_the_first_run_mails_no_backlog(self):
+        # Each beat's window is one day wide, so an account that churned
+        # before this change never matches it. The flag still holds a repeat.
+        for beat_name, (_, flag, days) in self.BEATS.items():
+            with self.subTest(beat_name):
+                docs = [
+                    self._churned("a-day-earlier", "canceled", days + 1),
+                    self._churned("a-day-later", "canceled", days - 1),
+                    self._churned("july-batch", "canceled", 80),
+                    self._churned("already-sent", "canceled", days, emailsSent={flag: datetime(2026, 7, 1, tzinfo=timezone.utc)}),
+                ]
+                result, queued = self._run(beat_name, docs)
+                self.assertEqual(queued, [])
+                self.assertEqual(result["emails_queued"], 0)
+                for doc in docs:
+                    doc.reference.update.assert_not_called()
+
+    def test_no_trial_nudge_skips_both_spellings_of_a_cancelled_trial(self):
+        signed_up = datetime.now(timezone.utc) - timedelta(days=3, hours=12)
+        docs = [
+            FakeUserDoc(uid, {"subscriptionStatus": status, "createdAt": signed_up}, auth_email=f"{uid}@real.org")
+            for uid, status in (("canceled", "canceled"), ("cancelled", "cancelled"), ("expired", "expired"), ("never-started", ""))
+        ]
+        db = SimpleNamespace(collection=lambda name: CreatedAtWindowQuery(docs))
+        with patch.dict(sys.modules, {"firebase_setup": SimpleNamespace(db=db)}), \
+             patch.object(email_tasks, "account_emails", _fake_auth(docs)), \
+             patch.object(email_tasks.send_signup_no_trial_nudge_task, "delay") as delay:
+            result = email_tasks.check_signup_no_trial_task()
+        self.assertEqual([c.kwargs["user_id"] for c in delay.call_args_list], ["never-started"])
+        self.assertEqual(result["emails_queued"], 1)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -623,20 +623,23 @@ class HealthScoreTests(unittest.TestCase):
         self.assertEqual(health["factors"]["tenure"], 7)
 
     def test_cancelled_customer_keeps_access_until_expiration(self):
-        self.assertTrue(analytics_api._has_current_subscription_access(
-            {
-                "subscriptionStatus": "cancelled",
-                "expirationDate": self.NOW + timedelta(days=1),
-            },
-            self.NOW,
-        ))
-        self.assertFalse(analytics_api._has_current_subscription_access(
-            {
-                "subscriptionStatus": "cancelled",
-                "expirationDate": self.NOW - timedelta(seconds=1),
-            },
-            self.NOW,
-        ))
+        # cerebral writes "cancelled"; the Cloud Function updateSubscriptionStatus "canceled"
+        for status in ("cancelled", "canceled"):
+            with self.subTest(status):
+                self.assertTrue(analytics_api._has_current_subscription_access(
+                    {
+                        "subscriptionStatus": status,
+                        "expirationDate": self.NOW + timedelta(days=1),
+                    },
+                    self.NOW,
+                ))
+                self.assertFalse(analytics_api._has_current_subscription_access(
+                    {
+                        "subscriptionStatus": status,
+                        "expirationDate": self.NOW - timedelta(seconds=1),
+                    },
+                    self.NOW,
+                ))
 
 
 class FetchUsageMonthlyTests(unittest.TestCase):

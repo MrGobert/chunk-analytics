@@ -19,6 +19,7 @@ logging.basicConfig(level=logging.WARNING)
 
 sys.path.insert(0, ".")
 import analytics_api as A  # noqa: E402
+from subscription_status import CHURNED_STATUSES  # noqa: E402
 
 
 def main():
@@ -29,7 +30,7 @@ def main():
 
     buckets = {
         status: list(users.where("subscriptionStatus", "==", status).limit(5000).stream())
-        for status in ("active", "trial", "expired", "cancelled")
+        for status in ("active", "trial", *CHURNED_STATUSES)
     }
     print("subscriptionStatus counts")
     for status, docs in buckets.items():

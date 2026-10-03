@@ -18,6 +18,7 @@ from statistics import median
 from flask import Blueprint, jsonify, request
 
 import revenuecat_client
+from subscription_status import CANCELLED_STATUSES, CHURNED_STATUSES
 
 analytics_api_bp = Blueprint("analytics_api", __name__)
 
@@ -373,7 +374,7 @@ def _has_current_subscription_access(user_data: dict, now: datetime) -> bool:
     status = str(user_data.get("subscriptionStatus") or "").strip().lower()
     if status in ("active", "trial"):
         return True
-    if status in ("cancelled", "canceled"):
+    if status in CANCELLED_STATUSES:
         expiration = _to_datetime(user_data.get("expirationDate"))
         return bool(expiration and expiration > now)
     return False
@@ -843,6 +844,7 @@ def _compute_revenue_summary(days: int) -> dict:
     # Active subscribers
     active_docs = list(users_ref.where("subscriptionStatus", "==", "active").limit(5000).stream())
     trial_docs = list(users_ref.where("subscriptionStatus", "==", "trial").limit(5000).stream())
+    # cerebral's spellings only, deliberately: see subscription_status.py
     expired_docs = list(users_ref.where("subscriptionStatus", "==", "expired").limit(5000).stream())
     cancelled_docs = list(users_ref.where("subscriptionStatus", "==", "cancelled").limit(5000).stream())
 
@@ -1168,6 +1170,7 @@ def _compute_subscriber_funnel(days: int) -> dict:
     signed_up = len(all_users_in_period)
 
     status_docs = {}
+    # cerebral's spellings only, deliberately: see subscription_status.py
     for status in ("trial", "active", "expired", "cancelled"):
         docs = list(users_ref.where("subscriptionStatus", "==", status).limit(5000).stream())
         for doc in docs:
@@ -1434,6 +1437,7 @@ def _compute_churn_intelligence(days: int) -> dict:
     trial_docs = list(users_ref.where("subscriptionStatus", "==", "trial").limit(5000).stream())
 
     # Churned users in period
+    # cerebral's spellings only, deliberately: see subscription_status.py
     expired_docs = list(users_ref.where("subscriptionStatus", "==", "expired").limit(5000).stream())
     cancelled_docs = list(users_ref.where("subscriptionStatus", "==", "cancelled").limit(5000).stream())
 
@@ -1509,7 +1513,7 @@ def _compute_churn_intelligence(days: int) -> dict:
         platform = data.get("platform", "unknown") or "unknown"
         sub_status = data.get("subscriptionStatus", "active")
         is_trial = _is_trial_subscription(data)
-        is_scheduled_cancellation = sub_status in ("cancelled", "canceled")
+        is_scheduled_cancellation = sub_status in CANCELLED_STATUSES
 
         # Trial-specific: days until trial ends
         trial_end = _to_datetime(data.get("trialEndDate"))
@@ -1747,6 +1751,7 @@ def _compute_customer_health() -> dict:
     total_score = 0
 
     while True:
+        # cerebral's spellings only, deliberately: see subscription_status.py
         query = (users_ref
                  .where("subscriptionStatus", "in", ["active", "trial", "cancelled"])
                  .order_by("__name__")
@@ -2046,7 +2051,7 @@ def _current_subscription(uid: str, data: dict) -> dict:
     status = str(data.get("subscriptionStatus") or "").strip().lower()
     period_end = (
         data.get("expirationDate") or data.get("renewalDate")
-        if status in ("cancelled", "canceled", "expired")
+        if status in CHURNED_STATUSES
         else data.get("renewalDate") or data.get("expirationDate")
     )
     fallback = {
