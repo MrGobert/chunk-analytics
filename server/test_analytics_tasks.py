@@ -10,6 +10,7 @@ Run:
     python -m pytest server/test_analytics_tasks.py -v
 """
 
+import ast
 import json
 import sys
 import unittest
@@ -145,6 +146,26 @@ class MrrHistoryTests(unittest.TestCase):
         firestore = FakeFirestore({"mrr_history": _history("2026-09-01", mrr=50.0)})
         self._run(firestore, None)
         self.assertEqual(firestore.dates("mrr_history"), ["2026-09-01", TODAY])
+
+
+class ScheduleTests(unittest.TestCase):
+    def test_email_stats_are_computed_on_demand_not_every_five_minutes(self):
+        # The 5-minute precompute would have read about 443k Firestore docs a
+        # day, and every tracked email and Resend event clears the cache it
+        # filled (dropped 2026-10-03). The dashboard snapshot stays.
+        # Read the schedule from source: importing celery_app runs sentry_sdk.init.
+        source = (Path(__file__).parent / "celery_app.py").read_text()
+        scheduled = {
+            value.value
+            for node in ast.walk(ast.parse(source))
+            if isinstance(node, ast.Dict)
+            for key, value in zip(node.keys, node.values)
+            if isinstance(key, ast.Constant) and key.value == "task"
+            and isinstance(value, ast.Constant)
+        }
+        self.assertNotIn("refresh_email_stats_cache", scheduled)
+        self.assertIn("compute_analytics_snapshot", scheduled)
+        self.assertIn("snapshot_daily_churn_rate", scheduled)
 
 
 if __name__ == "__main__":

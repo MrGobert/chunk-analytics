@@ -135,7 +135,6 @@ Score → status: ≥60 healthy, ≥30 atRisk, <30 churning.
 | `check_renewal_reminders` | Daily 09:00 UTC | 7-day renewal reminder |
 | `check_reengagement_14day` | Daily 12:00 UTC | Re-engagement for accounts last used 13.5–14.5 days ago (Firebase Auth activity, below) |
 | `check_signup_no_trial` | Daily 12:30 UTC | Nudge for users who signed up but never started trial |
-| `refresh_email_stats_cache` | Every 5 min | Pre-compute email conversion stats in Redis |
 | `compute_analytics_snapshot` | Every 15 min | Pre-compute revenue/funnel/churn/health data in Redis |
 | `snapshot_daily_churn_rate` | Daily 23:50 UTC | Snapshot churn rate to Firestore + Redis for trend chart |
 | `snapshot_daily_mrr` | Daily 23:55 UTC | Snapshot MRR to Firestore + Redis for trend chart |
@@ -213,7 +212,7 @@ ceiling. cerebral's document retention sweep reads the same signals
 - Every sent email logged to Firestore `emailTracking` collection
 - Conversion attribution: when a user converts (purchase/renewal), all emails sent within 30 days are marked as contributing
 - Delivery events (delivered, opened, clicked, bounced) updated via Resend webhook → `update_email_event()`
-- Stats cached in Redis, refreshed every 5 min
+- Stats cached in Redis for 5 minutes when the dashboard asks; every tracked email and Resend event clears them. There's no precompute: a 5-minute one was dropped in Oct 2026 (about 443k Firestore reads a day, for a cache those events kept clearing)
 
 ### Firestore Collections Used
 
@@ -246,16 +245,15 @@ dropped connection.
 
 What it holds:
 - `analytics_cache:*`: dashboard results, 15–20 minutes old at most.
-- `email_stats:{days}`: 5–10 minutes, cleared on every tracked email and Resend event.
+- `email_stats:{days}`: 5 minutes, cleared on every tracked email and Resend event.
 - The chart histories, for 8 days. Firestore `analytics_cache/{mrr_history,churn_rate_history}` is
   the record: the daily snapshot reads it, never an empty Redis key, and doesn't overwrite it after a
   failed read.
 - `eval_suite:lock` (one eval run at a time) and `eval_suite:runs:{day}` (`EVAL_MAX_RUNS_PER_DAY`,
   default 6).
 
-With Redis working, the precompute beats do their work: the 15-minute snapshot reads about 3,000
-Firestore docs per run and the 5-minute email-stats refresh about 1,500, roughly 730k reads a day
-together (2026-10). Without Redis they skip.
+With Redis working, the 15-minute snapshot does its work: about 3,000 Firestore docs per run, roughly
+290k reads a day (2026-10). Without Redis it skips.
 
 ### Environment Variables (Heroku)
 
