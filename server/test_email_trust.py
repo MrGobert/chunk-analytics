@@ -38,7 +38,7 @@ _AUTH_GUARDS = []
 def setUpModule():
     # Firebase is initialized with this machine's default credentials, so an
     # unpatched Auth lookup would reach the real project. Fail it instead.
-    for name in ("get_user", "get_users"):
+    for name in ("get_user", "get_users", "list_users"):
         patcher = patch.object(auth, name, side_effect=AssertionError(f"real Firebase Auth {name} call"))
         patcher.start()
         _AUTH_GUARDS.append(patcher)
@@ -256,14 +256,20 @@ BEATS = {
     "check_welcome_sequence_day7_task": ("send_day7_researcher_stories_task", "welcomeDay7", {}),
     "check_monthly_recap_task": ("send_monthly_recap_task", "monthlyRecap", {}),
     "check_renewal_reminders_task": ("send_renewal_reminder_task", "renewalReminder", {}),
-    "check_reengagement_14day_task": ("send_reengagement_14day_task", "reengagement14Day", {}),
     "check_signup_no_trial_task": ("send_signup_no_trial_nudge_task", "signupNoTrialNudge", {}),
+}
+
+# Beats that pick accounts from the Firebase Auth listing, which carries each
+# account's address, so they need no second lookup: beat -> (send task, flag).
+AUTH_LISTED_BEATS = {
+    "check_reengagement_14day_task": ("send_reengagement_14day_task", "reengagement14Day"),
 }
 
 
 class FakeDoc:
     def __init__(self, doc_id, data):
         self.id = doc_id
+        self.exists = True
         self._data = data
         self.reference = MagicMock()
 
@@ -318,7 +324,7 @@ class BeatRecipientTests(unittest.TestCase):
 
     def test_every_beat_is_covered(self):
         beats = {n for n in dir(email_tasks) if n.startswith("check_") and n.endswith("_task")}
-        self.assertEqual(beats, set(BEATS))
+        self.assertEqual(beats, set(BEATS) | set(AUTH_LISTED_BEATS))
 
     def test_each_beat_mails_the_auth_address_and_skips_accounts_without_one(self):
         for beat_name, (_, flag, fields) in BEATS.items():
@@ -339,6 +345,33 @@ class BeatRecipientTests(unittest.TestCase):
                 # dedupe flags as before: set for the queued account only
                 mailed.reference.update.assert_called_once_with({f"emailsSent.{flag}": ANY})
                 no_auth.reference.update.assert_not_called()
+                self.assertEqual(result["emails_queued"], 1)
+
+    def test_an_auth_listed_beat_mails_the_listed_address_and_skips_accounts_without_one(self):
+        for beat_name, (send_task_name, flag) in AUTH_LISTED_BEATS.items():
+            with self.subTest(beat=beat_name):
+                mailed = FakeDoc("uid-ok", {"email": DOC_ADDRESS, "displayName": "  Ada \n Lovelace "})
+                # an Auth account with no email (phone sign-in) whose doc names one
+                no_address = FakeDoc("uid-phone", {"email": "someone@example.org", "displayName": "Bo"})
+                docs = {doc.id: doc for doc in (mailed, no_address)}
+                db = SimpleNamespace(
+                    collection=lambda name: SimpleNamespace(document=lambda uid: uid),
+                    get_all=lambda refs: [docs[uid] for uid in refs],
+                )
+                send_task = getattr(email_tasks, send_task_name)
+                with patch.dict(sys.modules, {"firebase_setup": SimpleNamespace(db=db)}), \
+                     patch.object(email_tasks, "accounts_last_seen_between",
+                                  return_value={"uid-ok": AUTH_ADDRESS, "uid-phone": None}), \
+                     patch.object(email_tasks, "used_since", return_value=False), \
+                     patch.object(email_tasks, "account_emails", side_effect=AssertionError("second lookup")), \
+                     patch.object(email_tasks, "account_email", side_effect=AssertionError("per-user lookup in a beat")), \
+                     patch.object(send_task, "delay") as delay:
+                    result = getattr(email_tasks, beat_name)()
+                self.assertEqual(len(delay.call_args_list), 1)
+                self.assertEqual(delay.call_args.args, ())
+                self.assertEqual(delay.call_args.kwargs, {"user_name": "Ada Lovelace", "user_id": "uid-ok"})
+                mailed.reference.update.assert_called_once_with({f"emailsSent.{flag}": ANY})
+                no_address.reference.update.assert_not_called()
                 self.assertEqual(result["emails_queued"], 1)
 
     def test_a_beat_skips_test_domains_by_their_auth_address(self):

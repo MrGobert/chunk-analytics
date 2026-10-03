@@ -133,7 +133,7 @@ Score → status: ≥60 healthy, ≥30 atRisk, <30 churning.
 | `check_welcome_sequence_day7` | Daily 11:30 UTC | Day 7 researcher stories email |
 | `check_monthly_recap` | 1st of month, 14:00 UTC | Usage recap for active subscribers |
 | `check_renewal_reminders` | Daily 09:00 UTC | 7-day renewal reminder |
-| `check_reengagement_14day` | Daily 12:00 UTC | Re-engagement for 14-day inactive users |
+| `check_reengagement_14day` | Daily 12:00 UTC | Re-engagement for accounts last used 13.5–14.5 days ago (Firebase Auth activity, below) |
 | `check_signup_no_trial` | Daily 12:30 UTC | Nudge for users who signed up but never started trial |
 | `refresh_email_stats_cache` | Every 5 min | Pre-compute email conversion stats in Redis |
 | `compute_analytics_snapshot` | Every 15 min | Pre-compute revenue/funnel/churn/health data in Redis |
@@ -168,6 +168,17 @@ their own `users/{uid}` doc, so:
   `_one_line`. `server/test_email_trust.py` renders every `get_*_email` with hostile values.
 - Don't require `email_verified`: neither app ever sends a verification email, so every
   email/password account is unverified.
+
+**Who counts as inactive** (`account_activity.py`). `users/{uid}.lastActiveAt` has no writer:
+cerebral wrote it for one day (2026-03-03) and no prod doc carries it. The re-engagement beat selected
+by it, so it never sent. It now lists Firebase Auth (one call per 1,000 accounts; the beat's
+addresses come from that listing) and picks enabled accounts whose latest creation, sign-in or token
+refresh was 13.5–14.5 days ago. Every app refreshes its ID token while it runs; the sign-in time alone
+goes stale while an app stays signed in. An inbox capture, a `usage_monthly` chat or an App Intents
+job since then counts as use too: the clipper, the share sheet and email-in never refresh a token.
+The window is one day wide, so a run never mails a backlog; `REENGAGEMENT_DAILY_LIMIT` (500) is a
+ceiling. cerebral's document retention sweep reads the same signals
+(`services/documents/retention.py` there); keep them in step.
 
 **Marketing vs account email (Oct 2026).** cerebral owns the consent rule and every write
 (`services/marketing_email/consent.py` there); this app only reads it.
@@ -216,7 +227,9 @@ their own `users/{uid}` doc, so:
 | `users/{uid}/generated_images` | Generated images (monthly recap: numeric `timestamp` range count — NOT `createdAt`, which is mixed-type) |
 | `users/{uid}/transforms` | Artifacts (monthly recap: ISO-string `created_at` month-prefix range count) |
 | `users/{uid}/monitors/*/runs` | Automation runs (monthly recap: ISO-string `created_at` month-prefix range count per monitor) |
-| `users/{uid}/usage_monthly/{YYYY-MM}` | Month-keyed `searches`/`captures` counters written by cerebral request paths; recap reads the previous month's doc |
+| `users/{uid}/usage_monthly/{YYYY-MM}` | Month-keyed `searches`/`captures` counters written by cerebral request paths; recap reads the previous month's doc; re-engagement reads its ISO-string `updated_at` |
+| `users/{uid}/inbox` | Captures (re-engagement: a capture since the window counts as use; `createdAt` is a Timestamp, epoch seconds or an ISO string) |
+| `users/{uid}/intent_jobs` | App Intents jobs (re-engagement: ISO-string `updated_at` ending in `Z`) |
 | `document_metadata/{uid}/files_metadata` | Uploaded documents (monthly recap: numeric epoch `timestamp` range count) |
 | `users/{uid}/deleted_notes` | Deletion tombstones for cross-platform sync |
 

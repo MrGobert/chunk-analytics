@@ -26,6 +26,7 @@ from typing import Optional
 from celery import shared_task
 
 import email_service
+from account_activity import accounts_last_seen_between, used_since
 from account_email import account_email, account_emails
 from email_tracking import marketing_blocked, track_email_sent
 
@@ -57,6 +58,11 @@ EMAIL_COOLDOWN_HOURS = 24
 # Users fetched per Firestore page while the monthly recap beat task walks
 # the active/trial cohort
 RECAP_PAGE_SIZE = 400
+
+# Most re-engagement emails one daily run queues, the cap every other beat
+# query has. The 24-hour window is what keeps a run from mailing a backlog:
+# an account idle for longer than 14.5 days never qualifies.
+REENGAGEMENT_DAILY_LIMIT = 500
 
 
 def _received_recent_email(emails_sent: dict, cooldown_hours: int = EMAIL_COOLDOWN_HOURS) -> bool:
@@ -1696,46 +1702,60 @@ def check_renewal_reminders_task(self):
     soft_time_limit=300,
     time_limit=360,
 )
-def check_reengagement_14day_task(self):
+def check_reengagement_14day_task(self, dry_run: bool = False):
     """
-    Daily task: Find users inactive for 14+ days and send re-engagement email.
+    Daily task: Find users inactive for 14 days and send re-engagement email.
 
-    Queries Firestore for users with:
-    - lastActiveAt > 14 days ago
-    - Haven't received reengagement14Day email yet
+    Selects accounts last used 13.5 to 14.5 days ago (account_activity: the
+    latest of Firebase Auth's creation, sign-in and token refresh times), so
+    each daily run sees one day's worth and an account idle for longer never
+    qualifies. It used to read users.lastActiveAt, which no prod doc carries,
+    so it never sent.
+
+    Skips accounts that:
+    - captured, chatted or ran an App Intents job since then (those never
+      refresh a token)
+    - already got this email (once ever), or any marketing email in 24h
+    - are older than 12 months, or have no usable address
+    The send task checks marketing consent.
+
+    dry_run=True returns the candidates without dispatching or marking
+    (for a manual pre-flight from a heroku run shell).
 
     Schedule: Run daily via Celery Beat
     """
     from firebase_setup import db
 
     try:
-        logging.info("[BEAT_TASK] Checking for users inactive 14+ days...")
+        logging.info("[BEAT_TASK] Checking for users inactive 14 days...")
 
         now = datetime.now(timezone.utc)
         # Users whose last activity was 13.5 to 14.5 days ago
         window_start = now - timedelta(days=14, hours=12)
         window_end = now - timedelta(days=13, hours=12)
 
+        addresses = accounts_last_seen_between(window_start, window_end)
+        uids = sorted(addresses)
         users_ref = db.collection("users")
-        query = (
-            users_ref.where("lastActiveAt", ">=", window_start)
-            .where("lastActiveAt", "<=", window_end)
-            .limit(500)
-        )
-
-        docs = list(query.stream())
-        addresses = account_emails(doc.id for doc in docs)
+        snaps = {}
+        for start in range(0, len(uids), 300):
+            for snap in db.get_all([users_ref.document(uid) for uid in uids[start:start + 300]]):
+                snaps[snap.id] = snap
 
         count = 0
-        for doc in docs:
-            user_data = doc.to_dict()
-            email = addresses.get(doc.id)
+        candidates = []
+        for uid in uids:
+            snap = snaps.get(uid)
+            if snap is None or not snap.exists:
+                continue
+            user_data = snap.to_dict() or {}
+            email = addresses[uid]
             if _should_skip_user(email, user_data, check_stale=True):
                 continue
             name = _display_name(user_data)
 
             # Check if we already sent re-engagement email
-            emails_sent = user_data.get("emailsSent", {})
+            emails_sent = user_data.get("emailsSent") or {}
             if emails_sent.get("reengagement14Day"):
                 logging.info(
                     f"[BEAT_TASK] Skipping {email} - 14-day re-engagement already sent"
@@ -1749,15 +1769,40 @@ def check_reengagement_14day_task(self):
                 )
                 continue
 
-            if email:
-                send_reengagement_14day_task.delay(user_name=name, user_id=doc.id)
+            # A capture, chat or App Intents job since counts as use: the
+            # clipper, the share sheet and email-in never refresh a token
+            if used_since(db, uid, window_end):
+                continue
 
-                doc.reference.update({"emailsSent.reengagement14Day": now})
+            if count >= REENGAGEMENT_DAILY_LIMIT:
+                logging.warning(
+                    f"[BEAT_TASK] 14-day re-engagement stopped at the daily limit "
+                    f"({REENGAGEMENT_DAILY_LIMIT}) of {len(uids)} accounts"
+                )
+                break
+            count += 1
 
-                count += 1
-                logging.info(f"[BEAT_TASK] Queued 14-day re-engagement email for {email}")
+            if dry_run:
+                candidates.append({"uid": uid, "email": email})
+                continue
 
-        logging.info(f"[BEAT_TASK] ✓ Queued {count} 14-day re-engagement emails")
+            send_reengagement_14day_task.delay(user_name=name, user_id=uid)
+
+            snap.reference.update({"emailsSent.reengagement14Day": now})
+
+            logging.info(f"[BEAT_TASK] Queued 14-day re-engagement email for {email}")
+
+        if dry_run:
+            logging.info(
+                f"[BEAT_TASK] Dry run: {count} 14-day re-engagement candidates "
+                f"of {len(uids)} accounts last used 14 days ago"
+            )
+            return {"status": "dry_run", "candidates": candidates}
+
+        logging.info(
+            f"[BEAT_TASK] ✓ Queued {count} 14-day re-engagement emails "
+            f"({len(uids)} accounts last used 14 days ago)"
+        )
         return {"status": "completed", "emails_queued": count}
 
     except Exception as e:
