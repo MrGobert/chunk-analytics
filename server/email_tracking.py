@@ -15,8 +15,9 @@ Schema:
         conversionEvent: string | null (INITIAL_PURCHASE, RENEWAL, TRIAL_CONVERTED)
         daysToConvert: int | null
 
-Stats are cached in Redis for fast retrieval:
-    email_stats:{days} - JSON blob of stats, refreshed every 5 minutes
+Stats are cached in Redis when the dashboard asks for them:
+    email_stats:{days} - JSON blob of stats for 5 minutes; every tracked email
+    and Resend event clears it
 """
 
 import json
@@ -326,8 +327,8 @@ def get_conversion_stats(days: int = 30) -> Dict[str, Any]:
     """
     Get email conversion statistics for the specified time period.
 
-    Uses cached data when available (refreshed every 5 minutes).
-    If cache miss, triggers async refresh and returns empty stats.
+    Served from Redis when cached, else computed from Firestore and cached
+    for 5 minutes. Every tracked email and Resend event clears the cache.
 
     Args:
         days: Number of days to look back
@@ -521,43 +522,6 @@ def _compute_stats_fast(days: int) -> Dict[str, Any]:
             ),
         },
     }
-
-
-def refresh_stats_cache(days_list: List[int] = None):
-    """
-    Refresh the stats cache for specified day ranges.
-
-    Called by Celery task to keep cache warm.
-
-    Args:
-        days_list: List of day ranges to refresh (default: [7, 30, 90])
-    """
-    if days_list is None:
-        days_list = [7, 30, 90]
-
-    redis_client = _get_redis()
-    if not redis_client:
-        logging.warning("[EMAIL_TRACKING] Cannot refresh cache - Redis unavailable")
-        return
-
-    for days in days_list:
-        try:
-            stats = _compute_stats_fast(days)
-            cache_key = f"email_stats:{days}"
-
-            redis_client.setex(
-                cache_key,
-                STATS_CACHE_TTL_SECONDS * 2,  # Longer TTL for background refresh
-                json.dumps(stats),
-            )
-            logging.info(
-                f"[EMAIL_TRACKING] Refreshed cache for {days} days: {stats.get('totals', {})}"
-            )
-
-        except Exception as e:
-            logging.error(
-                f"[EMAIL_TRACKING] Failed to refresh cache for {days} days: {e}"
-            )
 
 
 def get_user_email_history(user_id: str) -> List[Dict[str, Any]]:

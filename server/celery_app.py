@@ -95,13 +95,6 @@ celery.conf.update(
             "schedule": crontab(minute=30, hour=12),
         },
         # ============================================================
-        # Email Stats Cache Refresh
-        # ============================================================
-        "refresh-email-stats-cache": {
-            "task": "refresh_email_stats_cache",
-            "schedule": crontab(minute="*/5"),
-        },
-        # ============================================================
         # Analytics Pre-computation
         # ============================================================
         "compute-analytics-snapshot": {
