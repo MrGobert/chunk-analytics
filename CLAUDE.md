@@ -237,7 +237,7 @@ churn intelligence has no provenance screen. `subscription_status.py` has the de
 | `emailTracking` | Per-email send records with delivery/conversion tracking |
 | `emailUnsubscribes` | Marketing opt-outs by address (cerebral writes them; ids are the lowercase address) |
 | `analytics_cache` | The record for the dashboard's chart histories (`mrr_history`, `churn_rate_history`); Redis only caches them |
-| `subscription_ledger` | cerebral's record of each RevenueCat event, keyed by event id: type, period type, store, environment, USD `price` beside `priceLocal`, no subscriber attributes. Revenue's sandbox and promotional screens, today's revenue, the funnel's trial and paid stages and the customer timeline read it (`_ledger_events`). Never read `subscription_events`: it's the RevenueCat Firebase extension's raw payload log, which replaced every record cerebral wrote there |
+| `subscription_ledger` | cerebral's record of each RevenueCat event, keyed by event id: type, period type, store, environment, USD `price` beside `priceLocal`, no subscriber attributes. Revenue's sandbox and promotional screens, today's revenue, the funnel's trial and paid stages and the customer timeline read it (`_ledger_events`). It's the only copy: `subscription_events`, where the RevenueCat Firebase extension replaced cerebral's records, was deleted with the extension on 2026-10-04 |
 | `users/{uid}/notes` | User notes (monthly recap: `createdAt` Timestamp range count) |
 | `users/{uid}/collections` | User collections (monthly recap: `createdAt` Timestamp range count) |
 | `users/{uid}/generated_images` | Generated images (monthly recap: numeric `timestamp` range count — NOT `createdAt`, which is mixed-type) |

@@ -200,9 +200,9 @@ def _get_cached_or_compute(cache_key, compute_fn, *args, ttl=900):
 
 
 # cerebral's record of every RevenueCat event, one doc per event id
-# (services/subscription/ledger.py there). Not subscription_events: that is the
-# RevenueCat Firebase extension's raw payload log, and the extension replaced
-# every record cerebral wrote there under the same event id.
+# (services/subscription/ledger.py there), and the only copy:
+# subscription_events, where the RevenueCat Firebase extension replaced
+# cerebral's records, was deleted with the extension on 2026-10-04.
 SUBSCRIPTION_LEDGER = "subscription_ledger"
 
 # The longest look-back of any view that reads the ledger (the sandbox and
