@@ -190,10 +190,19 @@ comparison and the email beats' queries match both spellings through `CANCELLED_
 `CHURNED_STATUSES`.
 
 The analytics snapshot's status scans still read cerebral's spellings only. Adding `"canceled"`
-would more than double the snapshot's Firestore reads, about 440k more a day. On 2026-10-03 it
-changed one figure, and made it wrong: the 90-day churn rate went from 33.9% to 64.9%. Most
-`"canceled"` docs are a July 2026 batch of about 100 web trials with no trial or webhook fields, and
-churn intelligence has no provenance screen. `subscription_status.py` has the details.
+would more than double the snapshot's Firestore reads, about 440k more a day. `subscription_status.py`
+has the details.
+
+**Churn intelligence counts paid churn from the ledger (Oct 2026).** Its rate is paid subscriptions
+that ended in the window over the customers paying at its start, both from `subscription_ledger`
+(`_paid_subscriptions`, `_churn_in_window`). The user doc can't say who paid: the native app writes
+`"active"` for trials and grants, 26 of 39 paying accounts' docs carried none of the webhook's
+fields, and the July 2026 web trials carry no trial fields. Trials that expired stay on the churned
+list as trials; sandbox builds and promotional grants leave it. Paid churners the status scans miss,
+the `"canceled"` spelling included, are read by id. On 2026-10-04 the 7/30/90-day rate went from
+3.3/5.6/33.9% to 6.7/9.1/25.0%: 3, 4 and 12 paid churners over 43 paying accounts, where it used to
+divide by 91 `"active"` docs. The revenue summary's churn rate still screens by the webhook's fields
+(12 subscribers), so it reads higher: 14.3/21.4/41.7%.
 
 **Marketing vs account email (Oct 2026).** cerebral owns the consent rule and every write
 (`services/marketing_email/consent.py` there); this app only reads it.
@@ -237,7 +246,7 @@ churn intelligence has no provenance screen. `subscription_status.py` has the de
 | `emailTracking` | Per-email send records with delivery/conversion tracking |
 | `emailUnsubscribes` | Marketing opt-outs by address (cerebral writes them; ids are the lowercase address) |
 | `analytics_cache` | The record for the dashboard's chart histories (`mrr_history`, `churn_rate_history`); Redis only caches them |
-| `subscription_ledger` | cerebral's record of each RevenueCat event, keyed by event id: type, period type, store, environment, USD `price` beside `priceLocal`, no subscriber attributes. Revenue's sandbox and promotional screens, today's revenue, the funnel's trial and paid stages and the customer timeline read it (`_ledger_events`). It's the only copy: `subscription_events`, where the RevenueCat Firebase extension replaced cerebral's records, was deleted with the extension on 2026-10-04 |
+| `subscription_ledger` | cerebral's record of each RevenueCat event, keyed by event id: type, period type, store, environment, USD `price` beside `priceLocal`, no subscriber attributes. Revenue's sandbox and promotional screens, today's revenue, the funnel's trial and paid stages, churn intelligence's paid churn and paying base, and the customer timeline read it (`_ledger_events`). It's the only copy: `subscription_events`, where the RevenueCat Firebase extension replaced cerebral's records, was deleted with the extension on 2026-10-04 |
 | `users/{uid}/notes` | User notes (monthly recap: `createdAt` Timestamp range count) |
 | `users/{uid}/collections` | User collections (monthly recap: `createdAt` Timestamp range count) |
 | `users/{uid}/generated_images` | Generated images (monthly recap: numeric `timestamp` range count — NOT `createdAt`, which is mixed-type) |
@@ -269,8 +278,8 @@ What it holds:
   default 6).
 
 With Redis working, the 15-minute snapshot does its work: about 3,000 Firestore docs per run, roughly
-290k reads a day (2026-10). `subscription_ledger` adds at most about 16k a day: each process reads its
-400 days (about 1,300 events) every 6 hours and only the records written since in between. Without
+290k reads a day (2026-10). `subscription_ledger` adds at most about 20k a day: each process reads its
+490 days (about 1,600 events) every 6 hours and only the records written since in between. Without
 Redis it skips.
 
 ### Environment Variables (Heroku)

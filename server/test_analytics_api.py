@@ -71,6 +71,27 @@ class FakeDB:
     def collection(self, name):
         return FakeCollection(self.collections.get(name, []))
 
+    def get_all(self, refs):
+        return [ref.get() for ref in refs]
+
+
+def ledger_event(event_id, uid, event_type, occurred, expires=None, **fields):
+    """A subscription_ledger record as cerebral writes it (services/subscription/ledger.py there)."""
+    data = {
+        "appUserId": uid,
+        "type": event_type,
+        "periodType": "NORMAL",
+        "store": "APP_STORE",
+        "environment": "PRODUCTION",
+        "price": 4.99,
+        "isFamilyShare": False,
+        "occurredAt": occurred,
+        "expirationAt": expires,
+        "updatedAt": occurred,
+    }
+    data.update(fields)
+    return FakeDoc(event_id, data)
+
 
 class SubscriberFunnelTests(unittest.TestCase):
     def test_uses_revenuecat_trial_lifecycle_and_excludes_direct_paid_purchase(self):
@@ -198,8 +219,8 @@ class LedgerDB(FakeDB):
 
 class LedgerReadTests(unittest.TestCase):
     """subscription_ledger is cerebral's record of every RevenueCat event. Its
-    400-day screen is about 1,300 events, and a snapshot run computes three
-    revenue and three funnel windows every 15 minutes: one read serves them
+    490-day read is about 1,600 events, and a snapshot run computes three
+    revenue, funnel and churn windows every 15 minutes: one read serves them
     all, and later runs read only the records written since."""
 
     NOW = datetime.now(timezone.utc)
@@ -234,6 +255,10 @@ class LedgerReadTests(unittest.TestCase):
         week = analytics_api._subscription_events_since(db, self.NOW - timedelta(days=7))
         quarter = analytics_api._subscription_events_since(db, self.NOW - timedelta(days=90))
         sandbox_only, _ = analytics_api._non_paying_uids_from_events(db, self.NOW - timedelta(days=400))
+        # Churn intelligence's 90-day window looks for payments a year and a
+        # month before it.
+        analytics_api._paid_subscriptions(
+            db, self.NOW - timedelta(days=90) - analytics_api.PAID_PERIOD_LOOKBACK, self.NOW)
 
         # One read, bounded by date: the 500-day-old event never came back.
         self.assertEqual(db.reads, [("occurredAt", 3)])
@@ -910,6 +935,283 @@ class ChurnReasonTests(unittest.TestCase):
         reason = analytics_api._classify_churn_reason(
             self._churned_user(), self.NOW, {"searches": 9, "captures": 2})
         self.assertEqual(reason, "Active user - unknown reason")
+
+    def test_the_ledger_says_whether_a_trial_expired_when_it_knows(self):
+        no_trial_fields = self._churned_user()
+        trial_dates = {**no_trial_fields, "trialEndDate": no_trial_fields["expirationDate"]}
+
+        self.assertEqual(analytics_api._classify_churn_reason(no_trial_fields, self.NOW, None, trial=True),
+                         "Trial - no usage")
+        self.assertEqual(analytics_api._classify_churn_reason(trial_dates, self.NOW, None, trial=False),
+                         "No usage")
+        self.assertEqual(analytics_api._classify_churn_reason(trial_dates, self.NOW, None),
+                         "Trial - no usage")
+
+
+class PaidSubscriptionTests(unittest.TestCase):
+    """_paid_subscriptions: who paid, from the ledger, and when that ended."""
+
+    NOW = datetime.now(timezone.utc)
+
+    def _ago(self, days):
+        return self.NOW - timedelta(days=days)
+
+    def _in(self, days):
+        return self.NOW + timedelta(days=days)
+
+    def _subscriptions(self, *events):
+        db = FakeDB({"subscription_ledger": list(events)})
+        return analytics_api._paid_subscriptions(db, self._ago(490), self.NOW)
+
+    def test_it_runs_from_the_first_payment_to_the_expiration_after_the_last(self):
+        subscriptions = self._subscriptions(
+            ledger_event("l1", "left", "INITIAL_PURCHASE", self._ago(70), self._ago(40)),
+            ledger_event("l2", "left", "RENEWAL", self._ago(40), self._ago(10)),
+            ledger_event("l3", "left", "CANCELLATION", self._ago(20), self._ago(10)),
+            ledger_event("l4", "left", "EXPIRATION", self._ago(10), self._ago(10)),
+            ledger_event("s1", "stays", "RENEWAL", self._ago(5), self._in(25)),
+        )
+
+        self.assertEqual(subscriptions["left"],
+                         {"started": self._ago(70), "ended": self._ago(10), "trialled": False})
+        self.assertEqual(subscriptions["stays"],
+                         {"started": self._ago(5), "ended": None, "trialled": False})
+
+    def test_a_refund_ends_it_early_and_a_billing_grace_period_late(self):
+        subscriptions = self._subscriptions(
+            # A yearly plan, refunded ten days in
+            ledger_event("r1", "refunded", "INITIAL_PURCHASE", self._ago(100), self._in(265)),
+            ledger_event("r2", "refunded", "CANCELLATION", self._ago(90), self._ago(90)),
+            ledger_event("r3", "refunded", "EXPIRATION", self._ago(90), self._ago(90)),
+            # Apple retried the charge for its 16 days of grace
+            ledger_event("g1", "graced", "RENEWAL", self._ago(46), self._ago(16)),
+            ledger_event("g2", "graced", "BILLING_ISSUE", self._ago(16), self._ago(16)),
+            ledger_event("g3", "graced", "EXPIRATION", self._ago(0), self._ago(0)),
+        )
+
+        self.assertEqual(subscriptions["refunded"]["ended"], self._ago(90))
+        self.assertEqual(subscriptions["graced"]["ended"], self._ago(0))
+
+    def test_a_trial_taken_later_doesnt_stretch_the_paid_period(self):
+        subscriptions = self._subscriptions(
+            ledger_event("p1", "returned", "INITIAL_PURCHASE", self._ago(200), self._ago(170)),
+            ledger_event("t1", "returned", "INITIAL_PURCHASE", self._ago(40), self._ago(33),
+                         periodType="TRIAL", price=0),
+            ledger_event("t2", "returned", "EXPIRATION", self._ago(33), self._ago(33), periodType="TRIAL"),
+        )
+
+        self.assertEqual(subscriptions["returned"],
+                         {"started": self._ago(200), "ended": self._ago(170), "trialled": True})
+
+    def test_with_no_expiration_it_ends_with_its_paid_period_once_the_grace_runs_out(self):
+        subscriptions = self._subscriptions(
+            ledger_event("l1", "lapsed", "RENEWAL", self._ago(75), self._ago(45)),
+            ledger_event("b1", "retrying", "RENEWAL", self._ago(40), self._ago(10)),
+            ledger_event("b2", "retrying", "BILLING_ISSUE", self._ago(10), self._ago(10)),
+        )
+
+        self.assertEqual(subscriptions["lapsed"]["ended"], self._ago(45))
+        self.assertIsNone(subscriptions["retrying"]["ended"])
+
+    def test_paying_again_after_it_ended_starts_a_new_subscription(self):
+        subscriptions = self._subscriptions(
+            ledger_event("a1", "back", "INITIAL_PURCHASE", self._ago(120), self._ago(90)),
+            ledger_event("a2", "back", "EXPIRATION", self._ago(90), self._ago(90)),
+            ledger_event("a3", "back", "INITIAL_PURCHASE", self._ago(20), self._in(10)),
+        )
+
+        self.assertEqual(subscriptions["back"],
+                         {"started": self._ago(20), "ended": None, "trialled": False})
+
+    def test_only_a_production_sale_someone_paid_for_is_a_payment(self):
+        def sale(uid, **fields):
+            return ledger_event(f"e-{uid}", uid, "INITIAL_PURCHASE", self._ago(5), self._in(25), **fields)
+
+        subscriptions = self._subscriptions(
+            sale("sandbox", environment="SANDBOX"),
+            sale("sandbox-trial", environment="SANDBOX", periodType="TRIAL", price=0),
+            sale("promotional-store", store="PROMOTIONAL", price=0),
+            sale("promotional-period", periodType="PROMOTIONAL", price=0),
+            sale("family", isFamilyShare=True, price=0),
+            sale("free", price=0),
+            sale("trial", periodType="TRIAL", price=0),
+            sale("price-unknown", price=None),
+            sale("intro-offer", periodType="INTRO", price=0.99),
+        )
+
+        self.assertEqual(
+            {uid for uid, sub in subscriptions.items() if sub["started"] is None},
+            {"sandbox", "sandbox-trial", "promotional-store", "promotional-period",
+             "family", "free", "trial"},
+        )
+        self.assertEqual({uid for uid, sub in subscriptions.items() if sub["trialled"]}, {"trial"})
+
+    def test_an_unreadable_ledger_is_none(self):
+        class Unreadable(FakeDB):
+            def collection(self, name):
+                raise RuntimeError("deadline exceeded")
+
+        self.assertIsNone(analytics_api._paid_subscriptions(Unreadable({}), self._ago(490), self.NOW))
+
+
+class ChurnDB(FakeDB):
+    """Logs the user docs read one by one, and can fail every ledger read."""
+
+    def __init__(self, collections, ledger_fails=False):
+        super().__init__(collections)
+        self.ledger_fails = ledger_fails
+        self.read_by_id = []
+
+    def collection(self, name):
+        if name == "subscription_ledger" and self.ledger_fails:
+            raise RuntimeError("deadline exceeded")
+        return super().collection(name)
+
+    def get_all(self, refs):
+        docs = super().get_all(refs)
+        self.read_by_id += [doc.id for doc in docs]
+        return docs
+
+
+class ChurnIntelligenceTests(unittest.TestCase):
+    """Churn is paid subscriptions that ended, from the ledger. A user doc's
+    status, webhook fields and expirationDate can't say (2026-10-04): the
+    native app writes "active" for trials and grants, most paying accounts'
+    docs carry none of the webhook's fields, and the Cloud Function's
+    "canceled" docs often have no expirationDate."""
+
+    NOW = datetime.now(timezone.utc)
+
+    def _ago(self, days):
+        return self.NOW - timedelta(days=days)
+
+    def _in(self, days):
+        return self.NOW + timedelta(days=days)
+
+    def _ledger(self):
+        ago, later = self._ago, self._in
+        return [
+            # Paid, then left
+            ledger_event("p1", "paid-left", "RENEWAL", ago(40), ago(10)),
+            ledger_event("p2", "paid-left", "EXPIRATION", ago(10), ago(10)),
+            # The same, under the Cloud Function's spelling and with no date
+            ledger_event("c1", "canceled-left", "RENEWAL", ago(50), ago(20)),
+            ledger_event("c2", "canceled-left", "EXPIRATION", ago(20), ago(20)),
+            # The same, and then the account was deleted
+            ledger_event("d1", "deleted", "RENEWAL", ago(45), ago(15)),
+            ledger_event("d2", "deleted", "EXPIRATION", ago(15), ago(15)),
+            # A web trial that never converted, with no trial fields on its doc
+            ledger_event("w1", "web-trial", "INITIAL_PURCHASE", ago(12), ago(5),
+                         periodType="TRIAL", store="RC_BILLING", price=0),
+            ledger_event("w2", "web-trial", "EXPIRATION", ago(5), ago(5),
+                         periodType="TRIAL", store="RC_BILLING"),
+            # A TestFlight purchase and a promotional grant
+            ledger_event("s1", "sandbox", "INITIAL_PURCHASE", ago(33), ago(3), environment="SANDBOX"),
+            ledger_event("s2", "sandbox", "EXPIRATION", ago(3), ago(3), environment="SANDBOX"),
+            ledger_event("g1", "promo", "INITIAL_PURCHASE", ago(34), ago(4),
+                         store="PROMOTIONAL", periodType="PROMOTIONAL", price=0),
+            ledger_event("g2", "promo", "EXPIRATION", ago(4), ago(4),
+                         store="PROMOTIONAL", periodType="PROMOTIONAL"),
+            # Paying now: monthly renewals, a yearly plan set not to renew, a first purchase
+            ledger_event("a1", "paying", "RENEWAL", ago(35), ago(5)),
+            ledger_event("a2", "paying", "RENEWAL", ago(5), later(25)),
+            ledger_event("y1", "paying-canceled", "INITIAL_PURCHASE", ago(100), later(265)),
+            ledger_event("y2", "paying-canceled", "CANCELLATION", ago(50), later(265)),
+            ledger_event("n1", "new-payer", "INITIAL_PURCHASE", ago(3), later(27)),
+        ]
+
+    def _users(self):
+        ago = self._ago
+        return [
+            FakeDoc("paid-left", {"subscriptionStatus": "expired", "expirationDate": ago(10),
+                                  "productId": "chunk_pro_monthly", "createdAt": ago(200)}),
+            FakeDoc("canceled-left", {"subscriptionStatus": "canceled", "createdAt": ago(300)}),
+            FakeDoc("web-trial", {"subscriptionStatus": "expired", "expirationDate": ago(5),
+                                  "createdAt": ago(12)}),
+            FakeDoc("sandbox", {"subscriptionStatus": "expired", "expirationDate": ago(3),
+                                "productId": "chunk_pro_monthly", "createdAt": ago(40)}),
+            FakeDoc("promo", {"subscriptionStatus": "expired", "expirationDate": ago(4),
+                              "subscriptionStore": "PROMOTIONAL", "createdAt": ago(40)}),
+            FakeDoc("paying", {"subscriptionStatus": "active", "createdAt": ago(400)}),
+            FakeDoc("paying-canceled", {"subscriptionStatus": "canceled", "createdAt": ago(120)}),
+            FakeDoc("new-payer", {"subscriptionStatus": "active", "createdAt": ago(90)}),
+            FakeDoc("never-paid", {"subscriptionStatus": "active", "createdAt": ago(30)}),
+        ]
+
+    def _churn(self, users=None, ledger=None, held_out="", ledger_fails=False):
+        db = ChurnDB({
+            "users": self._users() if users is None else users,
+            "subscription_ledger": self._ledger() if ledger is None else ledger,
+            "emailTracking": [],
+            "analytics_cache": [],
+        }, ledger_fails=ledger_fails)
+        with patch.dict(sys.modules, {"firebase_setup": SimpleNamespace(db=db)}), \
+             patch.object(analytics_api, "_get_redis", return_value=None), \
+             patch.dict(os.environ, {"ANALYTICS_EXCLUDED_UIDS": held_out}):
+            return analytics_api._compute_churn_intelligence(30), db
+
+    def test_the_rate_is_paid_subscriptions_that_ended_over_the_paying_base(self):
+        result, _ = self._churn()
+
+        # Three paid subscriptions ended, one account since deleted. Three
+        # accounts pay now, one of them new this month: 3 / (3 - 1 + 3).
+        self.assertEqual(result["churnRate"], 60.0)
+
+    def test_trials_stay_on_the_list_as_trials_and_accounts_that_never_paid_leave_it(self):
+        result, _ = self._churn()
+
+        rows = {row["uid"]: row for row in result["churnedUsers"]}
+        # Paid churn first, then expired trials, newest first in each
+        self.assertEqual(list(rows), ["paid-left", "canceled-left", "web-trial"])
+        self.assertEqual(rows["web-trial"]["reason"], "Trial - no usage")
+        self.assertEqual(result["churnReasons"], {"No usage": 2, "Trial - no usage": 1})
+
+    def test_a_canceled_doc_is_read_by_id_and_dated_by_the_ledger(self):
+        result, db = self._churn()
+
+        rows = {row["uid"]: row for row in result["churnedUsers"]}
+        self.assertEqual(rows["canceled-left"]["churnDate"], self._ago(20).isoformat())
+        self.assertEqual(rows["canceled-left"]["tenure"], 280)
+        # Only the churners the status scans don't return
+        self.assertEqual(sorted(db.read_by_id), ["canceled-left", "deleted"])
+
+    def test_paying_again_isnt_churn_whatever_the_doc_says(self):
+        ago, later = self._ago, self._in
+        result, _ = self._churn(
+            users=[FakeDoc("back", {"subscriptionStatus": "expired", "expirationDate": ago(8),
+                                    "createdAt": ago(200)})],
+            ledger=[
+                ledger_event("b1", "back", "RENEWAL", ago(38), ago(8)),
+                ledger_event("b2", "back", "EXPIRATION", ago(8), ago(8)),
+                ledger_event("b3", "back", "INITIAL_PURCHASE", ago(2), later(28)),
+            ],
+        )
+
+        self.assertEqual(result["churnedUsers"], [])
+        self.assertEqual(result["churnRate"], 0)
+
+    def test_held_out_accounts_never_count(self):
+        result, _ = self._churn(held_out="paid-left, paying")
+
+        # canceled-left and deleted over paying-canceled and new-payer: 2 / (2 - 1 + 2)
+        self.assertEqual(result["churnRate"], 66.7)
+        self.assertEqual([row["uid"] for row in result["churnedUsers"]], ["canceled-left", "web-trial"])
+
+    def test_an_unreadable_ledger_falls_back_to_the_webhook_fields(self):
+        ago = self._ago
+        result, _ = self._churn(ledger_fails=True, users=[
+            FakeDoc("confirmed", {"subscriptionStatus": "active", "latestTransactionId": "t1",
+                                  "createdAt": ago(200)}),
+            FakeDoc("confirmed-left", {"subscriptionStatus": "expired", "expirationDate": ago(10),
+                                       "latestTransactionId": "t2", "createdAt": ago(200)}),
+            FakeDoc("unconfirmed-left", {"subscriptionStatus": "expired", "expirationDate": ago(5),
+                                         "createdAt": ago(100)}),
+            FakeDoc("trial-left", {"subscriptionStatus": "expired", "trialEndDate": ago(3),
+                                   "expirationDate": ago(3), "createdAt": ago(10)}),
+        ])
+
+        self.assertEqual(result["churnRate"], 50.0)
+        self.assertEqual([row["uid"] for row in result["churnedUsers"]], ["confirmed-left", "trial-left"])
 
 
 class CustomerDetailTests(unittest.TestCase):

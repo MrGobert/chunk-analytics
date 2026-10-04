@@ -205,10 +205,11 @@ def _get_cached_or_compute(cache_key, compute_fn, *args, ttl=900):
 # cerebral's records, was deleted with the extension on 2026-10-04.
 SUBSCRIPTION_LEDGER = "subscription_ledger"
 
-# The longest look-back of any view that reads the ledger (the sandbox and
-# promotional screens), so one read serves them all: a snapshot run's three
-# revenue and three funnel windows, about 1,300 events on 2026-10-03.
-LEDGER_LOOKBACK_DAYS = 400
+# The longest look-back of any view that reads the ledger, so one read serves a
+# snapshot run's three revenue, funnel and churn windows: churn intelligence's
+# 90 days plus the PAID_PERIOD_LOOKBACK before them, which also covers the
+# sandbox and promotional screens' 400 days. About 1,600 events on 2026-10-04.
+LEDGER_LOOKBACK_DAYS = 490
 # After that read, a read at most this often asks only for the records written
 # since the previous one: cerebral stamps updatedAt on every write, a
 # RevenueCat retry's rewrite included. Under the 15-minute snapshot interval,
@@ -707,6 +708,210 @@ def _non_paying_uids_from_events(db, since: datetime) -> tuple:
         {uid for uid, only in sandbox_only.items() if only},
         {uid for uid, only in promo_only.items() if only},
     )
+
+
+# A store keeps a subscription going through a billing grace period after its
+# last paid period ends, while it retries the charge, and the EXPIRATION comes
+# at the grace period's end: on 2026-10-04 each paid subscription that ended in
+# the past 90 days did so 0 or 16 days (Apple's grace) after its last paid
+# period. A month covers any store's.
+PAID_PERIOD_GRACE = timedelta(days=31)
+# How far before a churn window the payment behind a subscription that ended
+# inside it can be: a yearly plan, plus that grace.
+PAID_PERIOD_LOOKBACK = timedelta(days=400)
+
+
+def _is_payment(event: dict) -> bool:
+    """A production purchase or renewal that money changed hands for: not a
+    sandbox build, a trial, a promotional grant, family sharing or a $0 sale."""
+    if str(event.get("environment") or "PRODUCTION").upper() == "SANDBOX":
+        return False
+    if not _is_paid_event(event) or event.get("isFamilyShare"):
+        return False
+    period = str(event.get("periodType") or "").upper()
+    if period == "PROMOTIONAL" or str(event.get("store") or "").upper() in NON_PAYING_STORES:
+        return False
+    price = event.get("price")
+    # RevenueCat sends no price when it doesn't know one.
+    return not isinstance(price, (int, float)) or price > 0
+
+
+def _paid_subscriptions(db, since: datetime, now: datetime):
+    """Each account's paid subscription, from the ledger's events since `since`.
+
+    {uid: {"started", "ended", "trialled"}}, or None when the ledger can't be
+    read. "started" is the subscription's first payment, None if the account
+    never paid (a sandbox build, a promotional grant, a trial that didn't
+    convert); "ended" is None while it runs; "trialled" means the account had
+    a production trial.
+
+    A subscription ends at the first EXPIRATION after its last payment: early
+    for a refund, late by a billing grace period. An EXPIRATION more than
+    PAID_PERIOD_GRACE after the paid period (a trial's, taken later) ends it
+    with that period instead, as does running past it with no EXPIRATION. A
+    payment after the end starts a new subscription.
+    """
+    try:
+        events = _ledger_events(db, since)
+    except Exception as exc:
+        logging.warning(f"[ANALYTICS_API] paid subscription history unavailable: {exc}")
+        return None
+
+    timelines = {}
+    for event in events:
+        uid = event.get("appUserId")
+        occurred = _event_occurred_at(event)
+        if uid and occurred:
+            timelines.setdefault(uid, []).append((occurred, event))
+
+    subscriptions = {}
+    for uid, timeline in timelines.items():
+        started = ended = paid_through = None
+        trialled = False
+        for occurred, event in sorted(timeline, key=lambda item: item[0]):
+            if str(event.get("environment") or "PRODUCTION").upper() == "SANDBOX":
+                continue
+            if str(event.get("periodType") or "").upper() == "TRIAL":
+                trialled = True
+            if _is_payment(event):
+                if started is None or ended is not None:
+                    started, ended = occurred, None
+                paid_through = _to_datetime(event.get("expirationAt")) or occurred
+            elif (
+                started is not None and ended is None
+                and str(event.get("type") or "").upper() == "EXPIRATION"
+            ):
+                expired = _to_datetime(event.get("expirationAt")) or occurred
+                ended = expired if expired <= paid_through + PAID_PERIOD_GRACE else paid_through
+        if started is not None and ended is None and paid_through + PAID_PERIOD_GRACE <= now:
+            ended = paid_through
+        subscriptions[uid] = {"started": started, "ended": ended, "trialled": trialled}
+    return subscriptions
+
+
+def _user_docs(db, uids) -> dict:
+    """{uid: user doc data} for the accounts in `uids` that have one, a read each."""
+    refs = [
+        db.collection("users").document(uid) for uid in uids
+        # Never a Firestore document id: see _get_firestore_user_doc
+        if uid and "/" not in uid and uid not in (".", "..")
+    ]
+    docs = {}
+    for start in range(0, len(refs), 300):
+        for snap in db.get_all(refs[start:start + 300]):
+            if snap.exists:
+                docs[snap.id] = snap.to_dict() or {}
+    return docs
+
+
+def _newest_first(rows: list) -> list:
+    return sorted(rows, key=lambda data: _to_datetime(data.get("expirationDate")), reverse=True)
+
+
+def _churn_in_window(db, cutoff: datetime, now: datetime,
+                     churned_docs: list, other_docs: list, current_docs: list) -> dict:
+    """Who churned between `cutoff` and `now`, and the paying base they left.
+
+    `churned_docs` are the status scans' expired and cancelled user docs,
+    `other_docs` the rest of what the scans returned, `current_docs` the ones
+    with access now. Returns:
+    - "churned": user doc data with "_uid" and "_trial", for the paid
+      subscriptions that ended and then the trials that did, newest first;
+    - "paidChurned": how many paid subscriptions ended, with a doc or not;
+    - "paying": paying customers now, and "newPaying": how many of them
+      started paying inside the window.
+
+    The ledger decides who paid (_paid_subscriptions). The user doc can't: the
+    native app writes "active" for trials and grants, most paying accounts'
+    docs carry none of the webhook's fields, and the Cloud Function's
+    "canceled" docs often have no expirationDate (2026-10-04).
+    """
+    held_out = _excluded_uids()
+    subscriptions = _paid_subscriptions(db, cutoff - PAID_PERIOD_LOOKBACK, now)
+    if subscriptions is None:
+        return _churn_in_window_from_docs(cutoff, now, churned_docs, current_docs, held_out)
+
+    paid = {
+        uid: sub for uid, sub in subscriptions.items()
+        if sub["started"] is not None and uid not in held_out
+    }
+    ended = {
+        uid: sub["ended"] for uid, sub in paid.items()
+        if sub["ended"] is not None and cutoff <= sub["ended"] <= now
+    }
+    paying = [sub for sub in paid.values() if sub["ended"] is None]
+
+    # The scans hold most churners' docs. The rest, mostly the Cloud Function's
+    # "canceled" spelling that the scans skip (subscription_status.py), are
+    # read by id. A deleted account still counts; it has no row.
+    docs = {doc.id: doc.to_dict() or {} for doc in churned_docs + other_docs}
+    docs.update(_user_docs(db, [uid for uid in ended if uid not in docs]))
+    paid_rows = [
+        {**docs[uid], "_uid": uid, "_trial": False, "expirationDate": at}
+        for uid, at in ended.items() if uid in docs
+    ]
+
+    trial_rows = []
+    for doc in churned_docs:
+        data = doc.to_dict() or {}
+        expired = _to_datetime(data.get("expirationDate"))
+        if doc.id in held_out or doc.id in ended or not (expired and cutoff <= expired <= now):
+            continue
+        sub = subscriptions.get(doc.id)
+        if sub and sub["started"] is not None and (
+            sub["ended"] is None or sub["ended"] >= expired - PAID_PERIOD_GRACE
+        ):
+            continue  # paying again, or a paid churn the ledger dates outside the window
+        if (sub and sub["trialled"]) or _is_trial_subscription(data):
+            trial_rows.append({**data, "_uid": doc.id, "_trial": True})
+        # Anything else never paid or trialled: a sandbox build, a promotional grant.
+
+    return {
+        "churned": _newest_first(paid_rows) + _newest_first(trial_rows),
+        "paidChurned": len(ended),
+        "paying": len(paying),
+        "newPaying": sum(1 for sub in paying if sub["started"] >= cutoff),
+    }
+
+
+def _churn_in_window_from_docs(cutoff: datetime, now: datetime,
+                               churned_docs: list, current_docs: list, held_out: set) -> dict:
+    """_churn_in_window when the ledger can't be read: the user doc's webhook
+    fields decide who paid, as in the revenue summary."""
+    def paid_for(data: dict) -> bool:
+        return (
+            _has_webhook_provenance(data) and not _is_promotional(data)
+            and not _is_free_access(data) and not _is_trial_subscription(data)
+        )
+
+    paid_rows, trial_rows = [], []
+    for doc in churned_docs:
+        data = doc.to_dict() or {}
+        expired = _to_datetime(data.get("expirationDate"))
+        if doc.id in held_out or not (expired and cutoff <= expired <= now):
+            continue
+        if _is_trial_subscription(data):
+            trial_rows.append({**data, "_uid": doc.id, "_trial": True})
+        elif paid_for(data):
+            paid_rows.append({**data, "_uid": doc.id, "_trial": False})
+
+    paying = []
+    for doc in current_docs:
+        data = doc.to_dict() or {}
+        if (
+            doc.id not in held_out and paid_for(data)
+            and not _is_unconverted_trial(data, now) and not _has_lapsed_renewal(data, now)
+        ):
+            paying.append(data)
+    return {
+        "churned": _newest_first(paid_rows) + _newest_first(trial_rows),
+        "paidChurned": len(paid_rows),
+        "paying": len(paying),
+        "newPaying": sum(
+            1 for data in paying
+            if (start := _subscription_start_date(data)) and start >= cutoff
+        ),
+    }
 
 
 # Per-user usage counters live in users/{uid}/usage_monthly/{YYYY-MM} docs,
@@ -1414,13 +1619,17 @@ def churn_intelligence():
     return jsonify(result), 200
 
 
-def _classify_churn_reason(data: dict, now: datetime, usage_monthly: dict = None) -> str:
+def _classify_churn_reason(data: dict, now: datetime, usage_monthly: dict = None,
+                           trial: bool = None) -> str:
     """Classify churn reason from user data with enriched signal hierarchy.
 
     usage_monthly covers the current+previous calendar month, so "usage" here
     means recent usage near the churn date. Users who churned before the
     usage_monthly counters existed (pre-2026-08) read as 0 — the same value
     the dead usageStats fields gave them.
+
+    `trial` says whether a trial expired, when the ledger knows
+    (_churn_in_window); otherwise the user doc's trial dates decide.
     """
     usage = usage_monthly or {}
     emails_sent = data.get("emailsSent", {}) or {}
@@ -1432,7 +1641,7 @@ def _classify_churn_reason(data: dict, now: datetime, usage_monthly: dict = None
     trial_end = _to_datetime(data.get("trialEndDate"))
     exp_date = _to_datetime(data.get("expirationDate"))
     created = _get_tenure_date(data)
-    is_trial_churn = (
+    is_trial_churn = trial if trial is not None else (
         trial_end and exp_date
         and abs((trial_end - exp_date).total_seconds()) < 86400 * 2  # expiration ≈ trial end
     )
@@ -1502,44 +1711,23 @@ def _compute_churn_intelligence(days: int) -> dict:
         doc for doc in cancelled_docs
         if _has_current_subscription_access(doc.to_dict(), now)
     ]
-    unexpired_cancelled_paid_docs = [
-        doc for doc in unexpired_cancelled_docs
-        if not _is_trial_subscription(doc.to_dict())
-    ]
     current_customer_docs = active_docs + trial_docs + unexpired_cancelled_docs
 
-    churned_in_period = []
-    for doc in expired_docs + cancelled_docs:
-        data = doc.to_dict()
-        data["_uid"] = doc.id
-        exp_date = _to_datetime(data.get("expirationDate"))
-        if exp_date and cutoff <= exp_date <= now:
-            churned_in_period.append(data)
-
-    # Separate trial expirations from subscriber churn for accurate churn rate
-    subscriber_churned = []
-    trial_churned = []
-    for data in churned_in_period:
-        trial_end = _to_datetime(data.get("trialEndDate"))
-        exp_date = _to_datetime(data.get("expirationDate"))
-        is_trial_expiry = _is_trial_subscription(data)
-        if is_trial_expiry:
-            trial_churned.append(data)
-        else:
-            subscriber_churned.append(data)
-
-    # Churn rate: only paying subscribers who churned (not trial expirations),
-    # over active-at-start. Exclude in-period new actives from the denominator so a
-    # burst of new signups doesn't understate churn.
-    total_subscriber_churned = len(subscriber_churned)
-    new_active_in_period = 0
-    for doc in active_docs + unexpired_cancelled_paid_docs:
-        subscription_start = _subscription_start_date(doc.to_dict())
-        if subscription_start and subscription_start >= cutoff:
-            new_active_in_period += 1
-    existing_active_at_start = (
-        len(active_docs) + len(unexpired_cancelled_paid_docs) - new_active_in_period
+    # Paid subscriptions that ended, then trials that expired. Sandbox builds
+    # and promotional grants never paid, so they're neither.
+    churn = _churn_in_window(
+        db, cutoff, now,
+        churned_docs=expired_docs + cancelled_docs,
+        other_docs=active_docs + trial_docs,
+        current_docs=active_docs + unexpired_cancelled_docs,
     )
+    churned_in_period = churn["churned"]
+
+    # Churn rate: paid subscriptions that ended over the paying customers at the
+    # start. Exclude in-period new payers from the denominator so a burst of new
+    # signups doesn't understate churn.
+    total_subscriber_churned = churn["paidChurned"]
+    existing_active_at_start = churn["paying"] - churn["newPaying"]
     start_active = existing_active_at_start + total_subscriber_churned
     churn_rate = round((total_subscriber_churned / start_active * 100) if start_active > 0 else 0, 1)
 
@@ -1656,7 +1844,7 @@ def _compute_churn_intelligence(days: int) -> dict:
 
     # Pre-compute churn reasons for all churned users (avoids double classification)
     reason_by_uid = {
-        d["_uid"]: _classify_churn_reason(d, now, usage_by_uid.get(d["_uid"]))
+        d["_uid"]: _classify_churn_reason(d, now, usage_by_uid.get(d["_uid"]), trial=d["_trial"])
         for d in churned_in_period
     }
 
