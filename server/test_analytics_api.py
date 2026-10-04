@@ -9,8 +9,10 @@ from unittest.mock import patch
 from flask import Flask
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import account_activity
 import analytics_api
 import revenuecat_client
+from firebase_admin import auth as firebase_auth
 
 
 class FakeDoc:
@@ -72,26 +74,86 @@ class FakeDB:
         return FakeCollection(self.collections.get(name, []))
 
 
-class SubscriberFunnelTests(unittest.TestCase):
+DAY_MS = 24 * 3600 * 1000
+
+
+def _auth_record(uid, refreshed_days_ago=None, disabled=False):
+    """A Firebase Auth record created and last signed in long ago, whose ID
+    token was last refreshed refreshed_days_ago (never, when None)."""
+    now_ms = datetime.now(timezone.utc).timestamp() * 1000
+    return SimpleNamespace(
+        uid=uid,
+        disabled=disabled,
+        user_metadata=SimpleNamespace(
+            creation_timestamp=int(now_ms - 400 * DAY_MS),
+            last_sign_in_timestamp=int(now_ms - 300 * DAY_MS),
+            last_refresh_timestamp=(
+                None if refreshed_days_ago is None else int(now_ms - refreshed_days_ago * DAY_MS)
+            ),
+        ),
+    )
+
+
+class FakeAuth:
+    """firebase_admin.auth.get_users over a fixed set of records."""
+
+    def __init__(self, records=()):
+        self.records = {record.uid: record for record in records}
+        self.calls = []
+
+    def get_users(self, identifiers):
+        identifiers = list(identifiers)
+        assert len(identifiers) <= 100, "get_users takes at most 100 identifiers"
+        self.calls.append([identifier.uid for identifier in identifiers])
+        return SimpleNamespace(
+            users=[self.records[i.uid] for i in identifiers if i.uid in self.records],
+            not_found=[i for i in identifiers if i.uid not in self.records],
+        )
+
+
+class ActivityStubs:
+    """Stubs both signals account_activity reads. No test may reach live
+    Firebase Auth: firebase_setup initializes the default app from ADC when
+    no credentials are set."""
+
+    def stub_activity(self, records=(), used=()):
+        self.auth = FakeAuth(records)
+        self.used_since_calls = []
+
+        def used_since(_db, uid, _since):
+            self.used_since_calls.append(uid)
+            return uid in used
+
+        for patcher in (
+            patch.object(firebase_auth, "get_users", self.auth.get_users),
+            patch.object(account_activity, "used_since", side_effect=used_since),
+        ):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+
+class SubscriberFunnelTests(ActivityStubs, unittest.TestCase):
+    NOW = datetime.now(timezone.utc)
+
+    def setUp(self):
+        self.stub_activity()
+
     def test_uses_revenuecat_trial_lifecycle_and_excludes_direct_paid_purchase(self):
         now = datetime.now(timezone.utc)
         users = [
             FakeDoc("trial-converted", {
                 "createdAt": now - timedelta(days=8),
                 "subscriptionStatus": "active",
-                "lastActiveAt": now,
                 "platform": "ios",
             }),
             FakeDoc("trial-open", {
                 "createdAt": now - timedelta(days=4),
                 "subscriptionStatus": "trial",
-                "lastActiveAt": now,
                 "platform": "ios",
             }),
             FakeDoc("direct-paid", {
                 "createdAt": now - timedelta(days=2),
                 "subscriptionStatus": "active",
-                "lastActiveAt": now,
                 "platform": "web",
             }),
         ]
@@ -130,6 +192,10 @@ class SubscriberFunnelTests(unittest.TestCase):
             }),
         ]
         fake_db = FakeDB({"users": users, "subscription_ledger": events})
+        self.stub_activity(records=[
+            _auth_record(uid, refreshed_days_ago=1)
+            for uid in ("trial-converted", "trial-open", "direct-paid")
+        ])
 
         with patch.dict(sys.modules, {"firebase_setup": SimpleNamespace(db=fake_db)}):
             result = analytics_api._compute_subscriber_funnel(30)
@@ -151,11 +217,11 @@ class SubscriberFunnelTests(unittest.TestCase):
                 "trialEndDate": now - timedelta(days=6),
                 "expirationDate": now + timedelta(days=20),
                 "subscriptionStatus": "cancelled",
-                "lastActiveAt": now - timedelta(days=1),
                 "platform": "ios",
             }),
         ]
         fake_db = FakeDB({"users": users, "subscription_ledger": []})
+        self.stub_activity(records=[_auth_record("cancelled-paid", refreshed_days_ago=1)])
 
         with patch.dict(sys.modules, {"firebase_setup": SimpleNamespace(db=fake_db)}):
             result = analytics_api._compute_subscriber_funnel(30)
@@ -168,6 +234,88 @@ class SubscriberFunnelTests(unittest.TestCase):
             "Active (30d)": 1,
             "Churned": 0,
         })
+
+    def _paying(self, uid):
+        """An account whose trial converted and that still has paid access."""
+        return FakeDoc(uid, {
+            "createdAt": self.NOW - timedelta(days=10),
+            "trialStartedAt": self.NOW - timedelta(days=9),
+            "trialEndDate": self.NOW - timedelta(days=6),
+            "expirationDate": self.NOW + timedelta(days=20),
+            "subscriptionStatus": "cancelled",
+            "platform": "ios",
+        })
+
+    def _stages(self, users):
+        fake_db = FakeDB({"users": users, "subscription_ledger": []})
+        with patch.dict(sys.modules, {"firebase_setup": SimpleNamespace(db=fake_db)}):
+            result = analytics_api._compute_subscriber_funnel(30)
+        return {row["stage"]: row["count"] for row in result["funnel"]}
+
+    def test_a_token_refresh_counts_as_use_without_any_firestore_read(self):
+        self.stub_activity(records=[_auth_record("paying", refreshed_days_ago=2)])
+        self.assertEqual(self._stages([self._paying("paying")])["Active (30d)"], 1)
+        self.assertEqual(self.used_since_calls, [])
+
+    def test_a_capture_or_chat_counts_when_auth_saw_nothing(self):
+        # The clipper, the share sheet and email-in never refresh a token.
+        self.stub_activity(records=[_auth_record("paying", refreshed_days_ago=45)], used={"paying"})
+        self.assertEqual(self._stages([self._paying("paying")])["Active (30d)"], 1)
+
+    def test_a_quiet_subscriber_is_not_active(self):
+        self.stub_activity(records=[_auth_record("paying", refreshed_days_ago=45)])
+        self.assertEqual(self._stages([self._paying("paying")])["Active (30d)"], 0)
+        self.assertEqual(self.used_since_calls, ["paying"])
+
+    def test_the_user_docs_last_active_fields_do_not_count(self):
+        # Nothing writes lastActiveAt, and the account's owner can.
+        user = self._paying("paying")
+        user._data["lastActiveAt"] = self.NOW
+        self.stub_activity(records=[_auth_record("paying", refreshed_days_ago=45)])
+        self.assertEqual(self._stages([user])["Active (30d)"], 0)
+
+    def test_no_paying_account_no_lookup(self):
+        self._stages([])
+        self.assertEqual(self.auth.calls, [])
+
+    def test_a_failed_lookup_counts_nobody_and_the_funnel_still_returns(self):
+        with patch.object(firebase_auth, "get_users", side_effect=RuntimeError("auth down")):
+            stages = self._stages([self._paying("paying")])
+        self.assertEqual(stages["Converted to Paid"], 1)
+        self.assertEqual(stages["Active (30d)"], 0)
+
+
+class ActiveSinceTests(ActivityStubs, unittest.TestCase):
+    """account_activity.active_since: who used Chunk since a moment."""
+
+    SINCE = datetime.now(timezone.utc) - timedelta(days=30)
+
+    def test_firestore_only_for_the_accounts_auth_did_not_show(self):
+        self.stub_activity(
+            records=[
+                _auth_record("seen", refreshed_days_ago=1),
+                _auth_record("quiet", refreshed_days_ago=45),
+                _auth_record("clipper", refreshed_days_ago=45),
+            ],
+            used={"clipper"},
+        )
+        active = account_activity.active_since(None, ["seen", "quiet", "clipper"], self.SINCE)
+        self.assertEqual(active, {"seen", "clipper"})
+        self.assertEqual(sorted(self.used_since_calls), ["clipper", "quiet"])
+
+    def test_disabled_and_deleted_accounts_are_never_active(self):
+        self.stub_activity(
+            records=[_auth_record("disabled", refreshed_days_ago=1, disabled=True)],
+            used={"disabled", "deleted"},
+        )
+        self.assertEqual(account_activity.active_since(None, ["disabled", "deleted"], self.SINCE), set())
+        self.assertEqual(self.used_since_calls, [])
+
+    def test_asks_auth_100_accounts_at_a_time(self):
+        uids = [f"uid-{i}" for i in range(150)]
+        self.stub_activity(records=[_auth_record(uid, refreshed_days_ago=1) for uid in uids])
+        self.assertEqual(account_activity.active_since(None, uids + uids[:5], self.SINCE), set(uids))
+        self.assertEqual([len(call) for call in self.auth.calls], [100, 50])
 
 
 class LedgerQuery(FakeCollection):

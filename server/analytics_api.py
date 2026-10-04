@@ -410,6 +410,20 @@ def _get_last_active_date(user_data: dict) -> datetime:
     return max(known) if known else None
 
 
+def _active_since(db, uids, since: datetime) -> set:
+    """The accounts among ``uids`` that used Chunk at or after ``since``, by
+    account_activity.active_since (Firebase Auth, then captures, chats and App
+    Intents jobs). Empty, and logged, when the lookup fails."""
+    if not uids:
+        return set()
+    try:
+        import account_activity
+        return account_activity.active_since(db, uids, since)
+    except Exception as exc:
+        logging.warning(f"[ANALYTICS_API] account activity lookup failed: {exc}")
+        return set()
+
+
 def _effective_last_active(user_data: dict, usage_monthly: dict = None) -> datetime:
     """Latest profile/Auth activity or cerebral usage-month write."""
     profile_activity = _get_last_active_date(user_data)
@@ -1303,7 +1317,17 @@ def _compute_subscriber_funnel(days: int) -> dict:
     converted_to_paid = len(cohort_conversions)
     trial_conversion_rate = round((converted_to_paid / started_trial * 100) if started_trial else 0, 1)
 
-    active_30d = 0
+    # Converted, still paying, and used Chunk in the last 30 days, by the
+    # signals the re-engagement email reads (account_activity.py). The user
+    # doc's lastActiveAt and its variants have no writer, so reading them
+    # kept this stage at 0.
+    paying_uids = [
+        uid for uid in cohort_conversions
+        if _has_current_subscription_access(status_docs.get(uid, {}), now)
+        and not _is_trial_subscription(status_docs.get(uid, {}))
+    ]
+    active_30d = len(_active_since(db, paying_uids, now - timedelta(days=30)))
+
     churned_count = 0
     platform_trials = {}
     platform_conversions = {}
@@ -1313,14 +1337,6 @@ def _compute_subscriber_funnel(days: int) -> dict:
         platform_trials[platform] = platform_trials.get(platform, 0) + 1
         if uid in cohort_conversions:
             platform_conversions[platform] = platform_conversions.get(platform, 0) + 1
-        if (
-            uid in cohort_conversions
-            and _has_current_subscription_access(data, now)
-            and not _is_trial_subscription(data)
-        ):
-            last_active = _get_last_active_date(data)
-            if last_active and last_active >= (now - timedelta(days=30)):
-                active_30d += 1
         exp_date = _to_datetime(data.get("expirationDate"))
         if (
             uid in cohort_conversions

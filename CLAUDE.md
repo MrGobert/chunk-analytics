@@ -180,6 +180,11 @@ The window is one day wide, so a run never mails a backlog; `REENGAGEMENT_DAILY_
 ceiling. cerebral's document retention sweep reads the same signals
 (`services/documents/retention.py` there); keep them in step.
 
+The subscriber funnel's "Active (30d)" stage reads them too, through `account_activity.active_since`:
+Firebase Auth for the converted, still-paying cohort, 100 accounts per call, and the Firestore checks
+only for the accounts Auth didn't show. Until Oct 2026 it read `lastActiveAt` and its variants, so it
+was always 0 (on 2026-10-04 it became 1 of 1 converted in 7 and 30 days, 3 of 3 in 90).
+
 **Who counts as churned** (`subscription_status.py`). Two writers spelled a cancellation differently.
 cerebral's RevenueCat webhook writes `"cancelled"` on CANCELLATION and `"expired"` on EXPIRATION. The
 Cloud Function `updateSubscriptionStatus` (semantic/firebase_functions) wrote `"canceled"` on both,
