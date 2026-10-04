@@ -180,13 +180,14 @@ The window is one day wide, so a run never mails a backlog; `REENGAGEMENT_DAILY_
 ceiling. cerebral's document retention sweep reads the same signals
 (`services/documents/retention.py` there); keep them in step.
 
-**Who counts as churned** (`subscription_status.py`). Two writers spell a cancellation differently.
+**Who counts as churned** (`subscription_status.py`). Two writers spelled a cancellation differently.
 cerebral's RevenueCat webhook writes `"cancelled"` on CANCELLATION and `"expired"` on EXPIRATION. The
-Cloud Function `updateSubscriptionStatus` (semantic/firebase_functions) writes `"canceled"` on both,
-and whichever lands last stays. On 2026-10-03, 457 prod accounts read `"canceled"` (449 last saw an
-EXPIRATION). The win-back beats matched only `"expired"` and `"cancelled"`, so none of those 457 got
-one. Every comparison and the email beats' queries match both spellings through `CANCELLED_STATUSES`
-/ `CHURNED_STATUSES`.
+Cloud Function `updateSubscriptionStatus` (semantic/firebase_functions) wrote `"canceled"` on both,
+racing the webhook, until it was deleted on 2026-10-03. That day 457 prod accounts read `"canceled"`
+(449 last saw an EXPIRATION), and they keep it until the webhook next writes their status. The
+win-back beats matched only `"expired"` and `"cancelled"`, so none of those 457 got one. Every
+comparison and the email beats' queries match both spellings through `CANCELLED_STATUSES` /
+`CHURNED_STATUSES`.
 
 The analytics snapshot's status scans still read cerebral's spellings only. Adding `"canceled"`
 would more than double the snapshot's Firestore reads, about 440k more a day. On 2026-10-03 it
@@ -236,6 +237,7 @@ churn intelligence has no provenance screen. `subscription_status.py` has the de
 | `emailTracking` | Per-email send records with delivery/conversion tracking |
 | `emailUnsubscribes` | Marketing opt-outs by address (cerebral writes them; ids are the lowercase address) |
 | `analytics_cache` | The record for the dashboard's chart histories (`mrr_history`, `churn_rate_history`); Redis only caches them |
+| `subscription_ledger` | cerebral's record of each RevenueCat event, keyed by event id: type, period type, store, environment, USD `price` beside `priceLocal`, no subscriber attributes. Revenue's sandbox and promotional screens, today's revenue, the funnel's trial and paid stages and the customer timeline read it (`_ledger_events`). Never read `subscription_events`: it's the RevenueCat Firebase extension's raw payload log, which replaced every record cerebral wrote there |
 | `users/{uid}/notes` | User notes (monthly recap: `createdAt` Timestamp range count) |
 | `users/{uid}/collections` | User collections (monthly recap: `createdAt` Timestamp range count) |
 | `users/{uid}/generated_images` | Generated images (monthly recap: numeric `timestamp` range count — NOT `createdAt`, which is mixed-type) |
@@ -267,7 +269,9 @@ What it holds:
   default 6).
 
 With Redis working, the 15-minute snapshot does its work: about 3,000 Firestore docs per run, roughly
-290k reads a day (2026-10). Without Redis it skips.
+290k reads a day (2026-10). `subscription_ledger` adds at most about 16k a day: each process reads its
+400 days (about 1,300 events) every 6 hours and only the records written since in between. Without
+Redis it skips.
 
 ### Environment Variables (Heroku)
 

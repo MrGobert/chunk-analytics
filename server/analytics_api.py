@@ -149,7 +149,7 @@ def _get_firestore_user_doc(users_ref, uid: str):
     Firestore document IDs cannot contain ``/`` or be exactly ``.``/``..``,
     while custom Firebase Auth UIDs can. In that case there cannot be a
     matching ``users/{uid}`` document, but Auth, RevenueCat, email tracking,
-    and event mirrors can still supply a useful customer detail page.
+    and the event ledger can still supply a useful customer detail page.
     """
     if not uid or "/" in uid or uid in (".", ".."):
         return None
@@ -199,26 +199,90 @@ def _get_cached_or_compute(cache_key, compute_fn, *args, ttl=900):
     return result
 
 
-def _subscription_events_since(db, cutoff: datetime) -> list[dict]:
-    """Load production RevenueCat event mirrors from the requested window."""
-    try:
-        docs = list(
-            db.collection("subscription_events")
-            .where("occurredAt", ">=", cutoff)
-            .limit(5000)
+# cerebral's record of every RevenueCat event, one doc per event id
+# (services/subscription/ledger.py there). Not subscription_events: that is the
+# RevenueCat Firebase extension's raw payload log, and the extension replaced
+# every record cerebral wrote there under the same event id.
+SUBSCRIPTION_LEDGER = "subscription_ledger"
+
+# The longest look-back of any view that reads the ledger (the sandbox and
+# promotional screens), so one read serves them all: a snapshot run's three
+# revenue and three funnel windows, about 1,300 events on 2026-10-03.
+LEDGER_LOOKBACK_DAYS = 400
+# After that read, a read at most this often asks only for the records written
+# since the previous one: cerebral stamps updatedAt on every write, a
+# RevenueCat retry's rewrite included. Under the 15-minute snapshot interval,
+# so every run sees new events.
+LEDGER_REFRESH_SECONDS = 600
+# updatedAt is cerebral's clock, not Firestore's, so each refresh reaches back
+# this far past the previous read, and the whole look-back is read again this
+# often in case a write landed later still.
+LEDGER_REFRESH_OVERLAP = timedelta(minutes=5)
+LEDGER_FULL_READ_SECONDS = 6 * 3600
+LEDGER_READ_LIMIT = 5000
+
+_ledger_cache: dict = {"db": None, "full_read_at": None, "read_at": None, "since": None, "events": {}}
+
+
+def _ledger_events(db, since: datetime) -> list[dict]:
+    """Every ledger event, sandbox included, that occurred at or after `since`.
+
+    Reads LEDGER_LOOKBACK_DAYS once per LEDGER_FULL_READ_SECONDS and adds what
+    changed in between, so a process reads the ledger about four times a day
+    rather than every snapshot run. Bounded by date because an unfiltered read
+    would silently truncate at the document cap and return an arbitrary subset.
+    """
+    now = datetime.now(timezone.utc)
+    cache = _ledger_cache
+    full_read = (
+        cache["db"] is not db
+        or cache["full_read_at"] is None
+        or (now - cache["full_read_at"]).total_seconds() >= LEDGER_FULL_READ_SECONDS
+        or since < cache["since"]
+    )
+    if not full_read and (now - cache["read_at"]).total_seconds() >= LEDGER_REFRESH_SECONDS:
+        changed = list(
+            db.collection(SUBSCRIPTION_LEDGER)
+            .where("updatedAt", ">=", cache["read_at"] - LEDGER_REFRESH_OVERLAP)
+            .limit(LEDGER_READ_LIMIT)
             .stream()
         )
-        if len(docs) == 5000:
-            logging.warning("[ANALYTICS_API] subscription_events query hit the 5000-doc limit")
+        # More changed than one read returns: read the whole look-back instead.
+        full_read = len(changed) == LEDGER_READ_LIMIT
+        if not full_read:
+            cache["events"].update((doc.id, doc.to_dict() or {}) for doc in changed)
+            cache["read_at"] = now
+    if full_read:
+        # A day more than any view asks for, so a caller that took its `now`
+        # a moment before this read is still served by it.
+        start = min(since, now - timedelta(days=LEDGER_LOOKBACK_DAYS + 1))
+        docs = list(
+            db.collection(SUBSCRIPTION_LEDGER)
+            .where("occurredAt", ">=", start)
+            .limit(LEDGER_READ_LIMIT)
+            .stream()
+        )
+        if len(docs) == LEDGER_READ_LIMIT:
+            logging.warning("[ANALYTICS_API] subscription_ledger read hit the 5000-doc limit")
+        cache.update(
+            db=db, full_read_at=now, read_at=now, since=start,
+            events={doc.id: doc.to_dict() or {} for doc in docs},
+        )
+    return [
+        event for event in cache["events"].values()
+        if (occurred := _event_occurred_at(event)) is not None and occurred >= since
+    ]
+
+
+def _subscription_events_since(db, cutoff: datetime) -> list[dict]:
+    """Production RevenueCat events from the ledger that occurred since cutoff."""
+    try:
         return [
-            doc.to_dict()
-            for doc in docs
-            if str(doc.to_dict().get("environment") or "PRODUCTION").upper()
-            != "SANDBOX"
+            event for event in _ledger_events(db, cutoff)
+            if str(event.get("environment") or "PRODUCTION").upper() != "SANDBOX"
         ]
     except Exception as exc:
-        # The collection is new; deployments remain backward compatible while
-        # it fills by falling back to lifecycle markers on user documents.
+        # Callers fall back to lifecycle markers on user documents.
         logging.warning(f"[ANALYTICS_API] subscription event history unavailable: {exc}")
         return []
 
@@ -244,14 +308,14 @@ def _event_occurred_at(data: dict) -> datetime:
 
 
 def _customer_subscription_events(db, uid: str) -> list[dict]:
-    """Load one customer's production RevenueCat event mirrors, oldest first.
+    """Load one customer's production RevenueCat events from the ledger, oldest first.
 
-    Equality-only query (no order_by) — subscription_events has no composite
-    index on appUserId+occurredAt; sorting happens in Python instead.
+    Equality-only query (no order_by) — the ledger has no composite index on
+    appUserId+occurredAt; sorting happens in Python instead.
     """
     try:
         docs = list(
-            db.collection("subscription_events")
+            db.collection(SUBSCRIPTION_LEDGER)
             .where("appUserId", "==", uid)
             .limit(500)
             .stream()
@@ -601,36 +665,27 @@ def _store_label(user_data: dict) -> str:
 
 
 def _non_paying_uids_from_events(db, since: datetime) -> tuple:
-    """UIDs the event mirror shows as never having transacted for real.
+    """UIDs the event ledger shows as never having transacted for real.
 
-    `environment` and `period_type` live only on subscription_events — the user
+    `environment` and `period_type` live only on the ledger — the user
     document carries neither — so a sandbox build or an offer-code redemption
-    can only be told from a purchase by joining against the mirror.
+    can only be told from a purchase by joining against it.
 
     Returns (sandbox_only, promotional_only). Both are "only" sets: any single
     PRODUCTION or non-promotional event clears the user, because a comped
     period followed by a real purchase is a paying subscriber.
 
-    Bounded by `since` for the same reason as _subscription_events_since: an
-    unfiltered read would silently truncate at the document cap and return an
-    arbitrary subset, which here would mean dropping real subscribers.
+    Bounded by `since` (see _ledger_events): a truncated read would mean
+    dropping real subscribers.
     """
     try:
-        docs = list(
-            db.collection("subscription_events")
-            .where("occurredAt", ">=", since)
-            .limit(5000)
-            .stream()
-        )
-        if len(docs) == 5000:
-            logging.warning("[ANALYTICS_API] non-paying screen hit the 5000-doc limit")
+        events = _ledger_events(db, since)
     except Exception as exc:
         logging.warning(f"[ANALYTICS_API] non-paying screen unavailable: {exc}")
         return set(), set()
 
     sandbox_only, promo_only = {}, {}
-    for doc in docs:
-        data = doc.to_dict() or {}
+    for data in events:
         app_user_id = data.get("appUserId")
         if not app_user_id:
             continue
@@ -1080,11 +1135,8 @@ def _compute_revenue_summary(days: int) -> dict:
         if _is_paid_event(event)
     ]
     for event in today_transactions:
-        # The mirror stores price_in_purchased_currency too, so a non-USD
-        # transaction would land here at its local face value.
-        currency = str(event.get("currency") or "USD").strip().upper()
-        if currency != "USD":
-            continue
+        # The ledger's `price` is RevenueCat's USD price whatever the buyer
+        # paid in (that amount is `priceLocal`), so every sale counts.
         try:
             today_revenue += float(event.get("price") or 0)
         except (TypeError, ValueError):
@@ -1210,7 +1262,7 @@ def _compute_subscriber_funnel(days: int) -> dict:
                 conversions[uid] = _event_occurred_at(paid_after_start) or started_at
                 platforms[uid] = paid_after_start.get("platform") or platforms[uid]
 
-    # Historical fallback for users that predate the event mirror. The trial
+    # Historical fallback for users that predate the event ledger. The trial
     # welcome-email timestamp is an especially useful durable marker because
     # older conversion handling deleted trialEndDate.
     for uid, data in status_docs.items():
@@ -1936,7 +1988,7 @@ def customer_detail_query():
 def _derived_subscription_history(data: dict) -> list[dict]:
     """Infer subscription history from user-doc lifecycle fields.
 
-    Fallback for users predating the subscription_events webhook mirror.
+    Fallback for users with no events in the ledger.
     """
     history = []
     created = _get_creation_date(data)
