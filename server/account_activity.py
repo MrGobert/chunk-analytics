@@ -16,6 +16,9 @@ prod user doc carries it (read 2026-10-03). Two signals are live:
 cerebral's document retention sweep reads the same two signals
 (services/documents/retention.py there); keep them in step. So do the
 14-day re-engagement email and the subscriber funnel's "Active (30d)" stage.
+The customer health score's recency reads only Firebase Auth
+(last_seen_by_uid) and usage_monthly: it scores every customer on each
+15-minute snapshot, so it can't afford queries per account.
 """
 
 from datetime import datetime, timezone
@@ -36,6 +39,25 @@ def last_seen(user) -> Optional[datetime]:
     if not stamps:
         return None
     return datetime.fromtimestamp(max(stamps) / 1000, timezone.utc)
+
+
+def last_seen_by_uid(uids: Iterable[str]) -> Dict[str, datetime]:
+    """{uid: last_seen} for the accounts among ``uids`` that Firebase Auth
+    knows, disabled ones included: when each last used Chunk, not whether it
+    can now. 100 accounts per Admin API call and no Firestore reads. Raises
+    when a call fails.
+    """
+    from firebase_admin import auth
+
+    uids = list(dict.fromkeys(uids))
+    found: Dict[str, datetime] = {}
+    for start in range(0, len(uids), 100):
+        result = auth.get_users([auth.UidIdentifier(uid) for uid in uids[start:start + 100]])
+        for user in result.users:
+            seen = last_seen(user)
+            if seen is not None:
+                found[user.uid] = seen
+    return found
 
 
 def accounts_last_seen_between(start: datetime, end: datetime) -> Dict[str, Optional[str]]:
