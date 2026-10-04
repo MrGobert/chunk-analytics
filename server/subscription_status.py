@@ -23,10 +23,15 @@ churn intelligence, customer health) still read cerebral's spellings only.
 Every 15-minute run scans the cancelled group 10 times (three windows of three
 views, plus customer health). The 457 "canceled" docs would add about 4,600
 reads a run, some 440k a day, more than doubling the snapshot's Firestore
-reads. On 2026-10-03 they changed one figure: the 90-day churn rate went from
-33.9% to 64.9%, and that figure is wrong. Most "canceled" docs are a July 2026
-batch of about 100 web trials with no trial or webhook fields, and churn
-intelligence has no provenance screen to keep them out of paid churn.
+reads.
+
+Churn intelligence doesn't need them. It counts paid churn from the
+subscription ledger and reads by id the docs of the paid churners the scans
+missed (analytics_api._churn_in_window): 5 "canceled" docs for the 90-day
+window on 2026-10-04. A scan wouldn't have counted 3 of them, which have no
+expirationDate. 97 of the other 102 "canceled" docs that ended in that window
+are a July 2026 batch of web trials with no trial or webhook fields: trial
+fallout, not paid churn, and the churned list leaves them out.
 """
 
 CANCELLED_STATUSES = ("cancelled", "canceled")
