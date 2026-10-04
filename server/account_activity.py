@@ -14,11 +14,12 @@ prod user doc carries it (read 2026-10-03). Two signals are live:
   usage_monthly, and App Intents jobs.
 
 cerebral's document retention sweep reads the same two signals
-(services/documents/retention.py there); keep them in step.
+(services/documents/retention.py there); keep them in step. So do the
+14-day re-engagement email and the subscriber funnel's "Active (30d)" stage.
 """
 
 from datetime import datetime, timezone
-from typing import Dict, Optional
+from typing import Dict, Iterable, Optional, Set
 
 import firebase_setup  # noqa: F401  (initializes the default Firebase app)
 
@@ -54,6 +55,34 @@ def accounts_last_seen_between(start: datetime, end: datetime) -> Dict[str, Opti
         if seen is not None and start <= seen <= end:
             found[user.uid] = user.email or None
     return found
+
+
+def active_since(db, uids: Iterable[str], since: datetime) -> Set[str]:
+    """The accounts among ``uids`` that used Chunk at or after ``since``.
+
+    Firebase Auth first, 100 accounts per Admin API call. Only the accounts
+    Auth doesn't show get ``used_since``'s Firestore queries (up to five
+    one-doc reads each), so the cost follows the accounts that went quiet. A
+    disabled or deleted account is never active. Raises when a call fails.
+    """
+    from firebase_admin import auth
+
+    uids = list(dict.fromkeys(uids))
+    active: Set[str] = set()
+    ruled_out: Set[str] = set()
+    for start in range(0, len(uids), 100):
+        result = auth.get_users([auth.UidIdentifier(uid) for uid in uids[start:start + 100]])
+        for user in result.users:
+            seen = last_seen(user)
+            if user.disabled:
+                ruled_out.add(user.uid)
+            elif seen is not None and seen >= since:
+                active.add(user.uid)
+        ruled_out.update(identifier.uid for identifier in result.not_found)
+    for uid in uids:
+        if uid not in active and uid not in ruled_out and used_since(db, uid, since):
+            active.add(uid)
+    return active
 
 
 def used_since(db, uid: str, since: datetime) -> bool:
