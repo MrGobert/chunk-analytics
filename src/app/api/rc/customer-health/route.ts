@@ -44,7 +44,7 @@ export async function GET(request: NextRequest) {
     const data = await response.json();
 
     return NextResponse.json({
-      distribution: data.distribution ?? { healthy: 0, atRisk: 0, churning: 0 },
+      distribution: data.distribution ?? { healthy: 0, fair: 0, poor: 0 },
       customers: data.customers ?? [],
       averageHealthScore: data.averageHealthScore ?? 0,
       lastUpdated: new Date().toISOString(),
@@ -55,7 +55,7 @@ export async function GET(request: NextRequest) {
     if (error instanceof Error && error.name === 'AbortError') {
       console.error('Cerebral API timeout for customer-health');
       return NextResponse.json({
-        distribution: { healthy: 0, atRisk: 0, churning: 0 },
+        distribution: { healthy: 0, fair: 0, poor: 0 },
         customers: [], averageHealthScore: 0,
         lastUpdated: new Date().toISOString(),
         note: 'Data unavailable - Cerebral server timeout. Try refreshing.',
@@ -64,7 +64,7 @@ export async function GET(request: NextRequest) {
 
     console.error('Failed to fetch customer health:', error);
     return NextResponse.json({
-      distribution: { healthy: 0, atRisk: 0, churning: 0 },
+      distribution: { healthy: 0, fair: 0, poor: 0 },
       customers: [], averageHealthScore: 0,
       lastUpdated: new Date().toISOString(),
       note: `Data unavailable - ${error instanceof Error ? error.message : 'Unknown error'}`,

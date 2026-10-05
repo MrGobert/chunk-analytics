@@ -433,8 +433,9 @@ export interface RevenueSummary {
   byProduct: Record<string, number>;
   /** Real active-subscriber head-count per plan type (monthly/annual). */
   subscribersByProduct?: Record<string, number>;
-  /** Where mrr/totalSubscribers came from: RevenueCat, or our own derivation. */
-  mrrSource?: 'revenuecat' | 'firestore' | 'unavailable';
+  /** Where mrr/totalSubscribers came from: RevenueCat; else the subscription
+   * ledger; else, when the ledger can't be read, user docs ('firestore'). */
+  mrrSource?: 'revenuecat' | 'ledger' | 'firestore' | 'unavailable';
   /** MRR we can attribute to a specific store and plan (drives the breakdowns). */
   attributedMrr?: number;
   /** Subscribers behind attributedMrr. */
@@ -443,15 +444,15 @@ export interface RevenueSummary {
   pricedSubscribers?: number;
   /** Confirmed subscribers we could not price in USD — excluded from MRR. */
   unpricedSubscribers?: number;
-  /** "active" documents with no RevenueCat webhook behind them. */
+  /** "active" documents with no RevenueCat webhook behind them (user-doc fallback only). */
   excludedNoProvenance?: number;
-  /** Promotional grants and sandbox-only accounts. */
+  /** Paying accounts held out by ANALYTICS_EXCLUDED_UIDS; in the user-doc fallback, promotional grants too. */
   excludedNonPaying?: number;
-  /** Comped / offer-code / internal accounts: entitled but never charged. */
+  /** Comped / offer-code / internal accounts: entitled but never charged (user-doc fallback only). */
   excludedFreeAccess?: number;
-  /** Subscriptions whose renewal date has already passed. */
+  /** Subscriptions whose renewal date has already passed (user-doc fallback only). */
   excludedLapsed?: number;
-  /** Dropped because the stored price was in a non-USD currency. */
+  /** Dropped because the stored price was in a non-USD currency (user-doc fallback only). */
   excludedNonUsd?: number;
   mrrTrend: { date: string; mrr: number }[];
   newSubscribers: number;
@@ -666,7 +667,7 @@ export interface CustomerHealthEntry {
   name?: string;
   platform: string;
   healthScore: number;
-  healthStatus: 'healthy' | 'atRisk' | 'churning' | string;
+  healthStatus: 'healthy' | 'fair' | 'poor' | string;
   subscriptionStatus: string;
   subscribedDays: number;
   lastActiveAt: string;
@@ -674,7 +675,8 @@ export interface CustomerHealthEntry {
 }
 
 export interface CustomerHealth {
-  distribution: { healthy: number; atRisk: number; churning: number };
+  /** Health score tiers: healthy 60+, fair 30–59, poor under 30. Not the at-risk list. */
+  distribution: { healthy: number; fair: number; poor: number };
   customers: CustomerHealthEntry[];
   averageHealthScore: number;
   lastUpdated: string;
