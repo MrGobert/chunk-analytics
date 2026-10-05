@@ -995,26 +995,50 @@ class StatusScan(FakeCollection):
         return StatusScan([doc for doc in self.docs if doc.id > last_doc.id])
 
 
+class HealthDB(FakeDB):
+    """Answers the customer health scan's status "in" filter, and can fail
+    every ledger read."""
+
+    def __init__(self, collections, ledger_fails=False):
+        super().__init__(collections)
+        self.ledger_fails = ledger_fails
+
+    def collection(self, name):
+        if name == "subscription_ledger" and self.ledger_fails:
+            raise RuntimeError("deadline exceeded")
+        return StatusScan(self.collections.get(name, []))
+
+
 class CustomerHealthTests(ActivityStubs, unittest.TestCase):
-    """The health list scores recency by when Firebase Auth last saw each
-    account, or a later chat or capture: most subscribers never chat."""
+    """The health list scores the accounts paying or trialling now, and scores
+    recency by when Firebase Auth last saw each account, or a later chat or
+    capture: most subscribers never chat."""
 
     NOW = datetime.now(timezone.utc)
 
     def setUp(self):
         self.stub_activity()
 
-    def _health(self, users, usage=None):
+    def _health(self, users, usage=None, ledger=None, held_out="", ledger_fails=False):
         self.usage_reads = []
 
         def fetch_usage(_db, uids, _now):
             self.usage_reads += list(uids)
             return {uid: (usage or {})[uid] for uid in uids if uid in (usage or {})}
 
-        db = SimpleNamespace(collection=lambda name: StatusScan(users if name == "users" else []))
+        if ledger is None:
+            # Every user here pays monthly
+            ledger = [
+                ledger_event(f"r-{doc.id}", doc.id, "RENEWAL", self.NOW - timedelta(days=5),
+                             self.NOW + timedelta(days=25))
+                for doc in users
+            ]
+        db = HealthDB({"users": users, "subscription_ledger": ledger}, ledger_fails=ledger_fails)
         with patch.dict(sys.modules, {"firebase_setup": SimpleNamespace(db=db)}), \
-             patch.object(analytics_api, "_fetch_usage_monthly", side_effect=fetch_usage):
+             patch.object(analytics_api, "_fetch_usage_monthly", side_effect=fetch_usage), \
+             patch.dict(os.environ, {"ANALYTICS_EXCLUDED_UIDS": held_out}):
             result = analytics_api._compute_customer_health()
+        self.distribution = result["distribution"]
         return {row["uid"]: row for row in result["customers"]}
 
     def _subscriber(self, uid, **fields):
@@ -1025,11 +1049,19 @@ class CustomerHealthTests(ActivityStubs, unittest.TestCase):
 
         reader = self._health([self._subscriber("reader")])["reader"]
 
-        # By usage_monthly alone: recency 0, tenure halved, score 5, churning
+        # By usage_monthly alone: recency 0, tenure halved, score 5, poor
         self.assertEqual(reader["factors"]["recency"], 97)
         self.assertEqual(reader["healthScore"], 44)
-        self.assertEqual(reader["healthStatus"], "atRisk")
+        self.assertEqual(reader["healthStatus"], "fair")
         self.assertEqual((datetime.now(timezone.utc) - analytics_api._to_datetime(reader["lastActiveAt"])).days, 1)
+
+    def test_the_tiers_are_named_apart_from_the_at_risk_list(self):
+        self.assertEqual(
+            [analytics_api._health_status(score) for score in (60, 59.9, 30, 29.9)],
+            ["healthy", "fair", "fair", "poor"],
+        )
+        self._health([self._subscriber("reader")])
+        self.assertEqual(self.distribution, {"healthy": 0, "fair": 0, "poor": 1})
 
     def test_a_chat_after_auth_last_saw_the_account_counts(self):
         self.stub_activity(records=[_auth_record("chatter", refreshed_days_ago=20)])
@@ -1045,16 +1077,58 @@ class CustomerHealthTests(ActivityStubs, unittest.TestCase):
 
         self.assertEqual(self._health([doc])["spoofed"]["factors"]["recency"], 0)
 
-    def test_only_customers_with_access_are_looked_up(self):
+    def test_only_accounts_paying_or_trialling_are_scored(self):
+        ago = lambda days: self.NOW - timedelta(days=days)  # noqa: E731
+        later = lambda days: self.NOW + timedelta(days=days)  # noqa: E731
+        users = [
+            self._subscriber("paying"),
+            # The Cloud Function's spelling, which the status scans skip
+            self._subscriber("paying-canceled", subscriptionStatus="canceled"),
+            # The native app writes "active" for all of these
+            self._subscriber("trialling"),
+            self._subscriber("never-paid"),
+            self._subscriber("testflight"),
+            self._subscriber("promo"),
+            self._subscriber("trial-over", subscriptionStatus="trial", trialEndDate=ago(2)),
+            self._subscriber("paid-left"),
+            self._subscriber("internal"),
+        ]
+        ledger = [
+            ledger_event("a1", "paying", "RENEWAL", ago(5), later(25)),
+            ledger_event("c1", "paying-canceled", "INITIAL_PURCHASE", ago(100), later(265)),
+            ledger_event("c2", "paying-canceled", "CANCELLATION", ago(50), later(265)),
+            ledger_event("t1", "trialling", "INITIAL_PURCHASE", ago(2), later(5), periodType="TRIAL", price=0),
+            ledger_event("s1", "testflight", "INITIAL_PURCHASE", ago(2), later(28), environment="SANDBOX"),
+            ledger_event("g1", "promo", "INITIAL_PURCHASE", ago(2), later(28),
+                         store="PROMOTIONAL", periodType="PROMOTIONAL", price=0),
+            ledger_event("o1", "trial-over", "INITIAL_PURCHASE", ago(9), ago(2), periodType="TRIAL", price=0),
+            ledger_event("o2", "trial-over", "EXPIRATION", ago(2), ago(2), periodType="TRIAL"),
+            ledger_event("l1", "paid-left", "RENEWAL", ago(40), ago(10)),
+            ledger_event("l2", "paid-left", "EXPIRATION", ago(10), ago(10)),
+            ledger_event("i1", "internal", "RENEWAL", ago(5), later(25)),
+            # Paying, but the account has no user doc
+            ledger_event("n1", "no-doc", "RENEWAL", ago(5), later(25)),
+        ]
+
+        customers = self._health(users, ledger=ledger, held_out="internal")
+
+        scored = ["paying", "paying-canceled", "trialling"]
+        self.assertEqual(sorted(customers), scored)
+        self.assertEqual(sum(self.distribution.values()), 3)
+        self.assertEqual([sorted(call) for call in self.auth.calls], [scored])
+        self.assertEqual(sorted(self.usage_reads), scored)
+
+    def test_without_the_ledger_only_docs_with_access_are_looked_up(self):
         users = [
             self._subscriber("paying"),
             self._subscriber("paid-to-next-month", subscriptionStatus="cancelled",
                              expirationDate=self.NOW + timedelta(days=20)),
             self._subscriber("lapsed", subscriptionStatus="cancelled",
                              expirationDate=self.NOW - timedelta(days=20)),
+            self._subscriber("internal"),
         ]
 
-        customers = self._health(users)
+        customers = self._health(users, ledger_fails=True, held_out="internal")
 
         self.assertEqual(sorted(customers), ["paid-to-next-month", "paying"])
         self.assertEqual([sorted(call) for call in self.auth.calls], [["paid-to-next-month", "paying"]])
@@ -1346,6 +1420,34 @@ class PaidSubscriptionTests(unittest.TestCase):
         )
         self.assertEqual({uid for uid, sub in subscriptions.items() if sub["trialled"]}, {"trial"})
 
+    def test_a_cancellation_holds_until_a_payment_or_an_uncancellation(self):
+        subscriptions = self._subscriptions(
+            # A yearly plan set not to renew a day after it was bought
+            ledger_event("y1", "set-to-lapse", "INITIAL_PURCHASE", self._ago(100), self._in(265)),
+            ledger_event("y2", "set-to-lapse", "CANCELLATION", self._ago(99), self._in(265)),
+            ledger_event("m1", "changed-mind", "RENEWAL", self._ago(5), self._in(25)),
+            ledger_event("m2", "changed-mind", "CANCELLATION", self._ago(4), self._in(25)),
+            ledger_event("m3", "changed-mind", "UNCANCELLATION", self._ago(3), self._in(25)),
+            # Cancelled, then bought again before the paid period ran out
+            ledger_event("b1", "bought-again", "RENEWAL", self._ago(45), self._ago(15)),
+            ledger_event("b2", "bought-again", "CANCELLATION", self._ago(30), self._ago(15)),
+            ledger_event("b3", "bought-again", "INITIAL_PURCHASE", self._ago(5), self._in(25)),
+            ledger_event("t1", "trial-cancelled", "INITIAL_PURCHASE", self._ago(3), self._in(4),
+                         periodType="TRIAL", price=0),
+            ledger_event("t2", "trial-cancelled", "CANCELLATION", self._ago(1), self._in(4), periodType="TRIAL"),
+            ledger_event("s1", "testflight-cancel", "RENEWAL", self._ago(5), self._in(25)),
+            ledger_event("s2", "testflight-cancel", "CANCELLATION", self._ago(1), self._in(25),
+                         environment="SANDBOX"),
+        )
+
+        self.assertEqual(
+            {uid: sub["cancelled"] for uid, sub in subscriptions.items()},
+            {"set-to-lapse": True, "changed-mind": False, "bought-again": False,
+             "trial-cancelled": True, "testflight-cancel": False},
+        )
+        self.assertEqual(subscriptions["trial-cancelled"]["trialUntil"], self._in(4))
+        self.assertIsNone(subscriptions["set-to-lapse"]["ended"])
+
     def test_an_unreadable_ledger_is_none(self):
         class Unreadable(FakeDB):
             def collection(self, name):
@@ -1475,8 +1577,8 @@ class ChurnIntelligenceTests(ActivityStubs, unittest.TestCase):
         rows = {row["uid"]: row for row in result["churnedUsers"]}
         self.assertEqual(rows["canceled-left"]["churnDate"], self._ago(20).isoformat())
         self.assertEqual(rows["canceled-left"]["tenure"], 280)
-        # Only the churners the status scans don't return
-        self.assertEqual(sorted(db.read_by_id), ["canceled-left", "deleted"])
+        # The customers, and the churners the status scans don't return
+        self.assertEqual(sorted(db.read_by_id), ["canceled-left", "deleted", "new-payer", "paying", "paying-canceled"])
 
     def test_paying_again_isnt_churn_whatever_the_doc_says(self):
         ago, later = self._ago, self._in
@@ -1541,9 +1643,9 @@ class ChurnIntelligenceTests(ActivityStubs, unittest.TestCase):
         result, _ = self._churn()
 
         at_risk = {row["uid"]: row for row in result["atRiskUsers"]}
-        self.assertEqual(sorted(at_risk), ["never-paid", "new-payer"])
+        self.assertEqual(sorted(at_risk), ["new-payer", "paying-canceled"])
         self.assertEqual(at_risk["new-payer"]["daysSinceActive"], 20)
-        self.assertIsNone(at_risk["never-paid"]["daysSinceActive"])
+        self.assertIsNone(at_risk["paying-canceled"]["daysSinceActive"])
         self.assertEqual([row["uid"] for row in result["topEngagedUsers"]], ["paying"])
         self.assertEqual(result["topEngagedUsers"][0]["daysSinceActive"], 2)
 
@@ -1552,7 +1654,7 @@ class ChurnIntelligenceTests(ActivityStubs, unittest.TestCase):
 
         self.assertEqual(len(self.auth.calls), 1)
         self.assertEqual(sorted(self.auth.calls[0]), [
-            "canceled-left", "never-paid", "new-payer", "paid-left", "paying", "web-trial"])
+            "canceled-left", "new-payer", "paid-left", "paying", "paying-canceled", "web-trial"])
 
     def test_a_failed_auth_lookup_leaves_usage_alone_to_say(self):
         with patch.object(firebase_auth, "get_users", side_effect=RuntimeError("auth down")):
@@ -1560,6 +1662,140 @@ class ChurnIntelligenceTests(ActivityStubs, unittest.TestCase):
 
         self.assertEqual(result["churnRate"], 60.0)
         self.assertEqual(result["atRiskCount"], 3)
+
+
+class CustomerListTests(ActivityStubs, unittest.TestCase):
+    """The at-risk and engaged lists hold the accounts paying or trialling
+    now, from the ledger. The status scans held every "active" doc, and on
+    2026-10-05, 55 of the 97 accounts they gave access to had never paid and
+    weren't trialling."""
+
+    NOW = datetime.now(timezone.utc)
+
+    def setUp(self):
+        # Everyone was seen yesterday, so only a cancellation or a trial's
+        # end puts an account at risk.
+        self.stub_activity(records=[
+            _auth_record(uid, refreshed_days_ago=1) for uid in (
+                "paying", "paying-canceled", "set-to-lapse", "changed-mind", "trialling",
+                "never-paid", "testflight", "promo", "trial-over", "paid-left", "internal")
+        ])
+
+    def _ago(self, days):
+        return self.NOW - timedelta(days=days)
+
+    def _in(self, days):
+        return self.NOW + timedelta(days=days)
+
+    def _lists(self, users, ledger, held_out="", ledger_fails=False):
+        db = ChurnDB({"users": users, "subscription_ledger": ledger,
+                      "emailTracking": [], "analytics_cache": []}, ledger_fails=ledger_fails)
+        with patch.dict(sys.modules, {"firebase_setup": SimpleNamespace(db=db)}), \
+             patch.object(analytics_api, "_get_redis", return_value=None), \
+             patch.dict(os.environ, {"ANALYTICS_EXCLUDED_UIDS": held_out}):
+            result = analytics_api._compute_churn_intelligence(30)
+        at_risk = {row["uid"]: row for row in result["atRiskUsers"]}
+        engaged = {row["uid"]: row for row in result["topEngagedUsers"]}
+        return result, at_risk, engaged
+
+    def _user(self, uid, status="active", **fields):
+        return FakeDoc(uid, {"subscriptionStatus": status, "createdAt": self._ago(400), **fields})
+
+    def test_only_accounts_paying_or_trialling_are_listed(self):
+        ago, later = self._ago, self._in
+        users = [
+            self._user("paying"),
+            self._user("paying-canceled", "canceled"),
+            # The native app writes "active" for all of these
+            self._user("trialling"),
+            self._user("never-paid"),
+            self._user("testflight"),
+            self._user("promo"),
+            self._user("trial-over", "trial", trialEndDate=ago(2)),
+            self._user("paid-left"),
+            self._user("internal"),
+        ]
+        ledger = [
+            ledger_event("a1", "paying", "RENEWAL", ago(5), later(25)),
+            ledger_event("c1", "paying-canceled", "INITIAL_PURCHASE", ago(100), later(265)),
+            ledger_event("c2", "paying-canceled", "CANCELLATION", ago(50), later(265)),
+            ledger_event("t1", "trialling", "INITIAL_PURCHASE", ago(2), later(5), periodType="TRIAL", price=0),
+            ledger_event("s1", "testflight", "INITIAL_PURCHASE", ago(2), later(28), environment="SANDBOX"),
+            ledger_event("g1", "promo", "INITIAL_PURCHASE", ago(2), later(28),
+                         store="PROMOTIONAL", periodType="PROMOTIONAL", price=0),
+            ledger_event("o1", "trial-over", "INITIAL_PURCHASE", ago(9), ago(2), periodType="TRIAL", price=0),
+            ledger_event("o2", "trial-over", "EXPIRATION", ago(2), ago(2), periodType="TRIAL"),
+            ledger_event("l1", "paid-left", "RENEWAL", ago(40), ago(10)),
+            ledger_event("l2", "paid-left", "EXPIRATION", ago(10), ago(10)),
+            ledger_event("i1", "internal", "RENEWAL", ago(5), later(25)),
+            # Paying, but the account has no user doc: no row, as in the churned list
+            ledger_event("n1", "no-doc", "RENEWAL", ago(5), later(25)),
+        ]
+
+        result, at_risk, engaged = self._lists(users, ledger, held_out="internal")
+
+        self.assertEqual(sorted(at_risk), ["paying-canceled"])
+        self.assertEqual(at_risk["paying-canceled"]["subscriptionType"], "cancelled")
+        self.assertEqual(sorted(engaged), ["paying"])
+        # The trial is neither at risk (five days left) nor a paying customer
+        self.assertEqual((result["atRiskCount"], result["engagedCount"]), (1, 1))
+
+    def test_a_cancellation_on_the_ledger_puts_a_customer_at_risk_whatever_the_doc_says(self):
+        ago, later = self._ago, self._in
+        users = [self._user("set-to-lapse"), self._user("changed-mind")]
+        ledger = [
+            ledger_event("s1", "set-to-lapse", "INITIAL_PURCHASE", ago(100), later(265)),
+            ledger_event("s2", "set-to-lapse", "CANCELLATION", ago(99), later(265)),
+            ledger_event("m1", "changed-mind", "RENEWAL", ago(5), later(25)),
+            ledger_event("m2", "changed-mind", "CANCELLATION", ago(4), later(25)),
+            ledger_event("m3", "changed-mind", "UNCANCELLATION", ago(3), later(25)),
+        ]
+
+        _, at_risk, engaged = self._lists(users, ledger)
+
+        self.assertEqual(list(at_risk), ["set-to-lapse"])
+        self.assertEqual(at_risk["set-to-lapse"]["subscriptionType"], "cancelled")
+        self.assertEqual(at_risk["set-to-lapse"]["daysSinceActive"], 1)
+        self.assertEqual(list(engaged), ["changed-mind"])
+
+    def test_a_trial_counts_down_to_the_end_the_ledger_gives(self):
+        ago, later = self._ago, self._in
+        users = [
+            # The doc's own trial dates are stale or missing
+            self._user("trialling", trialEndDate=ago(30)),
+            self._user("trial-over", "trial", trialEndDate=ago(2)),
+        ]
+        ledger = [
+            ledger_event("t1", "trialling", "INITIAL_PURCHASE", ago(4.5), later(2.5),
+                         periodType="TRIAL", price=0),
+            ledger_event("o1", "trial-over", "INITIAL_PURCHASE", ago(9), ago(2), periodType="TRIAL", price=0),
+            ledger_event("o2", "trial-over", "EXPIRATION", ago(2), ago(2), periodType="TRIAL"),
+        ]
+
+        result, at_risk, engaged = self._lists(users, ledger)
+
+        self.assertEqual(list(at_risk), ["trialling"])
+        self.assertEqual(at_risk["trialling"]["subscriptionType"], "trial")
+        self.assertEqual(at_risk["trialling"]["trialEndsIn"], 2)
+        self.assertEqual(result["trialAtRiskCount"], 1)
+        self.assertEqual(engaged, {})
+
+    def test_without_the_ledger_every_doc_with_access_is_listed(self):
+        ago, later = self._ago, self._in
+        users = [
+            self._user("paying"),
+            self._user("trialling", "trial", trialEndDate=later(2.5)),
+            self._user("paying-canceled", "cancelled", expirationDate=later(20)),
+            self._user("paid-left", "cancelled", expirationDate=ago(20)),
+            self._user("internal"),
+        ]
+
+        result, at_risk, engaged = self._lists(users, [], held_out="internal", ledger_fails=True)
+
+        self.assertEqual(sorted(at_risk), ["paying-canceled", "trialling"])
+        self.assertEqual(at_risk["paying-canceled"]["subscriptionType"], "cancelled")
+        self.assertEqual(at_risk["trialling"]["trialEndsIn"], 2)
+        self.assertEqual(sorted(engaged), ["paying"])
 
 
 class LoggedDB(ChurnDB):
@@ -1752,7 +1988,7 @@ class CustomerDetailTests(unittest.TestCase):
             return_value=(sample_stats, []),
         ):
             result = self._get_detail(users=[self._user_doc()])
-        self.assertIn(result["healthStatus"], ("healthy", "atRisk", "churning"))
+        self.assertIn(result["healthStatus"], ("healthy", "fair", "poor"))
         self.assertEqual(
             set(result["healthFactors"]),
             {"recency", "frequency", "featureDepth", "tenure", "emailEngagement"},

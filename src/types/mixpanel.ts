@@ -667,7 +667,7 @@ export interface CustomerHealthEntry {
   name?: string;
   platform: string;
   healthScore: number;
-  healthStatus: 'healthy' | 'atRisk' | 'churning' | string;
+  healthStatus: 'healthy' | 'fair' | 'poor' | string;
   subscriptionStatus: string;
   subscribedDays: number;
   lastActiveAt: string;
@@ -675,7 +675,8 @@ export interface CustomerHealthEntry {
 }
 
 export interface CustomerHealth {
-  distribution: { healthy: number; atRisk: number; churning: number };
+  /** Health score tiers: healthy 60+, fair 30–59, poor under 30. Not the at-risk list. */
+  distribution: { healthy: number; fair: number; poor: number };
   customers: CustomerHealthEntry[];
   averageHealthScore: number;
   lastUpdated: string;

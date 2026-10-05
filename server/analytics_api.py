@@ -787,13 +787,15 @@ def _is_payment(event: dict) -> bool:
 def _paid_subscriptions(db, since: datetime, now: datetime):
     """Each account's paid subscription, from the ledger's events since `since`.
 
-    {uid: {"started", "ended", "trialled", "payment", "trialUntil"}}, or None
-    when the ledger can't be read. "started" is the subscription's first
-    payment, None if the account never paid (a sandbox build, a promotional
-    grant, a trial that didn't convert); "ended" is None while it runs;
-    "trialled" means the account had a production trial; "payment" is the
-    latest payment event; "trialUntil" is when a production trial with no
-    payment or EXPIRATION since its start ends.
+    {uid: {"started", "ended", "trialled", "payment", "trialUntil",
+    "cancelled"}}, or None when the ledger can't be read. "started" is the
+    subscription's first payment, None if the account never paid (a sandbox
+    build, a promotional grant, a trial that didn't convert); "ended" is None
+    while it runs; "trialled" means the account had a production trial;
+    "payment" is the latest payment event; "trialUntil" is when a production
+    trial with no payment or EXPIRATION since its start ends; "cancelled"
+    means a CANCELLATION came after the latest payment or trial start, with no
+    UNCANCELLATION since: it won't renew.
 
     A subscription ends at the first EXPIRATION after its last payment: early
     for a refund, late by a billing grace period. An EXPIRATION more than
@@ -817,29 +819,32 @@ def _paid_subscriptions(db, since: datetime, now: datetime):
     subscriptions = {}
     for uid, timeline in timelines.items():
         started = ended = paid_through = payment = trial_until = None
-        trialled = False
+        trialled = cancelled = False
         for occurred, event in sorted(timeline, key=lambda item: item[0]):
             if str(event.get("environment") or "PRODUCTION").upper() == "SANDBOX":
                 continue
+            event_type = str(event.get("type") or "").upper()
             if str(event.get("periodType") or "").upper() == "TRIAL":
                 trialled = True
             if _is_trial_start_event(event):
-                trial_until = _to_datetime(event.get("expirationAt"))
+                trial_until, cancelled = _to_datetime(event.get("expirationAt")), False
             if _is_payment(event):
                 if started is None or ended is not None:
                     started, ended = occurred, None
                 paid_through = _to_datetime(event.get("expirationAt")) or occurred
-                payment, trial_until = event, None
-            elif str(event.get("type") or "").upper() == "EXPIRATION":
+                payment, trial_until, cancelled = event, None, False
+            elif event_type == "EXPIRATION":
                 trial_until = None
                 if started is not None and ended is None:
                     expired = _to_datetime(event.get("expirationAt")) or occurred
                     ended = expired if expired <= paid_through + PAID_PERIOD_GRACE else paid_through
+            elif event_type in ("CANCELLATION", "UNCANCELLATION"):
+                cancelled = event_type == "CANCELLATION"
         if started is not None and ended is None and paid_through + PAID_PERIOD_GRACE <= now:
             ended = paid_through
         subscriptions[uid] = {
             "started": started, "ended": ended, "trialled": trialled,
-            "payment": payment, "trialUntil": trial_until,
+            "payment": payment, "trialUntil": trial_until, "cancelled": cancelled,
         }
     return subscriptions
 
@@ -888,35 +893,32 @@ def _newest_first(rows: list) -> list:
     return sorted(rows, key=lambda data: _to_datetime(data.get("expirationDate")), reverse=True)
 
 
-def _churn_in_window(db, cutoff: datetime, now: datetime,
-                     churned_docs: list, other_docs: list, current_docs: list) -> dict:
-    """Who churned between `cutoff` and `now`, and the paying base they left.
+def _churn_in_window(db, cutoff: datetime, now: datetime, subscriptions: dict,
+                     held_out: set, churned_docs: list, known_docs: dict) -> dict:
+    """Who churned between `cutoff` and `now`, and the paying base they left,
+    from _paid_subscriptions.
 
-    `churned_docs` are the status scans' expired and cancelled user docs,
-    `other_docs` the rest of what the scans returned, `current_docs` the ones
-    with access now. Returns:
+    `churned_docs` are the status scans' expired and cancelled user docs, and
+    `known_docs` other user doc data already read, by uid. Returns:
     - "churned": user doc data with "_uid" and "_trial", for the paid
       subscriptions that ended and then the trials that did, newest first;
     - "paidChurned": how many paid subscriptions ended, with a doc or not;
     - "paying": paying customers now, and "newPaying": how many of them
       started paying inside the window.
 
-    The ledger decides who paid (_paid_subscriptions). The user doc can't: the
-    native app writes "active" for trials and grants, most paying accounts'
-    docs carry none of the webhook's fields, and the Cloud Function's
-    "canceled" docs often have no expirationDate (2026-10-04).
+    The ledger decides who paid. The user doc can't: the native app writes
+    "active" for trials and grants, most paying accounts' docs carry none of
+    the webhook's fields, and the Cloud Function's "canceled" docs often have
+    no expirationDate (2026-10-04). Without the ledger, see
+    _churn_in_window_from_docs.
     """
-    held_out = _excluded_uids()
-    subscriptions = _paid_subscriptions(db, cutoff - PAID_PERIOD_LOOKBACK, now)
-    if subscriptions is None:
-        return _churn_in_window_from_docs(cutoff, now, churned_docs, current_docs, held_out)
-
     paying, ended = _paid_base(subscriptions, cutoff, now, held_out)
 
     # The scans hold most churners' docs. The rest, mostly the Cloud Function's
     # "canceled" spelling that the scans skip (subscription_status.py), are
     # read by id. A deleted account still counts; it has no row.
-    docs = {doc.id: doc.to_dict() or {} for doc in churned_docs + other_docs}
+    docs = {doc.id: doc.to_dict() or {} for doc in churned_docs}
+    docs.update(known_docs)
     docs.update(_user_docs(db, [uid for uid in ended if uid not in docs]))
     paid_rows = [
         {**docs[uid], "_uid": uid, "_trial": False, "expirationDate": at}
@@ -943,6 +945,47 @@ def _churn_in_window(db, cutoff: datetime, now: datetime,
         "paidChurned": len(ended),
         "paying": len(paying),
         "newPaying": sum(1 for sub in paying.values() if sub["started"] >= cutoff),
+    }
+
+
+def _ledger_customers(db, subscriptions: dict, now: datetime, held_out: set) -> dict:
+    """{uid: (user doc data, state)} for the accounts the Customers page
+    scores: those paying now and those in a production trial, from
+    _paid_subscriptions. state is {"trial", "trialEndsAt", "cancelled"}.
+
+    The status scans can't say who those are (see _churn_in_window). On
+    2026-10-05, 55 of the 97 accounts they gave access to had never paid and
+    weren't trialling, and they missed the 3 paying accounts whose docs carry
+    the Cloud Function's "canceled" spelling. The doc's status can't say who
+    cancelled either: the native app writes "active" over it, and 9 of the 17
+    paying accounts set not to renew read "active".
+
+    An account with no user doc has no row, as in the churned list.
+    """
+    paying, _ = _paid_base(subscriptions, now, now, held_out)
+    trials = {
+        uid: sub for uid, sub in subscriptions.items()
+        if uid not in paying and uid not in held_out
+        and sub["trialUntil"] is not None and sub["trialUntil"] > now
+    }
+    docs = _user_docs(db, list(paying) + list(trials))
+    return {
+        uid: (docs[uid], {
+            "trial": uid in trials,
+            "trialEndsAt": sub["trialUntil"] if uid in trials else None,
+            "cancelled": sub["cancelled"],
+        })
+        for uid, sub in {**paying, **trials}.items() if uid in docs
+    }
+
+
+def _doc_customer_state(data: dict) -> dict:
+    """_ledger_customers' state, from the user doc, for when the ledger can't
+    be read."""
+    return {
+        "trial": _is_trial_subscription(data),
+        "trialEndsAt": _to_datetime(data.get("trialEndDate")),
+        "cancelled": str(data.get("subscriptionStatus") or "").strip().lower() in CANCELLED_STATUSES,
     }
 
 
@@ -1037,6 +1080,13 @@ def _fetch_usage_monthly(db, uids: list, now: datetime) -> dict:
     return usage
 
 
+def _health_status(score: float) -> str:
+    """The health score's tier. Deliberately not "at risk": on the dashboard
+    that means the at-risk list's rule (_compute_churn_intelligence), which
+    the At Risk card counts too."""
+    return "healthy" if score >= 60 else "fair" if score >= 30 else "poor"
+
+
 def _compute_health_score(user_data: dict, now: datetime, usage_monthly: dict = None) -> dict:
     """Compute health score from 5 weighted factors.
 
@@ -1082,11 +1132,9 @@ def _compute_health_score(user_data: dict, now: datetime, usage_monthly: dict = 
     score = (recency * 0.35 + tenure * 0.10 + frequency * 0.25 +
              feature_depth * 0.20 + email_engagement * 0.10)
 
-    status = "healthy" if score >= 60 else "atRisk" if score >= 30 else "churning"
-
     return {
         "healthScore": round(score),
-        "healthStatus": status,
+        "healthStatus": _health_status(score),
         "factors": {
             "recency": round(recency),
             "frequency": round(frequency),
@@ -1129,9 +1177,7 @@ def _health_with_email_history(health: dict, email_history: list[dict]) -> dict:
     )
     return {
         "healthScore": score,
-        "healthStatus": (
-            "healthy" if score >= 60 else "atRisk" if score >= 30 else "churning"
-        ),
+        "healthStatus": _health_status(score),
         "factors": factors,
     }
 
@@ -1859,42 +1905,50 @@ def _compute_churn_intelligence(days: int) -> dict:
     fourteen_days_ago = now - timedelta(days=14)
 
     users_ref = db.collection("users")
+    held_out = _excluded_uids()
+    subscriptions = _paid_subscriptions(db, cutoff - PAID_PERIOD_LOOKBACK, now)
 
-    # Active subscribers + trial users
-    active_docs = list(users_ref.where("subscriptionStatus", "==", "active").limit(5000).stream())
-    trial_docs = list(users_ref.where("subscriptionStatus", "==", "trial").limit(5000).stream())
-
-    # Churned users in period
+    # Churned users in period, and without the ledger, everyone with access.
     # cerebral's spellings only, deliberately: see subscription_status.py
-    expired_docs = list(users_ref.where("subscriptionStatus", "==", "expired").limit(5000).stream())
-    cancelled_docs = list(users_ref.where("subscriptionStatus", "==", "cancelled").limit(5000).stream())
-
-    for label, docs in [("active", active_docs), ("trial", trial_docs),
-                         ("expired", expired_docs), ("cancelled", cancelled_docs)]:
+    statuses = ("expired", "cancelled") if subscriptions is not None else ("active", "trial", "expired", "cancelled")
+    scans = {
+        status: list(users_ref.where("subscriptionStatus", "==", status).limit(5000).stream())
+        for status in statuses
+    }
+    for label, docs in scans.items():
         if len(docs) == 5000:
             logging.warning(f"[ANALYTICS_API] churn_intelligence: '{label}' query returned exactly 5000 docs — results may be truncated")
-
-    unexpired_cancelled_docs = [
-        doc for doc in cancelled_docs
-        if _has_current_subscription_access(doc.to_dict(), now)
-    ]
-    current_customer_docs = active_docs + trial_docs + unexpired_cancelled_docs
+    churned_docs = scans["expired"] + scans["cancelled"]
 
     # Paid subscriptions that ended, then trials that expired. Sandbox builds
-    # and promotional grants never paid, so they're neither.
-    churn = _churn_in_window(
-        db, cutoff, now,
-        churned_docs=expired_docs + cancelled_docs,
-        other_docs=active_docs + trial_docs,
-        current_docs=active_docs + unexpired_cancelled_docs,
-    )
+    # and promotional grants never paid, so they're neither. The at-risk and
+    # engaged lists are the accounts paying or trialling now.
+    if subscriptions is not None:
+        customers = _ledger_customers(db, subscriptions, now, held_out)
+        churn = _churn_in_window(
+            db, cutoff, now, subscriptions, held_out, churned_docs,
+            known_docs={uid: data for uid, (data, _) in customers.items()},
+        )
+    else:
+        unexpired_cancelled_docs = [
+            doc for doc in scans["cancelled"]
+            if _has_current_subscription_access(doc.to_dict(), now)
+        ]
+        customers = {}
+        for doc in scans["active"] + scans["trial"] + unexpired_cancelled_docs:
+            if doc.id not in held_out:
+                data = doc.to_dict() or {}
+                customers[doc.id] = (data, _doc_customer_state(data))
+        churn = _churn_in_window_from_docs(
+            cutoff, now, churned_docs, scans["active"] + unexpired_cancelled_docs, held_out,
+        )
     churned_in_period = churn["churned"]
 
     churn_rate = _paid_churn_rate(churn["paidChurned"], churn["paying"], churn["newPaying"])
 
     # One batched usage read and one batched Firebase Auth lookup for everyone
     # scored or classified below
-    scored_uids = [d.id for d in current_customer_docs]
+    scored_uids = list(customers)
     scored_uids += [d["_uid"] for d in churned_in_period]
     usage_by_uid = {}
     try:
@@ -1907,23 +1961,22 @@ def _compute_churn_intelligence(days: int) -> dict:
         for row in churned_in_period
     ]
 
-    # Single pass: classify active + trial users as at-risk or engaged
+    # Single pass: classify paying and trial customers as at-risk or engaged
     at_risk_users = []
     trial_at_risk_count = 0
     engaged_candidates = []
-    for doc in current_customer_docs:
-        data = {**doc.to_dict(), "lastSeenAt": last_seen_by_uid.get(doc.id)}
-        last_active = _effective_last_active(data, usage_by_uid.get(doc.id))
-        health = _compute_health_score(data, now, usage_by_uid.get(doc.id))
+    for uid, (doc_data, state) in customers.items():
+        data = {**doc_data, "lastSeenAt": last_seen_by_uid.get(uid)}
+        last_active = _effective_last_active(data, usage_by_uid.get(uid))
+        health = _compute_health_score(data, now, usage_by_uid.get(uid))
         tenure_date = _get_tenure_date(data)
         sub_age = max(0, (now - tenure_date).days) if tenure_date else None
         platform = data.get("platform", "unknown") or "unknown"
-        sub_status = data.get("subscriptionStatus", "active")
-        is_trial = _is_trial_subscription(data)
-        is_scheduled_cancellation = sub_status in CANCELLED_STATUSES
+        is_trial = state["trial"]
+        is_scheduled_cancellation = state["cancelled"]
 
         # Trial-specific: days until trial ends
-        trial_end = _to_datetime(data.get("trialEndDate"))
+        trial_end = state["trialEndsAt"]
         trial_ends_in = (trial_end - now).days if trial_end else None
 
         # Trial users within 3 days of expiration are at-risk regardless of activity
@@ -1937,7 +1990,7 @@ def _compute_churn_intelligence(days: int) -> dict:
         ):
             # At-risk: inactive 7+ days OR trial expiring soon
             at_risk_users.append({
-                "uid": doc.id,
+                "uid": uid,
                 "email": data.get("email", ""),
                 "lastActive": _safe_isoformat(last_active),
                 "daysSinceActive": (now - last_active).days if last_active else None,
@@ -1955,9 +2008,9 @@ def _compute_churn_intelligence(days: int) -> dict:
                 trial_at_risk_count += 1
         elif not is_trial and health["healthScore"] >= 40 and last_active and last_active >= fourteen_days_ago:
             # Engaged: active paying subscribers within 14 days with decent health
-            usage = usage_by_uid.get(doc.id, {})
+            usage = usage_by_uid.get(uid, {})
             engaged_candidates.append({
-                "uid": doc.id,
+                "uid": uid,
                 "email": data.get("email", ""),
                 "lastActive": _safe_isoformat(last_active),
                 "daysSinceActive": (now - last_active).days,
@@ -2134,7 +2187,7 @@ def _compute_churn_intelligence(days: int) -> dict:
 @analytics_api_bp.route("/customer-health", methods=["GET"])
 @require_analytics_auth
 @safe_analytics({
-    "distribution": {"healthy": 0, "atRisk": 0, "churning": 0},
+    "distribution": {"healthy": 0, "fair": 0, "poor": 0},
     "customers": [], "averageHealthScore": 0,
 })
 def customer_health():
@@ -2147,16 +2200,70 @@ def _compute_customer_health() -> dict:
     from firebase_setup import db
 
     now = datetime.now(timezone.utc)
-    users_ref = db.collection("users")
+    held_out = _excluded_uids()
+    # The accounts paying or trialling now, as churn intelligence scores them
+    subscriptions = _paid_subscriptions(db, now - PAID_PERIOD_LOOKBACK, now)
+    if subscriptions is not None:
+        current = [
+            (uid, data) for uid, (data, _) in
+            _ledger_customers(db, subscriptions, now, held_out).items()
+        ]
+    else:
+        current = _docs_with_access(db, now, held_out)
 
-    # Paginate through customers who may still have current access. A
-    # cancellation only disables renewal; entitlement continues to period end.
+    uids = [uid for uid, _ in current]
+    try:
+        usage_by_uid = _fetch_usage_monthly(db, uids, now)
+    except Exception as e:
+        logging.warning(f"[ANALYTICS_API] usage_monthly batch fetch failed: {e}")
+        usage_by_uid = {}
+    last_seen_by_uid = _auth_last_seen(uids)
+
+    customers = []
+    distribution = {"healthy": 0, "fair": 0, "poor": 0}
+    total_score = 0
+    for uid, data in current:
+        data = {**data, "lastSeenAt": last_seen_by_uid.get(uid)}
+        health = _compute_health_score(data, now, usage_by_uid.get(uid))
+        created = _get_tenure_date(data)
+        subscribed_days = max(0, (now - created).days) if created else 0
+
+        effective_last_active = _effective_last_active(
+            data, usage_by_uid.get(uid)
+        )
+        customer = {
+            "uid": uid,
+            "email": data.get("email", ""),
+            "name": _get_display_name(data),
+            "healthScore": health["healthScore"],
+            "healthStatus": health["healthStatus"],
+            "factors": health["factors"],
+            "subscriptionStatus": data.get("subscriptionStatus", ""),
+            "platform": data.get("platform", "unknown") or "unknown",
+            "lastActiveAt": _safe_isoformat(effective_last_active),
+            "subscribedDays": subscribed_days,
+        }
+        customers.append(customer)
+        distribution[health["healthStatus"]] = distribution.get(health["healthStatus"], 0) + 1
+        total_score += health["healthScore"]
+
+    avg_score = round(total_score / len(customers), 1) if customers else 0
+
+    return {
+        "distribution": distribution,
+        "customers": customers,
+        "averageHealthScore": avg_score,
+    }
+
+
+def _docs_with_access(db, now: datetime, held_out: set) -> list:
+    """[(uid, user doc data)] for the user docs whose status gives access now,
+    for when the ledger can't be read. A cancellation only disables renewal;
+    entitlement continues to period end."""
+    users_ref = db.collection("users")
     batch_size = 500
     last_doc = None
-    customers = []
-    distribution = {"healthy": 0, "atRisk": 0, "churning": 0}
-    total_score = 0
-
+    current = []
     while True:
         # cerebral's spellings only, deliberately: see subscription_status.py
         query = (users_ref
@@ -2169,56 +2276,15 @@ def _compute_customer_health() -> dict:
         docs = list(query.stream())
         if not docs:
             break
-
-        current = []
         for doc in docs:
-            data = doc.to_dict()
-            if _has_current_subscription_access(data, now):
+            data = doc.to_dict() or {}
+            if doc.id not in held_out and _has_current_subscription_access(data, now):
                 current.append((doc.id, data))
-        uids = [uid for uid, _ in current]
-        try:
-            usage_by_uid = _fetch_usage_monthly(db, uids, now)
-        except Exception as e:
-            logging.warning(f"[ANALYTICS_API] usage_monthly batch fetch failed: {e}")
-            usage_by_uid = {}
-        last_seen_by_uid = _auth_last_seen(uids)
-
-        for uid, data in current:
-            data = {**data, "lastSeenAt": last_seen_by_uid.get(uid)}
-            health = _compute_health_score(data, now, usage_by_uid.get(uid))
-            created = _get_tenure_date(data)
-            subscribed_days = max(0, (now - created).days) if created else 0
-
-            effective_last_active = _effective_last_active(
-                data, usage_by_uid.get(uid)
-            )
-            customer = {
-                "uid": uid,
-                "email": data.get("email", ""),
-                "name": _get_display_name(data),
-                "healthScore": health["healthScore"],
-                "healthStatus": health["healthStatus"],
-                "factors": health["factors"],
-                "subscriptionStatus": data.get("subscriptionStatus", ""),
-                "platform": data.get("platform", "unknown") or "unknown",
-                "lastActiveAt": _safe_isoformat(effective_last_active),
-                "subscribedDays": subscribed_days,
-            }
-            customers.append(customer)
-            distribution[health["healthStatus"]] = distribution.get(health["healthStatus"], 0) + 1
-            total_score += health["healthScore"]
 
         last_doc = docs[-1]
         if len(docs) < batch_size:
             break
-
-    avg_score = round(total_score / len(customers), 1) if customers else 0
-
-    return {
-        "distribution": distribution,
-        "customers": customers,
-        "averageHealthScore": avg_score,
-    }
+    return current
 
 
 # ============================================================

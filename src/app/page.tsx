@@ -16,6 +16,7 @@ import { useAnalytics } from '@/hooks/useAnalytics';
 import { AlertTriangle, Clock, Bug, CreditCard, Search, DollarSign, Wallet, Users2, UserPlus, Percent, TrendingDown, ArrowRight } from 'lucide-react';
 import { RevenueSummary, ChurnIntelligence, PulseMetrics, SubscriberFunnel, SentryStats } from '@/types/mixpanel';
 import { getDaysFromRange } from '@/lib/utils';
+import { AT_RISK_RULE } from '@/lib/customer-health';
 import { chart } from '@/lib/chartTheme';
 
 const fmtPct = (n: number) => `${(n * 100).toFixed(1)}%`;
@@ -112,7 +113,7 @@ export default function PulsePage() {
       list.push({ id: 'searchfail', level: 'warning', icon: Search, label: `Search failure rate ${fmtPct(pulse.searchFailRateToday)}`, detail: 'Above 2× the 7-day rate', href: '/health' });
     }
     if (churn && churn.atRiskCount > 0) {
-      list.push({ id: 'atrisk', level: 'warning', icon: AlertTriangle, label: `${churn.atRiskCount} at-risk customer${churn.atRiskCount > 1 ? 's' : ''}`, detail: 'Inactive 7+ days or trial ending soon', href: '/customers' });
+      list.push({ id: 'atrisk', level: 'warning', icon: AlertTriangle, label: `${churn.atRiskCount} at-risk customer${churn.atRiskCount > 1 ? 's' : ''}`, detail: AT_RISK_RULE, href: '/customers' });
     }
     return list;
   }, [churn, pulse, sentryDerived]);
