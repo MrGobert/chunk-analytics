@@ -551,11 +551,8 @@ class RevenueSummaryTests(unittest.TestCase):
                 "createdAt": now - timedelta(days=6),
             }),
         ]
-        fake_db = FakeDB({
-            "users": users,
-            "subscription_ledger": [],
-            "analytics_cache": [],
-        })
+        # The ledger can't be read, so the user docs' webhook fields decide
+        fake_db = ChurnDB({"users": users, "analytics_cache": []}, ledger_fails=True)
 
         with patch.dict(sys.modules, {"firebase_setup": SimpleNamespace(db=fake_db)}), \
              patch.object(analytics_api, "_get_redis", return_value=None):
@@ -568,7 +565,8 @@ class RevenueSummaryTests(unittest.TestCase):
 
 
 class RevenueGuardTests(unittest.TestCase):
-    """Regressions for the September 2026 $250k MRR incident.
+    """The doc fallback, for when the ledger can't be read, and its regressions
+    from the September 2026 $250k MRR incident.
 
     Two defects stacked: cerebral stored RevenueCat's local-currency price in
     subscriptionPrice, and the native app wrote subscriptionStatus "active" for
@@ -593,12 +591,8 @@ class RevenueGuardTests(unittest.TestCase):
         data.update(overrides)
         return data
 
-    def _summarize(self, users, events=()):
-        fake_db = FakeDB({
-            "users": users,
-            "subscription_ledger": list(events),
-            "analytics_cache": [],
-        })
+    def _summarize(self, users):
+        fake_db = ChurnDB({"users": users, "analytics_cache": []}, ledger_fails=True)
         with patch.dict(sys.modules, {"firebase_setup": SimpleNamespace(db=fake_db)}), \
              patch.object(analytics_api, "_get_redis", return_value=None):
             return analytics_api._compute_revenue_summary(30)
@@ -687,24 +681,23 @@ class RevenueGuardTests(unittest.TestCase):
         self.assertEqual(result["mrr"], 9.99)
         self.assertEqual(result["mrrSource"], "firestore")
 
-    def test_todays_revenue_counts_a_foreign_sale_at_its_usd_price(self):
-        """The ledger's price is RevenueCat's USD figure; priceLocal is what the buyer paid."""
-        now = datetime.now(timezone.utc)
-        sale = FakeDoc("sale", {
-            "appUserId": "eur-buyer",
-            "type": "INITIAL_PURCHASE",
-            "periodType": "NORMAL",
-            "store": "APP_STORE",
-            "environment": "PRODUCTION",
-            "occurredAt": now,
-            "updatedAt": now,
-            "price": 10.49,
-            "priceLocal": 9.99,
-            "currency": "EUR",
-        })
-        result = self._summarize([], events=[sale])
+    def test_the_rate_is_churn_intelligences_without_the_ledger(self):
+        users = [
+            FakeDoc("paying", self._paid()),
+            FakeDoc("new", self._paid(initialPurchaseAt=self.NOW - timedelta(days=3))),
+            FakeDoc("left", self._paid(subscriptionStatus="expired", renewalDate=None,
+                                       expirationDate=self.NOW - timedelta(days=3))),
+        ]
+        result = self._summarize(users)
+        churn = ChurnDB({"users": users, "emailTracking": [], "analytics_cache": []}, ledger_fails=True)
+        with patch.dict(sys.modules, {"firebase_setup": SimpleNamespace(db=churn)}), \
+             patch.object(analytics_api, "_get_redis", return_value=None), \
+             patch.object(analytics_api, "_auth_last_seen", return_value={}):
+            intelligence = analytics_api._compute_churn_intelligence(30)
 
-        self.assertEqual(result["todayRevenue"], 10.49)
+        # 1 / (2 - 1 + 1)
+        self.assertEqual(result["churnRate"], 50.0)
+        self.assertEqual(result["churnRate"], intelligence["churnRate"])
 
     def test_usd_price_field_is_trusted_whatever_the_buyer_was_charged_in(self):
         """After the webhook fix a VND subscriber carries a USD price too."""
@@ -760,23 +753,6 @@ class RevenueGuardTests(unittest.TestCase):
         self.assertEqual(result["trialUsers"], 1)
         self.assertEqual(result["excludedFreeAccess"], 0)
 
-    def test_offer_code_redemption_is_excluded_via_the_event_ledger(self):
-        """An App Store offer code arrives as APP_STORE with a promotional period."""
-        result = self._summarize(
-            [FakeDoc("offer", self._paid()), FakeDoc("paying", self._paid())],
-            [
-                FakeDoc("e1", {"appUserId": "offer", "store": "APP_STORE",
-                               "periodType": "PROMOTIONAL", "environment": "PRODUCTION",
-                               "occurredAt": self.NOW - timedelta(days=4)}),
-                FakeDoc("e2", {"appUserId": "paying", "store": "APP_STORE",
-                               "periodType": "NORMAL", "environment": "PRODUCTION",
-                               "occurredAt": self.NOW - timedelta(days=4)}),
-            ],
-        )
-
-        self.assertEqual(result["totalSubscribers"], 1)
-        self.assertEqual(result["excludedNonPaying"], 1)
-
     def test_held_out_uids_never_reach_any_revenue_figure(self):
         with patch.dict(os.environ, {"ANALYTICS_EXCLUDED_UIDS": "tester-1, tester-2"}):
             result = self._summarize([
@@ -788,30 +764,14 @@ class RevenueGuardTests(unittest.TestCase):
         self.assertEqual(result["totalSubscribers"], 1)
         self.assertEqual(result["mrr"], 9.99)
 
-    def test_promotional_and_sandbox_entitlements_are_excluded(self):
-        users = [
+    def test_a_promotional_grant_on_the_doc_is_excluded(self):
+        result = self._summarize([
             FakeDoc("comped", self._paid(subscriptionStore="PROMOTIONAL")),
-            FakeDoc("tester", self._paid()),
             FakeDoc("real", self._paid()),
-        ]
-        events = [
-            FakeDoc("e1", {"appUserId": "tester", "environment": "SANDBOX", "occurredAt": self.NOW - timedelta(days=3)}),
-            FakeDoc("e2", {"appUserId": "real", "environment": "PRODUCTION", "occurredAt": self.NOW - timedelta(days=3)}),
-        ]
-        result = self._summarize(users, events)
+        ])
 
         self.assertEqual(result["totalSubscribers"], 1)
-        self.assertEqual(result["excludedNonPaying"], 2)
-        self.assertEqual(result["mrr"], 9.99)
-
-    def test_a_production_event_keeps_a_user_who_also_tested_in_sandbox(self):
-        events = [
-            FakeDoc("e1", {"appUserId": "dev", "environment": "SANDBOX", "occurredAt": self.NOW - timedelta(days=9)}),
-            FakeDoc("e2", {"appUserId": "dev", "environment": "PRODUCTION", "occurredAt": self.NOW - timedelta(days=3)}),
-        ]
-        result = self._summarize([FakeDoc("dev", self._paid())], events)
-
-        self.assertEqual(result["totalSubscribers"], 1)
+        self.assertEqual(result["excludedNonPaying"], 1)
         self.assertEqual(result["mrr"], 9.99)
 
     def test_live_trial_flipped_to_active_counts_as_a_trial(self):
@@ -1269,6 +1229,10 @@ class PaidSubscriptionTests(unittest.TestCase):
         db = FakeDB({"subscription_ledger": list(events)})
         return analytics_api._paid_subscriptions(db, self._ago(490), self.NOW)
 
+    @staticmethod
+    def _run(sub):
+        return {key: sub[key] for key in ("started", "ended", "trialled")}
+
     def test_it_runs_from_the_first_payment_to_the_expiration_after_the_last(self):
         subscriptions = self._subscriptions(
             ledger_event("l1", "left", "INITIAL_PURCHASE", self._ago(70), self._ago(40)),
@@ -1278,9 +1242,9 @@ class PaidSubscriptionTests(unittest.TestCase):
             ledger_event("s1", "stays", "RENEWAL", self._ago(5), self._in(25)),
         )
 
-        self.assertEqual(subscriptions["left"],
+        self.assertEqual(self._run(subscriptions["left"]),
                          {"started": self._ago(70), "ended": self._ago(10), "trialled": False})
-        self.assertEqual(subscriptions["stays"],
+        self.assertEqual(self._run(subscriptions["stays"]),
                          {"started": self._ago(5), "ended": None, "trialled": False})
 
     def test_a_refund_ends_it_early_and_a_billing_grace_period_late(self):
@@ -1306,7 +1270,7 @@ class PaidSubscriptionTests(unittest.TestCase):
             ledger_event("t2", "returned", "EXPIRATION", self._ago(33), self._ago(33), periodType="TRIAL"),
         )
 
-        self.assertEqual(subscriptions["returned"],
+        self.assertEqual(self._run(subscriptions["returned"]),
                          {"started": self._ago(200), "ended": self._ago(170), "trialled": True})
 
     def test_with_no_expiration_it_ends_with_its_paid_period_once_the_grace_runs_out(self):
@@ -1326,8 +1290,38 @@ class PaidSubscriptionTests(unittest.TestCase):
             ledger_event("a3", "back", "INITIAL_PURCHASE", self._ago(20), self._in(10)),
         )
 
-        self.assertEqual(subscriptions["back"],
+        self.assertEqual(self._run(subscriptions["back"]),
                          {"started": self._ago(20), "ended": None, "trialled": False})
+
+    def test_it_keeps_the_latest_payment(self):
+        subscriptions = self._subscriptions(
+            ledger_event("m1", "monthly", "INITIAL_PURCHASE", self._ago(40), self._ago(10), price=9.99),
+            ledger_event("m2", "monthly", "RENEWAL", self._ago(10), self._in(20), price=10.49),
+            ledger_event("m3", "monthly", "CANCELLATION", self._ago(2), self._in(20)),
+        )
+
+        self.assertEqual(subscriptions["monthly"]["payment"]["price"], 10.49)
+
+    def test_a_trial_runs_until_it_converts_or_expires(self):
+        def trial(uid, started, ends, **fields):
+            return ledger_event(f"t-{uid}", uid, "INITIAL_PURCHASE", started, ends,
+                                periodType="TRIAL", price=0, **fields)
+
+        subscriptions = self._subscriptions(
+            trial("running", self._ago(1), self._in(2)),
+            # Set not to renew: it runs to its end all the same
+            trial("cancelled", self._ago(1), self._in(2)),
+            ledger_event("c2", "cancelled", "CANCELLATION", self._ago(0), self._in(2), periodType="TRIAL"),
+            trial("converted", self._ago(4), self._ago(1)),
+            ledger_event("v2", "converted", "RENEWAL", self._ago(1), self._in(364)),
+            trial("expired", self._ago(9), self._ago(2)),
+            ledger_event("x2", "expired", "EXPIRATION", self._ago(2), self._ago(2), periodType="TRIAL"),
+            trial("sandbox", self._ago(1), self._in(2), environment="SANDBOX"),
+        )
+
+        running = {uid for uid, sub in subscriptions.items()
+                   if sub["trialUntil"] and sub["trialUntil"] > self.NOW}
+        self.assertEqual(running, {"running", "cancelled"})
 
     def test_only_a_production_sale_someone_paid_for_is_a_payment(self):
         def sale(uid, **fields):
@@ -1522,6 +1516,21 @@ class ChurnIntelligenceTests(ActivityStubs, unittest.TestCase):
         self.assertEqual(result["churnRate"], 50.0)
         self.assertEqual([row["uid"] for row in result["churnedUsers"]], ["confirmed-left", "trial-left"])
 
+    def test_the_overview_counts_churn_the_same_way(self):
+        for days in (7, 30, 90):
+            with self.subTest(days=days):
+                db = ChurnDB({"users": self._users(), "subscription_ledger": self._ledger(),
+                              "emailTracking": [], "analytics_cache": []})
+                with patch.dict(sys.modules, {"firebase_setup": SimpleNamespace(db=db)}), \
+                     patch.object(analytics_api, "_get_redis", return_value=None), \
+                     patch.dict(os.environ, {"ANALYTICS_EXCLUDED_UIDS": ""}):
+                    churn = analytics_api._compute_churn_intelligence(days)
+                    summary = analytics_api._compute_revenue_summary(days)
+
+                self.assertEqual(summary["churnRate"], churn["churnRate"])
+        # 90 days: three paid subscriptions ended, two accounts started paying
+        self.assertEqual((summary["churned"], summary["newSubscribers"]), (3, 2))
+
     def test_the_at_risk_list_goes_by_when_auth_last_saw_the_account(self):
         # None of them ever chatted or captured: by usage_monthly alone, all
         # three were inactive.
@@ -1551,6 +1560,143 @@ class ChurnIntelligenceTests(ActivityStubs, unittest.TestCase):
 
         self.assertEqual(result["churnRate"], 60.0)
         self.assertEqual(result["atRiskCount"], 3)
+
+
+class LoggedDB(ChurnDB):
+    """Logs every collection read."""
+
+    def __init__(self, collections, ledger_fails=False):
+        super().__init__(collections, ledger_fails)
+        self.collections_read = []
+
+    def collection(self, name):
+        self.collections_read.append(name)
+        return super().collection(name)
+
+
+class RevenueLedgerTests(unittest.TestCase):
+    """The revenue summary from the ledger: the accounts paying now, priced and
+    split by their latest payment, and churn as churn intelligence counts it.
+    The user doc can't say who paid (ChurnIntelligenceTests)."""
+
+    NOW = datetime.now(timezone.utc)
+
+    def _ago(self, days):
+        return self.NOW - timedelta(days=days)
+
+    def _in(self, days):
+        return self.NOW + timedelta(days=days)
+
+    def _summary(self, events, rc=None, held_out=""):
+        db = LoggedDB({"subscription_ledger": list(events), "analytics_cache": []})
+        with patch.dict(sys.modules, {"firebase_setup": SimpleNamespace(db=db)}), \
+             patch.object(analytics_api, "_get_redis", return_value=None), \
+             patch.object(analytics_api.revenuecat_client, "get_overview_metrics", return_value=rc), \
+             patch.dict(os.environ, {"ANALYTICS_EXCLUDED_UIDS": held_out}):
+            result = analytics_api._compute_revenue_summary(30)
+        return result, db
+
+    def _payers(self):
+        ago, later = self._ago, self._in
+        return [
+            ledger_event("m1", "monthly", "RENEWAL", ago(10), later(20), price=9.99),
+            ledger_event("y1", "yearly", "INITIAL_PURCHASE", ago(100), later(265), price=69.99,
+                         productId="annual_69_3day_free"),
+            ledger_event("w1", "weekly", "RENEWAL", ago(2), later(5), price=4.99, store="RC_BILLING"),
+            # USD whatever the buyer paid in: that's priceLocal
+            ledger_event("e1", "euro", "RENEWAL", ago(5), later(25), price=10.49, priceLocal=9.99,
+                         currency="EUR"),
+            ledger_event("u1", "unpriced", "RENEWAL", ago(3), later(27), price=None),
+        ]
+
+    def test_paying_accounts_are_priced_by_their_latest_payment(self):
+        result, _ = self._summary(self._payers())
+
+        self.assertEqual(result["mrrSource"], "ledger")
+        self.assertEqual(result["totalSubscribers"], 5)
+        self.assertEqual((result["pricedSubscribers"], result["unpricedSubscribers"]), (4, 1))
+        # 9.99 + 69.99 / 12 + 4.99 * 4 + 10.49: RevenueCat counts a week as a
+        # quarter of a month
+        self.assertEqual(result["mrr"], 46.27)
+        self.assertEqual(result["attributedMrr"], 46.27)
+        self.assertEqual(result["byProduct"], {"monthly": 20.48, "annual": 5.83, "weekly": 19.96})
+        self.assertEqual(result["subscribersByProduct"], {"monthly": 2, "annual": 1, "weekly": 1})
+        self.assertEqual(result["byPlatform"], {"App Store": 26.31, "Web": 19.96})
+
+    def test_without_its_dates_a_payments_plan_comes_from_its_product(self):
+        def payment(product):
+            return {"productId": product, "occurredAt": self.NOW}
+
+        self.assertEqual(analytics_api._payment_plan(payment("chunk_pro_99_web_yr")), ("annual", 12))
+        self.assertEqual(analytics_api._payment_plan(payment("weekly_4_99")), ("weekly", 1 / 4))
+        self.assertEqual(analytics_api._payment_plan(payment("chunk_15_1mo")), ("monthly", 1))
+
+    def test_nothing_unpaid_counts(self):
+        ago, later = self._ago, self._in
+
+        def sale(uid, **fields):
+            return ledger_event(f"s-{uid}", uid, "INITIAL_PURCHASE", ago(5), later(25), **fields)
+
+        result, _ = self._summary([
+            sale("sandbox", environment="SANDBOX"),
+            sale("promotional", store="PROMOTIONAL", price=0),
+            # An App Store offer code: a promotional period on APP_STORE
+            sale("offer-code", periodType="PROMOTIONAL", price=0),
+            sale("family", isFamilyShare=True, price=0),
+            sale("free", price=0),
+            sale("trial", periodType="TRIAL", price=0),
+            # A tester who also bought in production pays
+            sale("tester", environment="SANDBOX"),
+            ledger_event("t2", "tester", "RENEWAL", ago(2), later(28)),
+        ])
+
+        self.assertEqual(result["totalSubscribers"], 1)
+        self.assertEqual(result["mrr"], 4.99)
+        self.assertEqual(result["trialUsers"], 1)
+
+    def test_revenuecat_is_the_headline_and_the_ledger_the_attribution(self):
+        result, _ = self._summary(self._payers(), rc={
+            "mrr": 337.0, "active_subscriptions": 44.0, "active_trials": 2.0})
+
+        self.assertEqual(result["mrrSource"], "revenuecat")
+        self.assertEqual((result["mrr"], result["arr"]), (337.0, 4044.0))
+        self.assertEqual((result["totalSubscribers"], result["trialUsers"]), (44, 2))
+        self.assertEqual((result["attributedMrr"], result["attributedSubscribers"]), (46.27, 5))
+        self.assertEqual(result["mrrTrend"][-1]["mrr"], 337.0)
+
+    def test_held_out_accounts_never_count(self):
+        result, _ = self._summary(self._payers(), held_out="monthly, weekly")
+
+        self.assertEqual(result["totalSubscribers"], 3)
+        self.assertEqual(result["mrr"], 16.32)
+        self.assertEqual(result["excludedNonPaying"], 2)
+
+    def test_reads_the_ledger_and_no_user_docs(self):
+        _, db = self._summary(self._payers())
+
+        self.assertNotIn("users", db.collections_read)
+        self.assertIn("subscription_ledger", db.collections_read)
+
+    def test_todays_revenue_counts_a_foreign_sale_at_its_usd_price(self):
+        """The ledger's price is RevenueCat's USD figure; priceLocal is what the buyer paid."""
+        sale = ledger_event("sale", "eur-buyer", "INITIAL_PURCHASE", self.NOW, self._in(30),
+                            price=10.49, priceLocal=9.99, currency="EUR")
+        result, _ = self._summary([sale])
+
+        self.assertEqual(result["todayRevenue"], 10.49)
+
+    def test_an_unreadable_ledger_falls_back_to_the_webhook_fields(self):
+        db = LoggedDB({"users": [FakeDoc("doc-paid", {
+            "subscriptionStatus": "active", "subscriptionPrice": 9.99, "subscriptionStore": "APP_STORE",
+            "renewalDate": self._in(20), "createdAt": self._ago(100),
+        })], "analytics_cache": []}, ledger_fails=True)
+        with patch.dict(sys.modules, {"firebase_setup": SimpleNamespace(db=db)}), \
+             patch.object(analytics_api, "_get_redis", return_value=None), \
+             patch.object(analytics_api.revenuecat_client, "get_overview_metrics", return_value=None):
+            result = analytics_api._compute_revenue_summary(30)
+
+        self.assertEqual(result["mrrSource"], "firestore")
+        self.assertEqual((result["totalSubscribers"], result["mrr"]), (1, 9.99))
 
 
 class CustomerDetailTests(unittest.TestCase):

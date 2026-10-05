@@ -692,6 +692,7 @@ RC_MRR_METRIC_IDS = ("mrr",)
 RC_SUBSCRIBER_METRIC_IDS = (
     "active_subscriptions", "active_subscribers", "subscriptions_active",
 )
+RC_TRIAL_METRIC_IDS = ("active_trials",)
 
 
 def _first_metric(metrics: dict, candidate_ids: tuple):
@@ -703,7 +704,12 @@ def _first_metric(metrics: dict, candidate_ids: tuple):
 
 def _store_label(user_data: dict) -> str:
     """Billing store for revenue attribution, not the user's last-seen device."""
-    store = str(user_data.get("subscriptionStore") or "").strip().upper()
+    return _store_name(user_data.get("subscriptionStore"))
+
+
+def _store_name(store) -> str:
+    """A RevenueCat store value, as the revenue chart labels it."""
+    store = str(store or "").strip().upper()
     return _STORE_LABELS.get(store, store.replace("_", " ").title() or "Unknown")
 
 
@@ -781,11 +787,13 @@ def _is_payment(event: dict) -> bool:
 def _paid_subscriptions(db, since: datetime, now: datetime):
     """Each account's paid subscription, from the ledger's events since `since`.
 
-    {uid: {"started", "ended", "trialled"}}, or None when the ledger can't be
-    read. "started" is the subscription's first payment, None if the account
-    never paid (a sandbox build, a promotional grant, a trial that didn't
-    convert); "ended" is None while it runs; "trialled" means the account had
-    a production trial.
+    {uid: {"started", "ended", "trialled", "payment", "trialUntil"}}, or None
+    when the ledger can't be read. "started" is the subscription's first
+    payment, None if the account never paid (a sandbox build, a promotional
+    grant, a trial that didn't convert); "ended" is None while it runs;
+    "trialled" means the account had a production trial; "payment" is the
+    latest payment event; "trialUntil" is when a production trial with no
+    payment or EXPIRATION since its start ends.
 
     A subscription ends at the first EXPIRATION after its last payment: early
     for a refund, late by a billing grace period. An EXPIRATION more than
@@ -808,27 +816,57 @@ def _paid_subscriptions(db, since: datetime, now: datetime):
 
     subscriptions = {}
     for uid, timeline in timelines.items():
-        started = ended = paid_through = None
+        started = ended = paid_through = payment = trial_until = None
         trialled = False
         for occurred, event in sorted(timeline, key=lambda item: item[0]):
             if str(event.get("environment") or "PRODUCTION").upper() == "SANDBOX":
                 continue
             if str(event.get("periodType") or "").upper() == "TRIAL":
                 trialled = True
+            if _is_trial_start_event(event):
+                trial_until = _to_datetime(event.get("expirationAt"))
             if _is_payment(event):
                 if started is None or ended is not None:
                     started, ended = occurred, None
                 paid_through = _to_datetime(event.get("expirationAt")) or occurred
-            elif (
-                started is not None and ended is None
-                and str(event.get("type") or "").upper() == "EXPIRATION"
-            ):
-                expired = _to_datetime(event.get("expirationAt")) or occurred
-                ended = expired if expired <= paid_through + PAID_PERIOD_GRACE else paid_through
+                payment, trial_until = event, None
+            elif str(event.get("type") or "").upper() == "EXPIRATION":
+                trial_until = None
+                if started is not None and ended is None:
+                    expired = _to_datetime(event.get("expirationAt")) or occurred
+                    ended = expired if expired <= paid_through + PAID_PERIOD_GRACE else paid_through
         if started is not None and ended is None and paid_through + PAID_PERIOD_GRACE <= now:
             ended = paid_through
-        subscriptions[uid] = {"started": started, "ended": ended, "trialled": trialled}
+        subscriptions[uid] = {
+            "started": started, "ended": ended, "trialled": trialled,
+            "payment": payment, "trialUntil": trial_until,
+        }
     return subscriptions
+
+
+def _paid_base(subscriptions: dict, cutoff: datetime, now: datetime, held_out: set) -> tuple:
+    """({uid: subscription} paying now, {uid: when it ended} for the paid
+    subscriptions that ended between `cutoff` and `now`), from
+    _paid_subscriptions. Held-out accounts are in neither. Churn intelligence
+    and the revenue summary both count from it, so their churn rates agree."""
+    paid = {
+        uid: sub for uid, sub in subscriptions.items()
+        if sub["started"] is not None and uid not in held_out
+    }
+    paying = {uid: sub for uid, sub in paid.items() if sub["ended"] is None}
+    ended = {
+        uid: sub["ended"] for uid, sub in paid.items()
+        if sub["ended"] is not None and cutoff <= sub["ended"] <= now
+    }
+    return paying, ended
+
+
+def _paid_churn_rate(churned: int, paying: int, new_paying: int) -> float:
+    """Paid subscriptions that ended in a window over the customers paying at
+    its start: those paying now, less the ones who started inside it (so a
+    burst of new signups doesn't understate churn), plus the ones who ended."""
+    at_start = paying - new_paying + churned
+    return round((churned / at_start * 100) if at_start > 0 else 0, 1)
 
 
 def _user_docs(db, uids) -> dict:
@@ -873,15 +911,7 @@ def _churn_in_window(db, cutoff: datetime, now: datetime,
     if subscriptions is None:
         return _churn_in_window_from_docs(cutoff, now, churned_docs, current_docs, held_out)
 
-    paid = {
-        uid: sub for uid, sub in subscriptions.items()
-        if sub["started"] is not None and uid not in held_out
-    }
-    ended = {
-        uid: sub["ended"] for uid, sub in paid.items()
-        if sub["ended"] is not None and cutoff <= sub["ended"] <= now
-    }
-    paying = [sub for sub in paid.values() if sub["ended"] is None]
+    paying, ended = _paid_base(subscriptions, cutoff, now, held_out)
 
     # The scans hold most churners' docs. The rest, mostly the Cloud Function's
     # "canceled" spelling that the scans skip (subscription_status.py), are
@@ -912,7 +942,7 @@ def _churn_in_window(db, cutoff: datetime, now: datetime,
         "churned": _newest_first(paid_rows) + _newest_first(trial_rows),
         "paidChurned": len(ended),
         "paying": len(paying),
-        "newPaying": sum(1 for sub in paying if sub["started"] >= cutoff),
+        "newPaying": sum(1 for sub in paying.values() if sub["started"] >= cutoff),
     }
 
 
@@ -1133,17 +1163,110 @@ def revenue_summary():
     return jsonify(result), 200
 
 
-def _compute_revenue_summary(days: int) -> dict:
-    from firebase_setup import db
+# The billing periods one payment can buy: the most days each runs, its plan,
+# and the months it pays for. The months are RevenueCat's own MRR
+# normalization (its MRR chart docs, 2026-10), so the ledger's MRR adds up as
+# RevenueCat's headline does: a week is a quarter of a month, not 12/52 of one.
+BILLING_PERIODS = (
+    (2, "daily", 1 / 30),
+    (5, "3-day", 1 / 10),
+    (10, "weekly", 1 / 4),
+    (21, "2-week", 1 / 2),
+    (45, "monthly", 1),
+    (75, "2-month", 2),
+    (136, "quarterly", 3),
+    (274, "semiannual", 6),
+    (400, "annual", 12),
+)
 
-    now = datetime.now(timezone.utc)
-    cutoff = now - timedelta(days=days)
-    prior_start = cutoff - timedelta(days=days)
 
-    # Query all users with subscription-related statuses
+def _payment_plan(event: dict) -> tuple:
+    """(plan, months) for what one payment bought: by the period it paid for
+    (expirationAt less purchasedAt), else by its product id."""
+    start = _to_datetime(event.get("purchasedAt")) or _event_occurred_at(event)
+    end = _to_datetime(event.get("expirationAt"))
+    if start and end and end > start:
+        days = (end - start).total_seconds() / 86400
+        for longest, plan, months in BILLING_PERIODS:
+            if days <= longest:
+                return plan, months
+    product = str(event.get("productId") or "").lower()
+    if "week" in product:
+        return "weekly", 1 / 4
+    if any(word in product for word in ("annual", "year", "yr")):
+        return "annual", 12
+    return "monthly", 1
+
+
+def _revenue_from_ledger(subscriptions: dict, cutoff: datetime, now: datetime, held_out: set) -> dict:
+    """The revenue summary's own figures from the ledger (_paid_subscriptions):
+    the accounts paying now, priced and split by store and plan by their latest
+    payment, and paid churn as churn intelligence counts it (_paid_base).
+
+    Nothing needs screening out, because nothing unpaid gets in: sandbox
+    builds, promotional grants, family sharing and $0 sales are never payments
+    (_is_payment), and a subscription past its paid period and grace has
+    ended. Only held-out accounts are left out. Reads no user docs.
+    """
+    paying, ended = _paid_base(subscriptions, cutoff, now, held_out)
+    mrr = 0.0
+    priced = unpriced = 0
+    by_platform, by_product, subs_by_product = {}, {}, {}
+    for sub in paying.values():
+        payment = sub["payment"]
+        price = payment.get("price")
+        if not isinstance(price, (int, float)):
+            # RevenueCat sends no price when it doesn't know one. `price` is
+            # USD whatever the buyer paid in (that is priceLocal).
+            unpriced += 1
+            continue
+        plan, months = _payment_plan(payment)
+        monthly = price / months
+        priced += 1
+        mrr += monthly
+        # MRR per billing store, not the device the account last used
+        store = _store_name(payment.get("store"))
+        by_platform[store] = by_platform.get(store, 0) + monthly
+        by_product[plan] = by_product.get(plan, 0) + monthly
+        subs_by_product[plan] = subs_by_product.get(plan, 0) + 1
+    return {
+        "attributedMrr": round(mrr, 2),
+        "subscribers": len(paying),
+        "paying": len(paying),
+        "newSubscribers": sum(1 for sub in paying.values() if sub["started"] >= cutoff),
+        "churned": len(ended),
+        "trialUsers": sum(
+            1 for uid, sub in subscriptions.items()
+            if uid not in held_out and sub["trialUntil"] and sub["trialUntil"] > now
+        ),
+        "byPlatform": {store: round(value, 2) for store, value in by_platform.items()},
+        "byProduct": {plan: round(value, 2) for plan, value in by_product.items()},
+        "subscribersByProduct": subs_by_product,
+        "pricedSubscribers": priced,
+        "unpricedSubscribers": unpriced,
+        # Paying accounts held out by ANALYTICS_EXCLUDED_UIDS; the doc screens'
+        # other exclusions have nothing to exclude here.
+        "excludedNonPaying": sum(
+            1 for uid, sub in subscriptions.items()
+            if uid in held_out and sub["started"] is not None and sub["ended"] is None
+        ),
+        "excludedNoProvenance": 0,
+        "excludedFreeAccess": 0,
+        "excludedLapsed": 0,
+        "excludedNonUsd": 0,
+        "todayEstimate": None,
+    }
+
+
+def _revenue_from_docs(db, cutoff: datetime, now: datetime, held_out: set) -> dict:
+    """_revenue_from_ledger when the ledger can't be read: the user docs whose
+    webhook fields say a subscription was paid for (WEBHOOK_PROVENANCE_FIELDS),
+    as the summary counted until Oct 2026. Most paying accounts' docs carry
+    none of those fields, so it undercounts (see _churn_in_window), and it
+    needs the status scans the ledger path doesn't.
+    """
     users_ref = db.collection("users")
 
-    # Active subscribers
     active_docs = list(users_ref.where("subscriptionStatus", "==", "active").limit(5000).stream())
     trial_docs = list(users_ref.where("subscriptionStatus", "==", "trial").limit(5000).stream())
     # cerebral's spellings only, deliberately: see subscription_status.py
@@ -1169,10 +1292,6 @@ def _compute_revenue_summary(days: int) -> dict:
     ]
     # Screen the candidates: an "active" status alone proves nothing, because
     # the native app writes it for trials, sandbox builds and promo grants.
-    sandbox_only_uids, promotional_uids = _non_paying_uids_from_events(
-        db, now - timedelta(days=400)
-    )
-    held_out_uids = _excluded_uids()
     candidate_docs = active_docs + unexpired_cancelled_paid_docs
 
     current_subscriber_docs = []
@@ -1184,10 +1303,7 @@ def _compute_revenue_summary(days: int) -> dict:
 
     for doc in candidate_docs:
         data = doc.to_dict()
-        if doc.id in held_out_uids:
-            excluded_non_paying += 1
-            continue
-        if doc.id in sandbox_only_uids or doc.id in promotional_uids or _is_promotional(data):
+        if doc.id in held_out or _is_promotional(data):
             excluded_non_paying += 1
             continue
         if not _has_webhook_provenance(data):
@@ -1207,14 +1323,6 @@ def _compute_revenue_summary(days: int) -> dict:
             continue
         current_subscriber_docs.append(doc)
 
-    total_subscribers = len(current_subscriber_docs)
-    trial_users = (
-        len(trial_docs)
-        + len(unexpired_cancelled_trial_docs)
-        + len(ratcheted_trial_docs)
-    )
-
-    # MRR calculation from confirmed paid subscribers
     by_platform = {}
     by_product = {}
     subs_by_product = {}
@@ -1252,67 +1360,93 @@ def _compute_revenue_summary(days: int) -> dict:
         by_product[product] = round(by_product.get(product, 0) + monthly_price, 2)
         subs_by_product[product] = subs_by_product.get(product, 0) + 1
 
-    arr = mrr * 12
+    # Paid churn as churn intelligence counts it without the ledger
+    churn = _churn_in_window_from_docs(
+        cutoff, now, expired_docs + cancelled_docs,
+        active_docs + unexpired_cancelled_docs, held_out,
+    )
 
-    # RevenueCat is the billing system of record. Our Firestore-derived figure
-    # can only ever see subscribers whose webhook landed and whose document
-    # carries the metadata we screen on, so it under-reports whenever delivery
-    # failed or the purchase predates those fields. Prefer RevenueCat's own
-    # numbers for the headline and keep the derived sum beside them as the
-    # amount we can actually attribute to a store and a plan.
-    attributed_mrr = round(mrr, 2)
-    attributed_subscribers = total_subscribers
-    mrr_source = "firestore"
+    # An estimate of today's sales from the docs' purchase dates, for when the
+    # ledger has none to sum.
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    today_estimate = 0.0
+    for doc in current_subscriber_docs:
+        data = doc.to_dict()
+        purchased = _to_datetime(data.get("initialPurchaseAt"))
+        if not purchased or purchased < today_start:
+            continue
+        monthly_price = _monthly_usd(data, doc.id)
+        if monthly_price is not None:
+            today_estimate += monthly_price
 
+    return {
+        "attributedMrr": round(mrr, 2),
+        "subscribers": len(current_subscriber_docs),
+        "paying": churn["paying"],
+        "newSubscribers": churn["newPaying"],
+        "churned": churn["paidChurned"],
+        "trialUsers": (
+            len(trial_docs)
+            + len(unexpired_cancelled_trial_docs)
+            + len(ratcheted_trial_docs)
+        ),
+        "byPlatform": by_platform,
+        "byProduct": by_product,
+        "subscribersByProduct": subs_by_product,
+        "pricedSubscribers": priced_subscribers,
+        "unpricedSubscribers": unpriced_subscribers,
+        "excludedNonPaying": excluded_non_paying,
+        "excludedNoProvenance": excluded_no_provenance,
+        "excludedFreeAccess": excluded_free_access,
+        "excludedLapsed": excluded_lapsed,
+        "excludedNonUsd": excluded_non_usd,
+        "todayEstimate": today_estimate,
+    }
+
+
+def _compute_revenue_summary(days: int) -> dict:
+    from firebase_setup import db
+
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(days=days)
+    held_out = _excluded_uids()
+
+    # Who pays, for what, and who stopped: from the ledger, counted as churn
+    # intelligence counts them, so the overview's churn rate is the Customers
+    # page's. The user doc can't say who paid (see _churn_in_window); it's the
+    # fallback when the ledger can't be read.
+    subscriptions = _paid_subscriptions(db, cutoff - PAID_PERIOD_LOOKBACK, now)
+    if subscriptions is not None:
+        base, mrr_source = _revenue_from_ledger(subscriptions, cutoff, now, held_out), "ledger"
+    else:
+        base, mrr_source = _revenue_from_docs(db, cutoff, now, held_out), "firestore"
+
+    mrr = base["attributedMrr"]
+    total_subscribers = base["subscribers"]
+    trial_users = base["trialUsers"]
+
+    # RevenueCat is the billing system of record. The ledger holds what
+    # cerebral's webhook received, so a purchase whose webhook never landed is
+    # missing from it but not from RevenueCat. Prefer RevenueCat's own numbers
+    # for the headline and keep ours beside them as the amount we can
+    # attribute to a store and a plan.
     rc_metrics = revenuecat_client.get_overview_metrics() or {}
     rc_mrr = _first_metric(rc_metrics, RC_MRR_METRIC_IDS)
     rc_subscribers = _first_metric(rc_metrics, RC_SUBSCRIBER_METRIC_IDS)
+    rc_trials = _first_metric(rc_metrics, RC_TRIAL_METRIC_IDS)
     if rc_mrr is not None and rc_mrr >= 0:
         mrr = float(rc_mrr)
-        arr = mrr * 12
         mrr_source = "revenuecat"
         if rc_subscribers is not None and rc_subscribers >= 0:
             total_subscribers = int(rc_subscribers)
+    if rc_trials is not None and rc_trials >= 0:
+        trial_users = int(rc_trials)
+    arr = mrr * 12
 
-
-    # New subscribers in period
-    new_subscribers = 0
-    for doc in current_subscriber_docs:
-        data = doc.to_dict()
-        subscription_start = _subscription_start_date(data)
-        if subscription_start and subscription_start >= cutoff:
-            new_subscribers += 1
-
-    # Churned paid subscribers in period. Trial expirations are conversion
-    # fallout, not subscriber churn.
-    # The provenance screen has to apply to the numerator too: counting
-    # unscreened churn against a screened active base would divide real
-    # cancellations by a much smaller population and overstate the rate.
-    churned = 0
-    for doc in expired_docs + cancelled_docs:
-        data = doc.to_dict()
-        exp_date = _to_datetime(data.get("expirationDate"))
-        if (
-            not _is_trial_subscription(data)
-            and _has_webhook_provenance(data)
-            and not _is_promotional(data)
-            and not _is_free_access(data)
-            and doc.id not in sandbox_only_uids
-            and doc.id not in promotional_uids
-            and doc.id not in held_out_uids
-            and exp_date
-            and cutoff <= exp_date <= now
-        ):
-            churned += 1
-
+    new_subscribers = base["newSubscribers"]
+    churned = base["churned"]
     net_new = new_subscribers - churned
-
-    # Churn rate: churned in period / active-at-start of period.
-    # active-at-start ≈ (actives that already existed before the window) + churned
-    # = (total_subscribers - new_subscribers) + churned. Excluding in-period new
-    # signups from the denominator avoids understating churn when acquisition is high.
-    start_active = (total_subscribers - new_subscribers) + churned
-    churn_rate = round((churned / start_active * 100) if start_active > 0 else 0, 1)
+    churn_rate = _paid_churn_rate(churned, base["paying"], new_subscribers)
 
     # MRR trend + change: load daily MRR snapshots from Redis (populated by
     # snapshot_daily_mrr task), then Firestore if Redis was flushed/unavailable.
@@ -1388,41 +1522,30 @@ def _compute_revenue_summary(days: int) -> dict:
             today_revenue += float(event.get("price") or 0)
         except (TypeError, ValueError):
             continue
-
-    # Backward-compatible estimate until the new ledger receives its first
-    # event. It is intentionally used only when there are no mirrored paid
-    # transactions, never added on top of authoritative RevenueCat revenue.
-    if not today_transactions:
-        for doc in current_subscriber_docs:
-            data = doc.to_dict()
-            purchased = _to_datetime(data.get("initialPurchaseAt"))
-            if not purchased or purchased < today_start:
-                continue
-            monthly_price = _monthly_usd(data, doc.id)
-            if monthly_price is not None:
-                today_revenue += monthly_price
+    if not today_transactions and base["todayEstimate"]:
+        today_revenue = base["todayEstimate"]
 
     return {
         "mrr": round(mrr, 2),
         "mrrChange": mrr_change,
         "arr": round(arr, 2),
         "mrrSource": mrr_source,
-        "attributedMrr": attributed_mrr,
-        "attributedSubscribers": attributed_subscribers,
+        "attributedMrr": base["attributedMrr"],
+        "attributedSubscribers": base["subscribers"],
         "todayRevenue": round(today_revenue, 2),
         "totalSubscribers": total_subscribers,
         "trialUsers": trial_users,
         "churnRate": churn_rate,
-        "byPlatform": by_platform,
-        "byProduct": by_product,
-        "subscribersByProduct": subs_by_product,
-        "pricedSubscribers": priced_subscribers,
-        "unpricedSubscribers": unpriced_subscribers,
-        "excludedNoProvenance": excluded_no_provenance,
-        "excludedNonPaying": excluded_non_paying,
-        "excludedFreeAccess": excluded_free_access,
-        "excludedLapsed": excluded_lapsed,
-        "excludedNonUsd": excluded_non_usd,
+        "byPlatform": base["byPlatform"],
+        "byProduct": base["byProduct"],
+        "subscribersByProduct": base["subscribersByProduct"],
+        "pricedSubscribers": base["pricedSubscribers"],
+        "unpricedSubscribers": base["unpricedSubscribers"],
+        "excludedNoProvenance": base["excludedNoProvenance"],
+        "excludedNonPaying": base["excludedNonPaying"],
+        "excludedFreeAccess": base["excludedFreeAccess"],
+        "excludedLapsed": base["excludedLapsed"],
+        "excludedNonUsd": base["excludedNonUsd"],
         "mrrTrend": mrr_trend,
         "newSubscribers": new_subscribers,
         "churned": churned,
@@ -1767,13 +1890,7 @@ def _compute_churn_intelligence(days: int) -> dict:
     )
     churned_in_period = churn["churned"]
 
-    # Churn rate: paid subscriptions that ended over the paying customers at the
-    # start. Exclude in-period new payers from the denominator so a burst of new
-    # signups doesn't understate churn.
-    total_subscriber_churned = churn["paidChurned"]
-    existing_active_at_start = churn["paying"] - churn["newPaying"]
-    start_active = existing_active_at_start + total_subscriber_churned
-    churn_rate = round((total_subscriber_churned / start_active * 100) if start_active > 0 else 0, 1)
+    churn_rate = _paid_churn_rate(churn["paidChurned"], churn["paying"], churn["newPaying"])
 
     # One batched usage read and one batched Firebase Auth lookup for everyone
     # scored or classified below
@@ -1990,7 +2107,7 @@ def _compute_churn_intelligence(days: int) -> dict:
             "date": now.strftime("%Y-%m-%d"),
             "rate": churn_rate,
             "atRiskCount": len(at_risk_users),
-            "churnedCount": total_subscriber_churned,
+            "churnedCount": churn["paidChurned"],
         }]
 
     return {

@@ -217,8 +217,27 @@ fields, and the July 2026 web trials carry no trial fields. Trials that expired 
 list as trials; sandbox builds and promotional grants leave it. Paid churners the status scans miss,
 the `"canceled"` spelling included, are read by id. On 2026-10-04 the 7/30/90-day rate went from
 3.3/5.6/33.9% to 6.7/9.1/25.0%: 3, 4 and 12 paid churners over 43 paying accounts, where it used to
-divide by 91 `"active"` docs. The revenue summary's churn rate still screens by the webhook's fields
-(12 subscribers), so it reads higher: 14.3/21.4/41.7%.
+divide by 91 `"active"` docs. The revenue summary's churn rate is counted the same way (below).
+
+**The revenue summary counts from the ledger too (Oct 2026).** RevenueCat's overview metrics are
+the headline when it answers: MRR, active subscriptions and active trials. Everything else, and the
+headline when RevenueCat doesn't answer (`mrrSource` `"ledger"`), comes from `subscription_ledger`:
+- The paying base is churn intelligence's (`_paid_base`): accounts with a production payment whose
+  paid period is running. Sandbox builds, promotional grants, family sharing and $0 sales are never
+  payments, so nothing is screened out; `ANALYTICS_EXCLUDED_UIDS` is still held out.
+- Attribution prices each paying account by its latest payment (`_revenue_from_ledger`): the USD
+  `price`, over the months the period it paid for covers (`expirationAt` less `purchasedAt`, else the
+  product id), by RevenueCat's own table in `BILLING_PERIODS` (a week is a quarter of a month). That
+  gives `attributedMrr`, the store and plan breakdowns, and the priced counts.
+- New subscribers, churned and the churn rate are churn intelligence's (`_paid_churn_rate`), so the
+  two pages' rates agree.
+- It reads no user docs: its four status scans, about 450 docs a snapshot run, are gone. If the
+  ledger can't be read it falls back to the webhook-field screen on user docs (`_revenue_from_docs`,
+  `mrrSource` `"firestore"`), the only path that fills the `excluded*` counts other than held-out.
+
+On 2026-10-05 attribution went from $77.51 over 12 subscribers to $337.55 over 43 (RevenueCat: $337,
+43), the 7/30/90-day churn rate from 6.7/8.7/13.6% to churn intelligence's 6.8/11.1/25.0%, and the
+revenue page's ARPU (MRR over priced subscribers) from $37.44 to $7.84.
 
 **Marketing vs account email (Oct 2026).** cerebral owns the consent rule and every write
 (`services/marketing_email/consent.py` there); this app only reads it.
@@ -262,7 +281,7 @@ divide by 91 `"active"` docs. The revenue summary's churn rate still screens by 
 | `emailTracking` | Per-email send records with delivery/conversion tracking |
 | `emailUnsubscribes` | Marketing opt-outs by address (cerebral writes them; ids are the lowercase address) |
 | `analytics_cache` | The record for the dashboard's chart histories (`mrr_history`, `churn_rate_history`); Redis only caches them |
-| `subscription_ledger` | cerebral's record of each RevenueCat event, keyed by event id: type, period type, store, environment, USD `price` beside `priceLocal`, no subscriber attributes. Revenue's sandbox and promotional screens, today's revenue, the funnel's trial and paid stages, churn intelligence's paid churn and paying base, and the customer timeline read it (`_ledger_events`). It's the only copy: `subscription_events`, where the RevenueCat Firebase extension replaced cerebral's records, was deleted with the extension on 2026-10-04 |
+| `subscription_ledger` | cerebral's record of each RevenueCat event, keyed by event id: type, period type, store, environment, USD `price` beside `priceLocal`, no subscriber attributes. The revenue summary's subscribers, attribution, churn and today's revenue, the funnel's trial and paid stages, churn intelligence's paid churn and paying base, and the customer timeline read it (`_ledger_events`). It's the only copy: `subscription_events`, where the RevenueCat Firebase extension replaced cerebral's records, was deleted with the extension on 2026-10-04 |
 | `users/{uid}/notes` | User notes (monthly recap: `createdAt` Timestamp range count) |
 | `users/{uid}/collections` | User collections (monthly recap: `createdAt` Timestamp range count) |
 | `users/{uid}/generated_images` | Generated images (monthly recap: numeric `timestamp` range count — NOT `createdAt`, which is mixed-type) |
@@ -294,9 +313,10 @@ What it holds:
   default 6).
 
 With Redis working, the 15-minute snapshot does its work: about 3,000 Firestore docs per run, roughly
-290k reads a day (2026-10). `subscription_ledger` adds at most about 20k a day: each process reads its
-490 days (about 1,600 events) every 6 hours and only the records written since in between. Without
-Redis it skips.
+290k reads a day (2026-10). The revenue summary stopped scanning statuses on 2026-10-05, about 450
+docs fewer a run (about 43k a day). `subscription_ledger` adds at most about 20k a day: each process
+reads its 490 days (about 1,600 events) every 6 hours and only the records written since in between.
+Without Redis it skips.
 
 ### Environment Variables (Heroku)
 
