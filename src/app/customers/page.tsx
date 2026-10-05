@@ -14,6 +14,7 @@ import CustomerSearch from '@/components/customers/CustomerSearch';
 import { useAnalytics } from '@/hooks/useAnalytics';
 import { getDaysFromRange } from '@/lib/utils';
 import { customerDetailHref } from '@/lib/customer-links';
+import { AT_RISK_RULE, ENGAGED_RULE, healthTierSummary } from '@/lib/customer-health';
 import { chart } from '@/lib/chartTheme';
 import type { ChurnIntelligence, CustomerHealth } from '@/types/mixpanel';
 import { HeartPulse, AlertTriangle, ShieldCheck, Activity } from 'lucide-react';
@@ -191,9 +192,9 @@ export default function CustomersPage() {
 
       {/* Health distribution + churn KPIs */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-        <div className="card-animate"><StatCard title="Healthy" value={dist?.healthy ?? 0} subtitle="Health score ≥ 60" icon={<ShieldCheck className="w-5 h-5" />} /></div>
-        <div className="card-animate"><StatCard title="At Risk" value={dist?.atRisk ?? (churn.atRiskCount || 0)} subtitle={churn.trialAtRiskCount ? `${churn.trialAtRiskCount} trials expiring` : 'Health 30–59'} icon={<AlertTriangle className="w-5 h-5" />} /></div>
-        <div className="card-animate"><StatCard title="Churning" value={dist?.churning ?? 0} subtitle="Health score < 30" icon={<HeartPulse className="w-5 h-5" />} /></div>
+        <div className="card-animate"><StatCard title="At Risk" value={dataUnavailable ? '—' : churn.atRiskCount} format={dataUnavailable ? 'text' : 'number'} subtitle={AT_RISK_RULE} icon={<AlertTriangle className="w-5 h-5" />} /></div>
+        <div className="card-animate"><StatCard title="Engaged" value={dataUnavailable ? '—' : churn.engagedCount} format={dataUnavailable ? 'text' : 'number'} subtitle={ENGAGED_RULE} icon={<ShieldCheck className="w-5 h-5" />} /></div>
+        <div className="card-animate"><StatCard title="Avg Health Score" value={health?.averageHealthScore ?? 0} format="decimal" subtitle={healthTierSummary(dist)} icon={<HeartPulse className="w-5 h-5" />} /></div>
         <div className="card-animate"><StatCard title="Monthly Churn Rate" value={dataUnavailable ? '—' : churn.churnRate / 100} format={dataUnavailable ? 'text' : 'percentage'} invertTrend icon={<Activity className="w-5 h-5" />} /></div>
       </div>
 
@@ -212,7 +213,7 @@ export default function CustomersPage() {
       <div className="card-animate card-surface p-6 sm:p-8 mb-8">
         <div className="mb-6 border-b border-line pb-4">
           <h3 className="font-display text-xl sm:text-2xl text-ink">At-Risk Customers</h3>
-          <p className="text-sm font-mono text-ink-faint mt-2">Inactive 7+ days, scheduled cancellations, or trials about to expire — lowest health first</p>
+          <p className="text-sm font-mono text-ink-faint mt-2">{AT_RISK_RULE} — lowest health first</p>
         </div>
         <div className="h-[320px]">
           {atRiskTableData.length > 0 ? (
@@ -238,7 +239,7 @@ export default function CustomersPage() {
         <div className="card-animate card-surface p-6 sm:p-8 mb-8">
           <div className="mb-6 border-b border-line pb-4">
             <h3 className="font-display text-xl sm:text-2xl text-ink">Most Engaged Customers</h3>
-            <p className="text-sm font-mono text-ink-faint mt-2">Active subscribers with strong health scores</p>
+            <p className="text-sm font-mono text-ink-faint mt-2">{ENGAGED_RULE}</p>
           </div>
           <div className="h-[320px]">
             <DataTable

@@ -119,7 +119,16 @@ Weighted composite of 5 factors:
 - Tenure (10%) — days since account creation (maxes at ~150 days)
 - Email engagement (10%) — emails received/interacted with
 
-Score → status: ≥60 healthy, ≥30 atRisk, <30 churning.
+Score → status (`_health_status`): ≥60 healthy, ≥30 fair, <30 poor. The tiers were `atRisk` and
+`churning` until Oct 2026. They were renamed because the Customers page's At Risk card counted the
+30–59 tier while its At-Risk list and Pulse's alert counted a different rule.
+
+**"At Risk" means one thing on the dashboard:** churn intelligence's at-risk list. That is a paying
+or trialling customer who has been inactive for 7+ days, is set to cancel, or has a trial ending within
+3 days. The Customers page's At Risk card, its At-Risk Customers list and Pulse's "N at-risk
+customers" alert all show `atRiskCount`, and they share one description (`AT_RISK_RULE` in
+`src/lib/customer-health.ts`). Beside it, the Engaged card counts the Most Engaged list
+(`engagedCount`), and the Avg Health Score card shows the tiers.
 
 ### Celery Beat Schedule (`celery_app.py`)
 

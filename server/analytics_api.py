@@ -1080,6 +1080,13 @@ def _fetch_usage_monthly(db, uids: list, now: datetime) -> dict:
     return usage
 
 
+def _health_status(score: float) -> str:
+    """The health score's tier. Deliberately not "at risk": on the dashboard
+    that means the at-risk list's rule (_compute_churn_intelligence), which
+    the At Risk card counts too."""
+    return "healthy" if score >= 60 else "fair" if score >= 30 else "poor"
+
+
 def _compute_health_score(user_data: dict, now: datetime, usage_monthly: dict = None) -> dict:
     """Compute health score from 5 weighted factors.
 
@@ -1125,11 +1132,9 @@ def _compute_health_score(user_data: dict, now: datetime, usage_monthly: dict = 
     score = (recency * 0.35 + tenure * 0.10 + frequency * 0.25 +
              feature_depth * 0.20 + email_engagement * 0.10)
 
-    status = "healthy" if score >= 60 else "atRisk" if score >= 30 else "churning"
-
     return {
         "healthScore": round(score),
-        "healthStatus": status,
+        "healthStatus": _health_status(score),
         "factors": {
             "recency": round(recency),
             "frequency": round(frequency),
@@ -1172,9 +1177,7 @@ def _health_with_email_history(health: dict, email_history: list[dict]) -> dict:
     )
     return {
         "healthScore": score,
-        "healthStatus": (
-            "healthy" if score >= 60 else "atRisk" if score >= 30 else "churning"
-        ),
+        "healthStatus": _health_status(score),
         "factors": factors,
     }
 
@@ -2184,7 +2187,7 @@ def _compute_churn_intelligence(days: int) -> dict:
 @analytics_api_bp.route("/customer-health", methods=["GET"])
 @require_analytics_auth
 @safe_analytics({
-    "distribution": {"healthy": 0, "atRisk": 0, "churning": 0},
+    "distribution": {"healthy": 0, "fair": 0, "poor": 0},
     "customers": [], "averageHealthScore": 0,
 })
 def customer_health():
@@ -2217,7 +2220,7 @@ def _compute_customer_health() -> dict:
     last_seen_by_uid = _auth_last_seen(uids)
 
     customers = []
-    distribution = {"healthy": 0, "atRisk": 0, "churning": 0}
+    distribution = {"healthy": 0, "fair": 0, "poor": 0}
     total_score = 0
     for uid, data in current:
         data = {**data, "lastSeenAt": last_seen_by_uid.get(uid)}

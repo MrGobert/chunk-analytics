@@ -1049,11 +1049,19 @@ class CustomerHealthTests(ActivityStubs, unittest.TestCase):
 
         reader = self._health([self._subscriber("reader")])["reader"]
 
-        # By usage_monthly alone: recency 0, tenure halved, score 5, churning
+        # By usage_monthly alone: recency 0, tenure halved, score 5, poor
         self.assertEqual(reader["factors"]["recency"], 97)
         self.assertEqual(reader["healthScore"], 44)
-        self.assertEqual(reader["healthStatus"], "atRisk")
+        self.assertEqual(reader["healthStatus"], "fair")
         self.assertEqual((datetime.now(timezone.utc) - analytics_api._to_datetime(reader["lastActiveAt"])).days, 1)
+
+    def test_the_tiers_are_named_apart_from_the_at_risk_list(self):
+        self.assertEqual(
+            [analytics_api._health_status(score) for score in (60, 59.9, 30, 29.9)],
+            ["healthy", "fair", "fair", "poor"],
+        )
+        self._health([self._subscriber("reader")])
+        self.assertEqual(self.distribution, {"healthy": 0, "fair": 0, "poor": 1})
 
     def test_a_chat_after_auth_last_saw_the_account_counts(self):
         self.stub_activity(records=[_auth_record("chatter", refreshed_days_ago=20)])
@@ -1980,7 +1988,7 @@ class CustomerDetailTests(unittest.TestCase):
             return_value=(sample_stats, []),
         ):
             result = self._get_detail(users=[self._user_doc()])
-        self.assertIn(result["healthStatus"], ("healthy", "atRisk", "churning"))
+        self.assertIn(result["healthStatus"], ("healthy", "fair", "poor"))
         self.assertEqual(
             set(result["healthFactors"]),
             {"recency", "frequency", "featureDepth", "tenure", "emailEngagement"},
