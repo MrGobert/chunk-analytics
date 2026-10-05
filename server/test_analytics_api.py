@@ -14,6 +14,24 @@ import analytics_api
 import revenuecat_client
 from firebase_admin import auth as firebase_auth
 
+_AUTH_GUARDS = []
+
+
+def setUpModule():
+    # firebase_setup initializes the default app from this machine's
+    # credentials, so an unpatched Auth call would reach the real project.
+    # Fail it instead; tests stub what they read (ActivityStubs,
+    # _firebase_auth_identity).
+    for name in ("get_user", "get_user_by_email", "get_users", "list_users"):
+        patcher = patch.object(firebase_auth, name, side_effect=AssertionError(f"real Firebase Auth {name} call"))
+        patcher.start()
+        _AUTH_GUARDS.append(patcher)
+
+
+def tearDownModule():
+    while _AUTH_GUARDS:
+        _AUTH_GUARDS.pop().stop()
+
 
 class FakeDoc:
     def __init__(self, doc_id, data, exists=True):
@@ -337,6 +355,29 @@ class ActiveSinceTests(ActivityStubs, unittest.TestCase):
         self.stub_activity(records=[_auth_record(uid, refreshed_days_ago=1) for uid in uids])
         self.assertEqual(account_activity.active_since(None, uids + uids[:5], self.SINCE), set(uids))
         self.assertEqual([len(call) for call in self.auth.calls], [100, 50])
+
+
+class LastSeenByUidTests(ActivityStubs, unittest.TestCase):
+    """account_activity.last_seen_by_uid: when each account last used Chunk,
+    by Firebase Auth alone."""
+
+    def test_asks_auth_100_accounts_at_a_time_and_reads_no_firestore(self):
+        uids = [f"uid-{i}" for i in range(150)]
+        self.stub_activity(records=[_auth_record(uid, refreshed_days_ago=1) for uid in uids])
+
+        seen = account_activity.last_seen_by_uid(uids + uids[:5])
+
+        self.assertEqual(set(seen), set(uids))
+        self.assertEqual([len(call) for call in self.auth.calls], [100, 50])
+        self.assertEqual(self.used_since_calls, [])
+
+    def test_unknown_accounts_are_left_out_and_disabled_ones_kept(self):
+        self.stub_activity(records=[_auth_record("disabled", refreshed_days_ago=3, disabled=True)])
+
+        seen = account_activity.last_seen_by_uid(["disabled", "deleted"])
+
+        self.assertEqual(list(seen), ["disabled"])
+        self.assertEqual((datetime.now(timezone.utc) - seen["disabled"]).days, 3)
 
 
 class LedgerQuery(FakeCollection):
@@ -882,7 +923,7 @@ class HealthScoreTests(unittest.TestCase):
 
     def _user(self):
         return {
-            "lastActiveAt": self.NOW - timedelta(days=1),
+            "lastSeenAt": self.NOW - timedelta(days=1),
             "createdAt": self.NOW - timedelta(days=200),
         }
 
@@ -910,7 +951,7 @@ class HealthScoreTests(unittest.TestCase):
         health = analytics_api._compute_health_score(user, self.NOW, None)
         self.assertEqual(health["factors"]["frequency"], 0)
 
-    def test_usage_month_update_supplies_recency_when_profile_field_is_missing(self):
+    def test_usage_month_update_supplies_recency_when_auth_saw_nothing(self):
         user = {"createdAt": self.NOW - timedelta(days=200)}
         health = analytics_api._compute_health_score(
             user,
@@ -920,9 +961,26 @@ class HealthScoreTests(unittest.TestCase):
         )
         self.assertGreaterEqual(health["factors"]["recency"], 96)
 
+    def test_recency_is_the_later_of_auth_and_a_chat_or_capture(self):
+        user = {"createdAt": self.NOW - timedelta(days=200), "lastSeenAt": self.NOW - timedelta(days=20)}
+        chatted = {"searches": 1, "captures": 0, "_lastActiveAt": self.NOW - timedelta(days=2)}
+
+        self.assertEqual(analytics_api._compute_health_score(user, self.NOW)["factors"]["recency"], 34)
+        self.assertEqual(analytics_api._compute_health_score(user, self.NOW, chatted)["factors"]["recency"], 93)
+
+    def test_the_user_docs_last_active_fields_do_not_count(self):
+        # Nothing writes them, and the account's owner can.
+        user = {
+            "createdAt": self.NOW - timedelta(days=200),
+            "lastActiveAt": self.NOW, "last_active_at": self.NOW, "lastActive": self.NOW,
+        }
+        health = analytics_api._compute_health_score(user, self.NOW)
+        self.assertEqual(health["factors"]["recency"], 0)
+        self.assertEqual(health["factors"]["tenure"], 50)
+
     def test_future_trial_end_is_not_used_as_tenure_start(self):
         user = {
-            "lastActiveAt": self.NOW,
+            "lastSeenAt": self.NOW,
             "trialEndDate": self.NOW + timedelta(days=7),
         }
         health = analytics_api._compute_health_score(user, self.NOW)
@@ -932,7 +990,7 @@ class HealthScoreTests(unittest.TestCase):
 
     def test_trial_start_supplies_non_negative_tenure(self):
         user = {
-            "lastActiveAt": self.NOW,
+            "lastSeenAt": self.NOW,
             "trialStartedAt": self.NOW - timedelta(days=10),
             "trialEndDate": self.NOW + timedelta(days=4),
         }
@@ -959,6 +1017,97 @@ class HealthScoreTests(unittest.TestCase):
                     },
                     self.NOW,
                 ))
+
+
+class StatusScan(FakeCollection):
+    """The customer health scan: a status "in" filter, paged by document id."""
+
+    def where(self, field, operator, value):
+        if operator == "in":
+            return StatusScan([doc for doc in self.docs if doc.to_dict().get(field) in value])
+        return StatusScan(super().where(field, operator, value).docs)
+
+    def order_by(self, field):
+        assert field == "__name__"
+        return StatusScan(sorted(self.docs, key=lambda doc: doc.id))
+
+    def start_after(self, last_doc):
+        return StatusScan([doc for doc in self.docs if doc.id > last_doc.id])
+
+
+class CustomerHealthTests(ActivityStubs, unittest.TestCase):
+    """The health list scores recency by when Firebase Auth last saw each
+    account, or a later chat or capture: most subscribers never chat."""
+
+    NOW = datetime.now(timezone.utc)
+
+    def setUp(self):
+        self.stub_activity()
+
+    def _health(self, users, usage=None):
+        self.usage_reads = []
+
+        def fetch_usage(_db, uids, _now):
+            self.usage_reads += list(uids)
+            return {uid: (usage or {})[uid] for uid in uids if uid in (usage or {})}
+
+        db = SimpleNamespace(collection=lambda name: StatusScan(users if name == "users" else []))
+        with patch.dict(sys.modules, {"firebase_setup": SimpleNamespace(db=db)}), \
+             patch.object(analytics_api, "_fetch_usage_monthly", side_effect=fetch_usage):
+            result = analytics_api._compute_customer_health()
+        return {row["uid"]: row for row in result["customers"]}
+
+    def _subscriber(self, uid, **fields):
+        return FakeDoc(uid, {"subscriptionStatus": "active", "createdAt": self.NOW - timedelta(days=200), **fields})
+
+    def test_a_subscriber_who_never_chats_is_scored_by_when_auth_last_saw_them(self):
+        self.stub_activity(records=[_auth_record("reader", refreshed_days_ago=1)])
+
+        reader = self._health([self._subscriber("reader")])["reader"]
+
+        # By usage_monthly alone: recency 0, tenure halved, score 5, churning
+        self.assertEqual(reader["factors"]["recency"], 97)
+        self.assertEqual(reader["healthScore"], 44)
+        self.assertEqual(reader["healthStatus"], "atRisk")
+        self.assertEqual((datetime.now(timezone.utc) - analytics_api._to_datetime(reader["lastActiveAt"])).days, 1)
+
+    def test_a_chat_after_auth_last_saw_the_account_counts(self):
+        self.stub_activity(records=[_auth_record("chatter", refreshed_days_ago=20)])
+        chatted = {"searches": 1, "captures": 0, "_lastActiveAt": self.NOW - timedelta(days=2)}
+
+        chatter = self._health([self._subscriber("chatter")], usage={"chatter": chatted})["chatter"]
+
+        self.assertEqual(chatter["factors"]["recency"], 93)
+
+    def test_the_docs_own_last_seen_fields_do_not_count(self):
+        # The account's owner can write any of them; Auth has no record here.
+        doc = self._subscriber("spoofed", lastActiveAt=self.NOW, lastSeenAt=self.NOW)
+
+        self.assertEqual(self._health([doc])["spoofed"]["factors"]["recency"], 0)
+
+    def test_only_customers_with_access_are_looked_up(self):
+        users = [
+            self._subscriber("paying"),
+            self._subscriber("paid-to-next-month", subscriptionStatus="cancelled",
+                             expirationDate=self.NOW + timedelta(days=20)),
+            self._subscriber("lapsed", subscriptionStatus="cancelled",
+                             expirationDate=self.NOW - timedelta(days=20)),
+        ]
+
+        customers = self._health(users)
+
+        self.assertEqual(sorted(customers), ["paid-to-next-month", "paying"])
+        self.assertEqual([sorted(call) for call in self.auth.calls], [["paid-to-next-month", "paying"]])
+        self.assertEqual(sorted(self.usage_reads), ["paid-to-next-month", "paying"])
+
+    def test_a_failed_auth_lookup_scores_by_usage_alone(self):
+        chatted = {"searches": 1, "captures": 0, "_lastActiveAt": self.NOW - timedelta(days=2)}
+        with patch.object(firebase_auth, "get_users", side_effect=RuntimeError("auth down")):
+            customers = self._health([self._subscriber("chatter"), self._subscriber("reader")],
+                                     usage={"chatter": chatted})
+
+        self.assertEqual(customers["chatter"]["factors"]["recency"], 93)
+        self.assertEqual(customers["reader"]["factors"]["recency"], 0)
 
 
 class FetchUsageMonthlyTests(unittest.TestCase):
@@ -1072,7 +1221,7 @@ class ChurnReasonTests(unittest.TestCase):
         return {
             "expirationDate": self.NOW - timedelta(days=5),
             "createdAt": self.NOW - timedelta(days=200),
-            "lastActiveAt": self.NOW - timedelta(days=10),
+            "lastSeenAt": self.NOW - timedelta(days=10),
         }
 
     def test_no_usage_monthly_reads_as_no_usage(self):
@@ -1083,6 +1232,15 @@ class ChurnReasonTests(unittest.TestCase):
         reason = analytics_api._classify_churn_reason(
             self._churned_user(), self.NOW, {"searches": 9, "captures": 2})
         self.assertEqual(reason, "Active user - unknown reason")
+
+    def test_went_inactive_goes_by_when_the_account_was_last_seen(self):
+        used = {"searches": 9, "captures": 2}
+        quiet = {**self._churned_user(), "lastSeenAt": self.NOW - timedelta(days=40)}
+        still_opening_the_app = {**quiet, "lastSeenAt": self.NOW - timedelta(days=1)}
+
+        self.assertEqual(analytics_api._classify_churn_reason(quiet, self.NOW, used), "Went inactive")
+        self.assertEqual(analytics_api._classify_churn_reason(still_opening_the_app, self.NOW, used),
+                         "Active user - unknown reason")
 
     def test_the_ledger_says_whether_a_trial_expired_when_it_knows(self):
         no_trial_fields = self._churned_user()
@@ -1221,7 +1379,7 @@ class ChurnDB(FakeDB):
         return docs
 
 
-class ChurnIntelligenceTests(unittest.TestCase):
+class ChurnIntelligenceTests(ActivityStubs, unittest.TestCase):
     """Churn is paid subscriptions that ended, from the ledger. A user doc's
     status, webhook fields and expirationDate can't say (2026-10-04): the
     native app writes "active" for trials and grants, most paying accounts'
@@ -1229,6 +1387,9 @@ class ChurnIntelligenceTests(unittest.TestCase):
     "canceled" docs often have no expirationDate."""
 
     NOW = datetime.now(timezone.utc)
+
+    def setUp(self):
+        self.stub_activity()
 
     def _ago(self, days):
         return self.NOW - timedelta(days=days)
@@ -1360,6 +1521,36 @@ class ChurnIntelligenceTests(unittest.TestCase):
 
         self.assertEqual(result["churnRate"], 50.0)
         self.assertEqual([row["uid"] for row in result["churnedUsers"]], ["confirmed-left", "trial-left"])
+
+    def test_the_at_risk_list_goes_by_when_auth_last_saw_the_account(self):
+        # None of them ever chatted or captured: by usage_monthly alone, all
+        # three were inactive.
+        self.stub_activity(records=[
+            _auth_record("paying", refreshed_days_ago=2),
+            _auth_record("new-payer", refreshed_days_ago=20),
+        ])
+        result, _ = self._churn()
+
+        at_risk = {row["uid"]: row for row in result["atRiskUsers"]}
+        self.assertEqual(sorted(at_risk), ["never-paid", "new-payer"])
+        self.assertEqual(at_risk["new-payer"]["daysSinceActive"], 20)
+        self.assertIsNone(at_risk["never-paid"]["daysSinceActive"])
+        self.assertEqual([row["uid"] for row in result["topEngagedUsers"]], ["paying"])
+        self.assertEqual(result["topEngagedUsers"][0]["daysSinceActive"], 2)
+
+    def test_one_auth_lookup_covers_the_scored_and_the_churned(self):
+        self._churn()
+
+        self.assertEqual(len(self.auth.calls), 1)
+        self.assertEqual(sorted(self.auth.calls[0]), [
+            "canceled-left", "never-paid", "new-payer", "paid-left", "paying", "web-trial"])
+
+    def test_a_failed_auth_lookup_leaves_usage_alone_to_say(self):
+        with patch.object(firebase_auth, "get_users", side_effect=RuntimeError("auth down")):
+            result, _ = self._churn()
+
+        self.assertEqual(result["churnRate"], 60.0)
+        self.assertEqual(result["atRiskCount"], 3)
 
 
 class CustomerDetailTests(unittest.TestCase):
@@ -1710,7 +1901,7 @@ class CustomerDetailTests(unittest.TestCase):
             "email": "ada@example.org",
             "displayName": "",
             "authCreatedAt": created_ms,
-            "authLastSignInAt": int(self.NOW.timestamp() * 1000),
+            "lastSeenAt": self.NOW,
         }
         with patch.object(analytics_api, "_firebase_auth_identity", return_value=identity), \
              patch.dict(sys.modules, {
@@ -1727,19 +1918,20 @@ class CustomerDetailTests(unittest.TestCase):
         self.assertTrue(result["createdAt"])
         self.assertTrue(result["lastActiveAt"])
 
-    def test_auth_email_and_newer_sign_in_override_stale_firestore_mirror(self):
-        firestore_last_active = self.NOW - timedelta(days=30)
+    def test_auth_email_and_last_seen_override_stale_firestore_mirror(self):
         auth_last_active = self.NOW - timedelta(hours=2)
         auth_last_active_ms = int(auth_last_active.timestamp() * 1000)
         fake_db = FakeDB({"users": [FakeDoc("u1", {
             "email": "old@example.org",
             "createdAt": self.NOW - timedelta(days=100),
-            "lastActiveAt": firestore_last_active,
+            # Written by the account's owner: neither counts
+            "lastActiveAt": self.NOW,
+            "lastSeenAt": self.NOW,
         })]})
         identity = {
             "uid": "u1",
             "email": "current@example.org",
-            "authLastSignInAt": auth_last_active_ms,
+            "lastSeenAt": auth_last_active_ms,
         }
         with patch.object(
             analytics_api, "_firebase_auth_identity", return_value=identity
@@ -1759,6 +1951,29 @@ class CustomerDetailTests(unittest.TestCase):
                 auth_last_active_ms / 1000, tz=timezone.utc
             ),
         )
+
+    def test_the_auth_identity_is_last_seen_by_token_refresh_not_sign_in(self):
+        record = _auth_record("u1", refreshed_days_ago=1)
+        record.email, record.display_name = "u1@example.com", ""
+
+        identity = analytics_api._auth_identity_from_record(record)
+
+        # Signed in 300 days ago, and the app has refreshed its token since
+        refreshed = record.user_metadata.last_refresh_timestamp / 1000
+        self.assertEqual(identity["lastSeenAt"], datetime.fromtimestamp(refreshed, timezone.utc))
+
+    def test_revenuecat_last_seen_stands_in_only_when_auth_has_no_record(self):
+        rc_seen = int((self.NOW - timedelta(days=1)).timestamp() * 1000)
+        profile = lambda uid: {"uid": uid, "lastActiveAt": rc_seen}  # noqa: E731
+        auth_seen = self.NOW - timedelta(days=10)
+
+        known = self._get_detail(users=[self._user_doc()], rc_profile=profile,
+                                 identity={"uid": "u1", "lastSeenAt": auth_seen})
+        unknown = self._get_detail(users=[self._user_doc()], rc_profile=profile)
+
+        self.assertEqual(analytics_api._to_datetime(known["lastActiveAt"]), auth_seen)
+        self.assertEqual(analytics_api._to_datetime(unknown["lastActiveAt"]),
+                         analytics_api._to_datetime(rc_seen))
 
     def test_auth_only_uid_with_slash_skips_invalid_firestore_document_path(self):
         uid = "tenant/customer"
@@ -1931,6 +2146,16 @@ class CustomerSearchTests(unittest.TestCase):
         )
         self.assertEqual(result["uid"], "revenuecat-only")
         self.assertEqual(result["email"], "billing@example.org")
+
+    def test_last_active_is_auths_last_seen_or_revenuecats_without_an_auth_record(self):
+        seen = datetime(2026, 9, 30, tzinfo=timezone.utc)
+        by_auth = self._find("uid-2", [FakeDoc("uid-2", {"lastActiveAt": datetime(2026, 10, 3)})],
+                             by_uid={"uid": "uid-2", "lastSeenAt": seen})
+        by_revenuecat = self._find("billing@example.org", [], revenuecat={
+            "uid": "revenuecat-only", "lastActiveAt": int(seen.timestamp() * 1000)})
+
+        self.assertEqual(by_auth["lastActiveAt"], seen.isoformat())
+        self.assertEqual(by_revenuecat["lastActiveAt"], seen.isoformat())
 
     def test_endpoint_validates_query_and_returns_404(self):
         app = Flask(__name__)

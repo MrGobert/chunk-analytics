@@ -113,7 +113,7 @@ All endpoints require auth (`Authorization` header = `REVENUECAT_WEBHOOK_AUTH` e
 #### Health Score Algorithm
 
 Weighted composite of 5 factors:
-- Recency (35%) — days since last active (0 after 30 days; halves tenure when inactive)
+- Recency (35%) — days since the account was last seen (0 after 30 days; halves tenure when inactive): the later of Firebase Auth's last seen and the latest `usage_monthly` write (below, "Who counts as inactive")
 - Usage frequency (25%) — searches over the current+previous calendar month from `users/{uid}/usage_monthly/{YYYY-MM}` docs (20+ = max). Batch-fetched via `_fetch_usage_monthly` (BatchGetDocuments, 2 doc reads/user) — never read `usageStats.monthly*` (dead since cerebral `dfe43f0`, 2026-03)
 - Feature depth (20%) — distinct server-observable signals used in that window (`USAGE_FEATURE_SIGNALS`: searches, captures; scale self-adjusts as counters are added)
 - Tenure (10%) — days since account creation (maxes at ~150 days)
@@ -184,6 +184,17 @@ The subscriber funnel's "Active (30d)" stage reads them too, through `account_ac
 Firebase Auth for the converted, still-paying cohort, 100 accounts per call, and the Firestore checks
 only for the accounts Auth didn't show. Until Oct 2026 it read `lastActiveAt` and its variants, so it
 was always 0 (on 2026-10-04 it became 1 of 1 converted in 7 and 30 days, 3 of 3 in 90).
+
+The health score's recency reads Firebase Auth as well, and so do churn intelligence's at-risk and
+engaged lists, its churn reasons and the customer detail page. Recency is the later of Auth's last
+seen (`account_activity.last_seen_by_uid`, 100 accounts per call) and the latest `usage_monthly`
+write. They skip the Firestore checks: the snapshot scores every customer every 15 minutes. Every
+view merges Auth's time in as `lastSeenAt`, never from the doc. RevenueCat's last seen stands in only
+for an account Auth has no record of, on the detail page and in search. Until Oct 2026 recency
+rested on `usage_monthly` alone, so a subscriber who never chatted looked idle. On 2026-10-04, 66 of
+the 96 scored accounts had no recency at all; afterwards 3 did, the ones with no Auth account. The
+at-risk list went from 79 to 74, and 7 health statuses rose. 27 of the 38 paying accounts it
+scores hadn't been seen in over 30 days.
 
 **Who counts as churned** (`subscription_status.py`). Two writers spelled a cancellation differently.
 cerebral's RevenueCat webhook writes `"cancelled"` on CANCELLATION and `"expired"` on EXPIRATION. The

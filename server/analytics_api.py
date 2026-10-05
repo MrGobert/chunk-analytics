@@ -96,12 +96,18 @@ def _get_display_name(user_data: dict) -> str:
 def _auth_identity_from_record(record) -> dict:
     """Convert a Firebase Auth UserRecord into the profile fields we consume."""
     metadata = getattr(record, "user_metadata", None)
+    last_seen = None
+    if metadata is not None:
+        import account_activity
+        last_seen = account_activity.last_seen(record)
     return {
         "uid": getattr(record, "uid", "") or "",
         "email": getattr(record, "email", None) or "",
         "displayName": getattr(record, "display_name", None) or "",
         "authCreatedAt": getattr(metadata, "creation_timestamp", None),
-        "authLastSignInAt": getattr(metadata, "last_sign_in_timestamp", None),
+        # Not the last sign-in alone: that goes stale while an app stays
+        # signed in. See account_activity.py.
+        "lastSeenAt": last_seen,
     }
 
 
@@ -138,8 +144,11 @@ def _merge_profile_identity(user_data: dict, identity: dict) -> dict:
         merged["displayName"] = identity["displayName"]
     if identity.get("authCreatedAt"):
         merged["authCreatedAt"] = identity["authCreatedAt"]
-    if identity.get("authLastSignInAt"):
-        merged["authLastSignInAt"] = identity["authLastSignInAt"]
+    # Only Auth says when the account was last seen, never the doc: its
+    # owner can write any field.
+    merged.pop("lastSeenAt", None)
+    if identity.get("lastSeenAt"):
+        merged["lastSeenAt"] = identity["lastSeenAt"]
     return merged
 
 
@@ -399,16 +408,14 @@ def _get_creation_date(user_data: dict) -> datetime:
 
 
 def _get_last_active_date(user_data: dict) -> datetime:
-    """Get profile/Auth activity timestamp across known field variants."""
-    candidates = [
-        _to_datetime(user_data.get("lastActiveAt")),
-        _to_datetime(user_data.get("last_active_at")),
-        _to_datetime(user_data.get("lastActive")),
-        _to_datetime(user_data.get("authLastSignInAt")),
-        _to_datetime(user_data.get("revenueCatLastSeenAt")),
-    ]
-    known = [value for value in candidates if value]
-    return max(known) if known else None
+    """When the account was last seen: lastSeenAt, which every caller merges
+    in from Firebase Auth (account_activity.last_seen), or from RevenueCat for
+    an account Auth has no record of, never from the doc.
+
+    The user doc's lastActiveAt and its variants aren't read: nothing writes
+    them (account_activity.py), and the account's owner can write any field.
+    """
+    return _to_datetime(user_data.get("lastSeenAt"))
 
 
 def _active_since(db, uids, since: datetime) -> set:
@@ -425,8 +432,29 @@ def _active_since(db, uids, since: datetime) -> set:
         return set()
 
 
+def _auth_last_seen(uids) -> dict:
+    """{uid: when the account last used Chunk by Firebase Auth}, by
+    account_activity.last_seen_by_uid: 100 accounts per call, no Firestore
+    reads. Empty, and logged, when the lookup fails, so recency falls back to
+    usage_monthly."""
+    if not uids:
+        return {}
+    try:
+        import account_activity
+        return account_activity.last_seen_by_uid(uids)
+    except Exception as exc:
+        logging.warning(f"[ANALYTICS_API] Firebase Auth last-seen lookup failed: {exc}")
+        return {}
+
+
 def _effective_last_active(user_data: dict, usage_monthly: dict = None) -> datetime:
-    """Latest profile/Auth activity or cerebral usage-month write."""
+    """When the account last used Chunk: the later of Firebase Auth's last
+    seen (_get_last_active_date) and its latest usage_monthly write, a chat or
+    capture. Every caller merges lastSeenAt in first.
+
+    Inbox captures and App Intents jobs never refresh a token either, but
+    finding them takes queries per account (account_activity.used_since),
+    which the snapshot can't afford for every customer."""
     profile_activity = _get_last_active_date(user_data)
     usage_activity = _to_datetime((usage_monthly or {}).get("_lastActiveAt"))
     candidates = [value for value in (profile_activity, usage_activity) if value]
@@ -1747,21 +1775,27 @@ def _compute_churn_intelligence(days: int) -> dict:
     start_active = existing_active_at_start + total_subscriber_churned
     churn_rate = round((total_subscriber_churned / start_active * 100) if start_active > 0 else 0, 1)
 
-    # One batched usage read for everyone scored or classified below
+    # One batched usage read and one batched Firebase Auth lookup for everyone
+    # scored or classified below
+    scored_uids = [d.id for d in current_customer_docs]
+    scored_uids += [d["_uid"] for d in churned_in_period]
     usage_by_uid = {}
     try:
-        scored_uids = [d.id for d in current_customer_docs]
-        scored_uids += [d["_uid"] for d in churned_in_period]
         usage_by_uid = _fetch_usage_monthly(db, scored_uids, now)
     except Exception as e:
         logging.warning(f"[ANALYTICS_API] usage_monthly batch fetch failed: {e}")
+    last_seen_by_uid = _auth_last_seen(scored_uids)
+    churned_in_period = [
+        {**row, "lastSeenAt": last_seen_by_uid.get(row["_uid"])}
+        for row in churned_in_period
+    ]
 
     # Single pass: classify active + trial users as at-risk or engaged
     at_risk_users = []
     trial_at_risk_count = 0
     engaged_candidates = []
     for doc in current_customer_docs:
-        data = doc.to_dict()
+        data = {**doc.to_dict(), "lastSeenAt": last_seen_by_uid.get(doc.id)}
         last_active = _effective_last_active(data, usage_by_uid.get(doc.id))
         health = _compute_health_score(data, now, usage_by_uid.get(doc.id))
         tenure_date = _get_tenure_date(data)
@@ -2019,25 +2053,30 @@ def _compute_customer_health() -> dict:
         if not docs:
             break
 
+        current = []
+        for doc in docs:
+            data = doc.to_dict()
+            if _has_current_subscription_access(data, now):
+                current.append((doc.id, data))
+        uids = [uid for uid, _ in current]
         try:
-            usage_by_uid = _fetch_usage_monthly(db, [d.id for d in docs], now)
+            usage_by_uid = _fetch_usage_monthly(db, uids, now)
         except Exception as e:
             logging.warning(f"[ANALYTICS_API] usage_monthly batch fetch failed: {e}")
             usage_by_uid = {}
+        last_seen_by_uid = _auth_last_seen(uids)
 
-        for doc in docs:
-            data = doc.to_dict()
-            if not _has_current_subscription_access(data, now):
-                continue
-            health = _compute_health_score(data, now, usage_by_uid.get(doc.id))
+        for uid, data in current:
+            data = {**data, "lastSeenAt": last_seen_by_uid.get(uid)}
+            health = _compute_health_score(data, now, usage_by_uid.get(uid))
             created = _get_tenure_date(data)
             subscribed_days = max(0, (now - created).days) if created else 0
 
             effective_last_active = _effective_last_active(
-                data, usage_by_uid.get(doc.id)
+                data, usage_by_uid.get(uid)
             )
             customer = {
-                "uid": doc.id,
+                "uid": uid,
                 "email": data.get("email", ""),
                 "name": _get_display_name(data),
                 "healthScore": health["healthScore"],
@@ -2148,7 +2187,10 @@ def _find_customer(query: str) -> dict:
         revenuecat_customer = None
     if revenuecat_customer and revenuecat_customer.get("uid"):
         return _customer_profile_basics(
-            revenuecat_customer["uid"], revenuecat_customer
+            revenuecat_customer["uid"],
+            # Auth has no record of the account, so RevenueCat's last seen
+            # stands in, as on the detail page.
+            {**revenuecat_customer, "lastSeenAt": revenuecat_customer.get("lastActiveAt")},
         )
     return None
 
@@ -2384,8 +2426,6 @@ def _get_customer_detail(uid: str) -> dict:
     data = _merge_profile_identity(firestore_data, identity)
 
     # RevenueCat is the fallback identity source beneath Firestore/Auth.
-    # Its last-seen timestamp remains a separate candidate so the newest
-    # cross-system activity wins without overwriting a canonical profile field.
     rc_profile = revenuecat_profile or {}
     if not data.get("email") and rc_profile.get("email"):
         data["email"] = rc_profile["email"]
@@ -2398,8 +2438,12 @@ def _get_customer_detail(uid: str) -> dict:
         data["platform"] = rc_profile["platform"]
     if not _get_creation_date(data) and rc_profile.get("createdAt"):
         data["createdAt"] = rc_profile["createdAt"]
-    if rc_profile.get("lastActiveAt"):
-        data["revenueCatLastSeenAt"] = rc_profile["lastActiveAt"]
+    if not data.get("lastSeenAt") and rc_profile.get("lastActiveAt"):
+        # Its last-seen time stands in only for an account Auth has no record
+        # of: the lists can't ask RevenueCat about every customer, and this
+        # page scores an account as they do. On 2026-10-04 it was within a day
+        # of Auth's for 76 of 93 scored accounts, earlier for 15, later for 2.
+        data["lastSeenAt"] = rc_profile["lastActiveAt"]
     email_history = _customer_email_history(db, uid)
     events = _customer_subscription_events(db, uid)
     current_subscription = _current_subscription(uid, data)
